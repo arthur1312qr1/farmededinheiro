@@ -17,7 +17,7 @@ class Config:
         
         # Trading Configuration
         self.PAPER_TRADING = os.getenv("PAPER_TRADING", "false").lower() == "true"
-        self.SYMBOL = os.getenv("SYMBOL", "ETHUSDT")  # Correct format for Bitget USDT-M
+        self.SYMBOL = os.getenv("SYMBOL", "ETHUSDT_UMCBL")  # Correct format for Bitget USDT-M
         
         # Leverage and Risk Management
         self.MIN_LEVERAGE = int(os.getenv("MIN_LEVERAGE", "9"))
