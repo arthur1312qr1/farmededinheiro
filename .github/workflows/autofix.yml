@@ -1,5 +1,3 @@
-name: Auto-fixer com IA
-
 on:
   workflow_dispatch:
     inputs:
