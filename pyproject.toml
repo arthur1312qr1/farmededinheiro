@@ -1,0 +1,24 @@
+[project]
+name = "enhanced-crypto-trading-bot"
+version = "1.0.0"
+description = "Enhanced cryptocurrency trading bot with Google Gemini AI error correction and Bitget USDT-M Futures support"
+dependencies = [
+    "flask",
+    "gunicorn",
+    "requests",
+    "numpy",
+    "pandas",
+    "python-dotenv",
+    "google-generativeai",
+    "psycopg2-binary",
+    "email-validator",
+    "werkzeug",
+    "newsapi-python",
+    "sift-stack-py",
+    "google-api-core",
+    "google-genai"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
