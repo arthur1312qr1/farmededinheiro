@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Crypto Trading Bot - Bitget USDT-M Futures</title>
+    
+    <!-- Bootstrap CSS with Replit Dark Theme -->
+    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome Icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Custom Styles -->
+    <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet">
+</head>
+<body data-bs-theme="dark">
+    <div class="container-fluid">
+        <!-- Header -->
+        <div class="row">
+            <div class="col-12">
+                <header class="d-flex flex-wrap justify-content-center py-3 mb-4 border-bottom">
+                    <a href="/" class="d-flex align-items-center mb-3 mb-md-0 me-md-auto text-decoration-none">
+                        <i class="fas fa-robot me-2 fs-4 text-primary"></i>
+                        <span class="fs-4 text-white">Enhanced Crypto Trading Bot</span>
+                    </a>
+                    <div class="d-flex align-items-center">
+                        <span class="badge bg-{{ 'success' if bot_running else 'danger' }} me-2">
+                            <i class="fas fa-{{ 'play' if bot_running else 'stop' }}"></i>
+                            {{ 'RUNNING' if bot_running else 'STOPPED' }}
+                        </span>
+                        {% if config.PAPER_TRADING %}
+                        <span class="badge bg-warning">
+                            <i class="fas fa-vial"></i> PAPER TRADING
+                        </span>
+                        {% endif %}
+                    </div>
+                </header>
+            </div>
+        </div>
+
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="row">
+                    <div class="col-12">
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                                <i class="fas fa-{{ 'exclamation-circle' if category == 'error' else 'info-circle' if category == 'info' else 'check-circle' }}"></i>
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <!-- Control Panel -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <i class="fas fa-control me-2"></i>Painel de Controle
+                        </h5>
+                        <small class="text-muted">Bitget Futures USDT-M</small>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="d-grid gap-2 d-md-flex">
+                                    <form method="post" action="{{ url_for('start_bot') }}" class="me-2">
+                                        <button type="submit" class="btn btn-success" {{ 'disabled' if bot_running else '' }}>
+                                            <i class="fas fa-play"></i> Iniciar Bot
+                                        </button>
+                                    </form>
+                                    <form method="post" action="{{ url_for('stop_bot') }}" class="me-2">
+                                        <button type="submit" class="btn btn-danger" {{ 'disabled' if not bot_running else '' }}>
+                                            <i class="fas fa-stop"></i> Parar Bot
+                                        </button>
+                                    </form>
+                                    <button type="button" class="btn btn-info" onclick="refreshData()">
+                                        <i class="fas fa-sync"></i> Atualizar
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="col-md-6 text-md-end">
+                                <button type="button" class="btn btn-warning" onclick="triggerGeminiFix()">
+                                    <i class="fas fa-magic"></i> Análise IA de Erros
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Dashboard -->
+        <div class="row mb-4">
+            <!-- Balance Information -->
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h6 class="mb-0">
+                            <i class="fas fa-wallet text-primary"></i> Saldo & Patrimônio
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="balance-info">
+                            {% if balance_info %}
+                                <div class="mb-2">
+                                    <small class="text-muted">Saldo Disponível</small>
+                                    <div class="fs-5 fw-bold text-primary">
+                                        ${{ "%.2f"|format(balance_info.get('available_balance', 0)) }}
+                                    </div>
+                                </div>
+                                <div class="mb-2">
+                                    <small class="text-muted">Patrimônio Total</small>
+                                    <div class="fs-6">
+                                        ${{ "%.2f"|format(balance_info.get('total_equity', 0)) }}
+                                    </div>
+                                </div>
+                                <div class="mb-2">
+                                    <small class="text-muted">P&L Não Realizado</small>
+                                    <div class="fs-6 {{ 'text-success' if balance_info.get('unrealized_pnl', 0) >= 0 else 'text-danger' }}">
+                                        ${{ "%.2f"|format(balance_info.get('unrealized_pnl', 0)) }}
+                                    </div>
+                                </div>
+                            {% else %}
+                                <div class="text-muted">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trading Statistics -->
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h6 class="mb-0">
+                            <i class="fas fa-chart-line text-success"></i> Trading Stats
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="trading-stats">
+                            {% if bot_state %}
+                                <div class="mb-2">
+                                    <small class="text-muted">Total Profit</small>
+                                    <div class="fs-5 fw-bold {{ 'text-success' if bot_state.get('total_profit', 0) >= 0 else 'text-danger' }}">
+                                        ${{ "%.2f"|format(bot_state.get('total_profit', 0)) }}
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-6">
+                                        <small class="text-muted">Total Trades</small>
+                                        <div class="fw-bold">{{ bot_state.get('total_trades', 0) }}</div>
+                                    </div>
+                                    <div class="col-6">
+                                        <small class="text-muted">Win Rate</small>
+                                        <div class="fw-bold">
+                                            {% set total = bot_state.get('winning_trades', 0) + bot_state.get('losing_trades', 0) %}
+                                            {% if total > 0 %}
+                                                {{ "%.1f"|format((bot_state.get('winning_trades', 0) / total) * 100) }}%
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            {% else %}
+                                <div class="text-muted">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Configuration -->
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h6 class="mb-0">
+                            <i class="fas fa-cog text-warning"></i> Configuration
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-2">
+                            <small class="text-muted">Symbol</small>
+                            <div class="fw-bold">{{ config.SYMBOL }}</div>
+                        </div>
+                        <div class="mb-2">
+                            <small class="text-muted">Leverage Range</small>
+                            <div>{{ config.MIN_LEVERAGE }}x - {{ config.MAX_LEVERAGE }}x</div>
+                        </div>
+                        <div class="mb-2">
+                            <small class="text-muted">Poll Interval</small>
+                            <div>{{ config.POLL_INTERVAL }}s</div>
+                        </div>
+                        <div class="mb-2">
+                            <small class="text-muted">Max Losses</small>
+                            <div>{{ config.MAX_CONSECUTIVE_LOSSES }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Current Positions -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">
+                            <i class="fas fa-chart-area text-info"></i> Current Positions
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="positions-table">
+                            <div class="text-muted text-center py-3">
+                                <i class="fas fa-spinner fa-spin"></i> Loading positions...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bot State & Logs -->
+        <div class="row mb-4">
+            <!-- Bot State -->
+            <div class="col-md-6 mb-3">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">
+                            <i class="fas fa-database text-secondary"></i> Bot State
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <pre id="bot-state" class="bg-dark p-3 rounded text-light small" style="max-height: 300px; overflow-y: auto;">
+                            Loading bot state...
+                        </pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Logs -->
+            <div class="col-md-6 mb-3">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">
+                            <i class="fas fa-file-alt text-secondary"></i> Recent Activity
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <pre id="recent-logs" class="bg-dark p-3 rounded text-light small" style="max-height: 300px; overflow-y: auto;">
+                            Loading logs...
+                        </pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Analysis Modal -->
+        <div class="modal fade" id="aiAnalysisModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">
+                            <i class="fas fa-magic text-warning"></i> Gemini AI Analysis
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label for="errorDescription" class="form-label">Error Description</label>
+                            <textarea class="form-control" id="errorDescription" rows="3" placeholder="Describe the error or issue you're experiencing..."></textarea>
+                        </div>
+                        <div id="aiAnalysisResult" class="border rounded p-3 bg-dark text-light" style="display: none;">
+                            <h6>AI Analysis Result:</h6>
+                            <pre id="aiResultText" class="mb-0"></pre>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-warning" onclick="requestAiAnalysis()">
+                            <i class="fas fa-magic"></i> Analyze
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="py-4 mt-5 border-top">
+            <div class="row">
+                <div class="col-md-6">
+                    <p class="text-muted mb-0">
+                        <i class="fas fa-shield-alt text-success"></i> 
+                        Enhanced Trading Bot with Gemini AI Error Correction
+                    </p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <small class="text-muted">
+                        Last updated: <span id="last-update">{{ bot_state.get('last_updated', 'Never') if bot_state else 'Never' }}</span>
+                    </small>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Custom JavaScript -->
+    <script>
+        // Auto-refresh data every 5 seconds
+        let autoRefresh = true;
+        
+        function refreshData() {
+            if (!autoRefresh) return;
+            
+            // Update bot status
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateBotState(data.bot_state);
+                        updateBalanceInfo(data.balance_info);
+                        updateTradingStats(data.bot_state);
+                        updatePositionsTable(data.bot_state);
+                        document.getElementById('last-update').textContent = new Date().toLocaleString();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching status:', error);
+                });
+            
+            // Update logs
+            fetch('/api/logs')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.logs) {
+                        const logsElement = document.getElementById('recent-logs');
+                        logsElement.textContent = data.logs.slice(-20).join('');
+                        logsElement.scrollTop = logsElement.scrollHeight;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching logs:', error);
+                });
+        }
+        
+        function updateBotState(state) {
+            const stateElement = document.getElementById('bot-state');
+            if (state) {
+                stateElement.textContent = JSON.stringify(state, null, 2);
+            }
+        }
+        
+        function updateBalanceInfo(balance) {
+            const balanceElement = document.getElementById('balance-info');
+            if (balance && !balance.error) {
+                balanceElement.innerHTML = `
+                    <div class="mb-2">
+                        <small class="text-muted">Available Balance</small>
+                        <div class="fs-5 fw-bold text-primary">
+                            $${parseFloat(balance.available_balance || 0).toFixed(2)}
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <small class="text-muted">Total Equity</small>
+                        <div class="fs-6">
+                            $${parseFloat(balance.total_equity || 0).toFixed(2)}
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <small class="text-muted">Unrealized P&L</small>
+                        <div class="fs-6 ${parseFloat(balance.unrealized_pnl || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                            $${parseFloat(balance.unrealized_pnl || 0).toFixed(2)}
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        function updateTradingStats(state) {
+            const statsElement = document.getElementById('trading-stats');
+            if (state) {
+                const totalTrades = (state.winning_trades || 0) + (state.losing_trades || 0);
+                const winRate = totalTrades > 0 ? ((state.winning_trades || 0) / totalTrades * 100).toFixed(1) : 'N/A';
+                
+                statsElement.innerHTML = `
+                    <div class="mb-2">
+                        <small class="text-muted">Total Profit</small>
+                        <div class="fs-5 fw-bold ${parseFloat(state.total_profit || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                            $${parseFloat(state.total_profit || 0).toFixed(2)}
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6">
+                            <small class="text-muted">Total Trades</small>
+                            <div class="fw-bold">${state.total_trades || 0}</div>
+                        </div>
+                        <div class="col-6">
+                            <small class="text-muted">Win Rate</small>
+                            <div class="fw-bold">${winRate}${winRate !== 'N/A' ? '%' : ''}</div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        function updatePositionsTable(state) {
+            const positionsElement = document.getElementById('positions-table');
+            const positions = state.current_positions || {};
+            
+            if (Object.keys(positions).length === 0) {
+                positionsElement.innerHTML = `
+                    <div class="text-muted text-center py-3">
+                        <i class="fas fa-inbox"></i> No open positions
+                    </div>
+                `;
+            } else {
+                let html = '<div class="table-responsive"><table class="table table-striped"><thead><tr>';
+                html += '<th>Side</th><th>Size</th><th>Entry Price</th><th>Current P&L</th><th>Leverage</th></tr></thead><tbody>';
+                
+                for (const [side, position] of Object.entries(positions)) {
+                    html += `<tr>
+                        <td><span class="badge bg-${side === 'long' ? 'success' : 'danger'}">${side.toUpperCase()}</span></td>
+                        <td>${parseFloat(position.size || 0).toFixed(4)}</td>
+                        <td>$${parseFloat(position.entry_price || 0).toFixed(2)}</td>
+                        <td class="${parseFloat(position.unrealized_pnl || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                            $${parseFloat(position.unrealized_pnl || 0).toFixed(2)}
+                        </td>
+                        <td>${position.leverage || 'N/A'}x</td>
+                    </tr>`;
+                }
+                
+                html += '</tbody></table></div>';
+                positionsElement.innerHTML = html;
+            }
+        }
+        
+        function triggerGeminiFix() {
+            const modal = new bootstrap.Modal(document.getElementById('aiAnalysisModal'));
+            modal.show();
+        }
+        
+        function requestAiAnalysis() {
+            const errorDescription = document.getElementById('errorDescription').value;
+            const resultDiv = document.getElementById('aiAnalysisResult');
+            const resultText = document.getElementById('aiResultText');
+            
+            if (!errorDescription.trim()) {
+                alert('Please enter an error description');
+                return;
+            }
+            
+            resultText.textContent = 'Analyzing with Gemini AI...';
+            resultDiv.style.display = 'block';
+            
+            fetch('/api/gemini-fix', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    error: errorDescription
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    resultText.textContent = data.fix_suggestion;
+                } else {
+                    resultText.textContent = `Error: ${data.error}`;
+                }
+            })
+            .catch(error => {
+                resultText.textContent = `Network error: ${error.message}`;
+            });
+        }
+        
+        // Start auto-refresh
+        setInterval(refreshData, 5000);
+        refreshData(); // Initial load
+        
+        // Handle page visibility to pause/resume auto-refresh
+        document.addEventListener('visibilitychange', function() {
+            autoRefresh = !document.hidden;
+            if (autoRefresh) {
+                refreshData();
+            }
+        });
+    </script>
+</body>
+</html>
