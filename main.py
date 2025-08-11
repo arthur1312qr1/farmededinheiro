@@ -21,4 +21,9 @@ if __name__ == "__main__":
     logger.info(f"Environment: {os.environ.get('RAILWAY_ENVIRONMENT', 'development')}")
     logger.info(f"Paper Trading Mode: {os.environ.get('PAPER_TRADING', 'true')}")
     
-    app.run(host="0.0.0.0", port=port, debug=False)
+    try:
+        app.run(host="0.0.0.0", port=port, debug=False)
+    except Exception as e:
+        logger.error(f"Failed to start server: {e}")
+        import traceback
+        traceback.print_exc()
