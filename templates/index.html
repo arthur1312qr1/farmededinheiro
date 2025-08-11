@@ -1,18 +1,41 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-br">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enhanced Crypto Trading Bot - Bitget USDT-M Futures</title>
+    <title>Bot de Trading Cripto Aprimorado - Bitget USDT-M Futures</title>
     
-    <!-- Bootstrap CSS with Replit Dark Theme -->
-    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+    <!-- Bootstrap CSS com tema escuro do Replit (substituído por um tema escuro padrão para melhor compatibilidade) -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     
     <!-- Font Awesome Icons -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
     <!-- Custom Styles -->
-    <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: 'Inter', sans-serif;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        .card {
+            background-color: #1e1e1e;
+            border-color: #333;
+        }
+        .card-header {
+            border-bottom-color: #333;
+        }
+        .modal-content {
+            background-color: #1e1e1e;
+            color: #e0e0e0;
+        }
+        .form-control, .form-control:focus {
+            background-color: #2a2a2a;
+            color: #e0e0e0;
+            border-color: #444;
+        }
+    </style>
 </head>
 <body data-bs-theme="dark">
     <div class="container-fluid">
@@ -20,41 +43,33 @@
         <div class="row">
             <div class="col-12">
                 <header class="d-flex flex-wrap justify-content-center py-3 mb-4 border-bottom">
-                    <a href="/" class="d-flex align-items-center mb-3 mb-md-0 me-md-auto text-decoration-none">
+                    <a href="#" class="d-flex align-items-center mb-3 mb-md-0 me-md-auto text-decoration-none">
                         <i class="fas fa-robot me-2 fs-4 text-primary"></i>
                         <span class="fs-4 text-white">Enhanced Crypto Trading Bot</span>
                     </a>
                     <div class="d-flex align-items-center">
-                        <span class="badge bg-{{ 'success' if bot_running else 'danger' }} me-2">
-                            <i class="fas fa-{{ 'play' if bot_running else 'stop' }}"></i>
-                            {{ 'RUNNING' if bot_running else 'STOPPED' }}
+                        <!-- Bot status badge -->
+                        <span id="bot-status-badge" class="badge me-2">
+                            <i class="fas"></i>
+                            <span></span>
                         </span>
-                        {% if config.PAPER_TRADING %}
-                        <span class="badge bg-warning">
+                        <!-- Paper trading badge -->
+                        <span id="paper-trading-badge" class="badge bg-warning" style="display: none;">
                             <i class="fas fa-vial"></i> PAPER TRADING
                         </span>
-                        {% endif %}
                     </div>
                 </header>
             </div>
         </div>
 
         <!-- Flash Messages -->
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                <div class="row">
-                    <div class="col-12">
-                        {% for category, message in messages %}
-                            <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
-                                <i class="fas fa-{{ 'exclamation-circle' if category == 'error' else 'info-circle' if category == 'info' else 'check-circle' }}"></i>
-                                {{ message }}
-                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                            </div>
-                        {% endfor %}
-                    </div>
+        <div class="row">
+            <div class="col-12">
+                <div id="flash-messages">
+                    <!-- Flash messages will be dynamically added here -->
                 </div>
-            {% endif %}
-        {% endwith %}
+            </div>
+        </div>
 
         <!-- Control Panel -->
         <div class="row mb-4">
@@ -62,7 +77,7 @@
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">
-                            <i class="fas fa-control me-2"></i>Painel de Controle
+                            <i class="fas fa-cogs me-2"></i>Painel de Controle
                         </h5>
                         <small class="text-muted">Bitget Futures USDT-M</small>
                     </div>
@@ -70,23 +85,19 @@
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="d-grid gap-2 d-md-flex">
-                                    <form method="post" action="{{ url_for('start_bot') }}" class="me-2">
-                                        <button type="submit" class="btn btn-success" {{ 'disabled' if bot_running else '' }}>
-                                            <i class="fas fa-play"></i> Iniciar Bot
-                                        </button>
-                                    </form>
-                                    <form method="post" action="{{ url_for('stop_bot') }}" class="me-2">
-                                        <button type="submit" class="btn btn-danger" {{ 'disabled' if not bot_running else '' }}>
-                                            <i class="fas fa-stop"></i> Parar Bot
-                                        </button>
-                                    </form>
-                                    <button type="button" class="btn btn-info" onclick="refreshData()">
+                                    <button id="start-bot-btn" type="button" class="btn btn-success">
+                                        <i class="fas fa-play"></i> Iniciar Bot
+                                    </button>
+                                    <button id="stop-bot-btn" type="button" class="btn btn-danger">
+                                        <i class="fas fa-stop"></i> Parar Bot
+                                    </button>
+                                    <button id="refresh-btn" type="button" class="btn btn-info">
                                         <i class="fas fa-sync"></i> Atualizar
                                     </button>
                                 </div>
                             </div>
                             <div class="col-md-6 text-md-end">
-                                <button type="button" class="btn btn-warning" onclick="triggerGeminiFix()">
+                                <button type="button" class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#aiAnalysisModal">
                                     <i class="fas fa-magic"></i> Análise IA de Erros
                                 </button>
                             </div>
@@ -108,30 +119,10 @@
                     </div>
                     <div class="card-body">
                         <div id="balance-info">
-                            {% if balance_info %}
-                                <div class="mb-2">
-                                    <small class="text-muted">Saldo Disponível</small>
-                                    <div class="fs-5 fw-bold text-primary">
-                                        ${{ "%.2f"|format(balance_info.get('available_balance', 0)) }}
-                                    </div>
-                                </div>
-                                <div class="mb-2">
-                                    <small class="text-muted">Patrimônio Total</small>
-                                    <div class="fs-6">
-                                        ${{ "%.2f"|format(balance_info.get('total_equity', 0)) }}
-                                    </div>
-                                </div>
-                                <div class="mb-2">
-                                    <small class="text-muted">P&L Não Realizado</small>
-                                    <div class="fs-6 {{ 'text-success' if balance_info.get('unrealized_pnl', 0) >= 0 else 'text-danger' }}">
-                                        ${{ "%.2f"|format(balance_info.get('unrealized_pnl', 0)) }}
-                                    </div>
-                                </div>
-                            {% else %}
-                                <div class="text-muted">
-                                    <i class="fas fa-spinner fa-spin"></i> Loading...
-                                </div>
-                            {% endif %}
+                            <!-- Data will be populated here by JavaScript -->
+                            <div class="text-muted text-center">
+                                <i class="fas fa-spinner fa-spin"></i> Carregando...
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -142,40 +133,15 @@
                 <div class="card h-100">
                     <div class="card-header">
                         <h6 class="mb-0">
-                            <i class="fas fa-chart-line text-success"></i> Trading Stats
+                            <i class="fas fa-chart-line text-success"></i> Estatísticas de Trading
                         </h6>
                     </div>
                     <div class="card-body">
                         <div id="trading-stats">
-                            {% if bot_state %}
-                                <div class="mb-2">
-                                    <small class="text-muted">Total Profit</small>
-                                    <div class="fs-5 fw-bold {{ 'text-success' if bot_state.get('total_profit', 0) >= 0 else 'text-danger' }}">
-                                        ${{ "%.2f"|format(bot_state.get('total_profit', 0)) }}
-                                    </div>
-                                </div>
-                                <div class="row">
-                                    <div class="col-6">
-                                        <small class="text-muted">Total Trades</small>
-                                        <div class="fw-bold">{{ bot_state.get('total_trades', 0) }}</div>
-                                    </div>
-                                    <div class="col-6">
-                                        <small class="text-muted">Win Rate</small>
-                                        <div class="fw-bold">
-                                            {% set total = bot_state.get('winning_trades', 0) + bot_state.get('losing_trades', 0) %}
-                                            {% if total > 0 %}
-                                                {{ "%.1f"|format((bot_state.get('winning_trades', 0) / total) * 100) }}%
-                                            {% else %}
-                                                N/A
-                                            {% endif %}
-                                        </div>
-                                    </div>
-                                </div>
-                            {% else %}
-                                <div class="text-muted">
-                                    <i class="fas fa-spinner fa-spin"></i> Loading...
-                                </div>
-                            {% endif %}
+                            <!-- Data will be populated here by JavaScript -->
+                            <div class="text-muted text-center">
+                                <i class="fas fa-spinner fa-spin"></i> Carregando...
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -186,25 +152,15 @@
                 <div class="card h-100">
                     <div class="card-header">
                         <h6 class="mb-0">
-                            <i class="fas fa-cog text-warning"></i> Configuration
+                            <i class="fas fa-cog text-warning"></i> Configuração
                         </h6>
                     </div>
                     <div class="card-body">
-                        <div class="mb-2">
-                            <small class="text-muted">Symbol</small>
-                            <div class="fw-bold">{{ config.SYMBOL }}</div>
-                        </div>
-                        <div class="mb-2">
-                            <small class="text-muted">Leverage Range</small>
-                            <div>{{ config.MIN_LEVERAGE }}x - {{ config.MAX_LEVERAGE }}x</div>
-                        </div>
-                        <div class="mb-2">
-                            <small class="text-muted">Poll Interval</small>
-                            <div>{{ config.POLL_INTERVAL }}s</div>
-                        </div>
-                        <div class="mb-2">
-                            <small class="text-muted">Max Losses</small>
-                            <div>{{ config.MAX_CONSECUTIVE_LOSSES }}</div>
+                        <div id="config-info">
+                            <!-- Data will be populated here by JavaScript -->
+                            <div class="text-muted text-center">
+                                <i class="fas fa-spinner fa-spin"></i> Carregando...
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -217,13 +173,14 @@
                 <div class="card">
                     <div class="card-header">
                         <h6 class="mb-0">
-                            <i class="fas fa-chart-area text-info"></i> Current Positions
+                            <i class="fas fa-chart-area text-info"></i> Posições Atuais
                         </h6>
                     </div>
                     <div class="card-body">
                         <div id="positions-table">
+                            <!-- Data will be populated here by JavaScript -->
                             <div class="text-muted text-center py-3">
-                                <i class="fas fa-spinner fa-spin"></i> Loading positions...
+                                <i class="fas fa-spinner fa-spin"></i> Carregando posições...
                             </div>
                         </div>
                     </div>
@@ -238,12 +195,12 @@
                 <div class="card">
                     <div class="card-header">
                         <h6 class="mb-0">
-                            <i class="fas fa-database text-secondary"></i> Bot State
+                            <i class="fas fa-database text-secondary"></i> Estado do Bot
                         </h6>
                     </div>
                     <div class="card-body">
                         <pre id="bot-state" class="bg-dark p-3 rounded text-light small" style="max-height: 300px; overflow-y: auto;">
-                            Loading bot state...
+                            Carregando estado do bot...
                         </pre>
                     </div>
                 </div>
@@ -254,12 +211,12 @@
                 <div class="card">
                     <div class="card-header">
                         <h6 class="mb-0">
-                            <i class="fas fa-file-alt text-secondary"></i> Recent Activity
+                            <i class="fas fa-file-alt text-secondary"></i> Atividade Recente
                         </h6>
                     </div>
                     <div class="card-body">
                         <pre id="recent-logs" class="bg-dark p-3 rounded text-light small" style="max-height: 300px; overflow-y: auto;">
-                            Loading logs...
+                            Carregando logs...
                         </pre>
                     </div>
                 </div>
@@ -272,24 +229,30 @@
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">
-                            <i class="fas fa-magic text-warning"></i> Gemini AI Analysis
+                            <i class="fas fa-magic text-warning"></i> Análise Gemini IA
                         </h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
+                        <div id="ai-analysis-loading" class="text-center py-3" style="display: none;">
+                            <i class="fas fa-spinner fa-spin me-2"></i> Análise em andamento...
+                        </div>
                         <div class="mb-3">
-                            <label for="errorDescription" class="form-label">Error Description</label>
-                            <textarea class="form-control" id="errorDescription" rows="3" placeholder="Describe the error or issue you're experiencing..."></textarea>
+                            <label for="errorDescription" class="form-label">Descrição do Erro</label>
+                            <textarea class="form-control" id="errorDescription" rows="3" placeholder="Descreva o erro ou problema que está enfrentando..."></textarea>
                         </div>
                         <div id="aiAnalysisResult" class="border rounded p-3 bg-dark text-light" style="display: none;">
-                            <h6>AI Analysis Result:</h6>
+                            <h6>Resultado da Análise da IA:</h6>
                             <pre id="aiResultText" class="mb-0"></pre>
+                        </div>
+                        <div id="ai-analysis-error" class="alert alert-danger mt-3" role="alert" style="display: none;">
+                            <!-- Error message will be populated here -->
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
                         <button type="button" class="btn btn-warning" onclick="requestAiAnalysis()">
-                            <i class="fas fa-magic"></i> Analyze
+                            <i class="fas fa-magic"></i> Analisar
                         </button>
                     </div>
                 </div>
@@ -302,12 +265,12 @@
                 <div class="col-md-6">
                     <p class="text-muted mb-0">
                         <i class="fas fa-shield-alt text-success"></i> 
-                        Enhanced Trading Bot with Gemini AI Error Correction
+                        Bot de Trading Aprimorado com Análise de Erros da Gemini IA
                     </p>
                 </div>
                 <div class="col-md-6 text-md-end">
                     <small class="text-muted">
-                        Last updated: <span id="last-update">{{ bot_state.get('last_updated', 'Never') if bot_state else 'Never' }}</span>
+                        Última atualização: <span id="last-update">Nunca</span>
                     </small>
                 </div>
             </div>
@@ -319,103 +282,167 @@
     
     <!-- Custom JavaScript -->
     <script>
-        // Auto-refresh data every 5 seconds
-        let autoRefresh = true;
+        // Mock data to simulate server responses
+        let mockBotState = {
+            bot_running: false,
+            paper_trading: true,
+            total_profit: 15.75,
+            total_trades: 12,
+            winning_trades: 8,
+            losing_trades: 4,
+            current_positions: {
+                long: {
+                    side: "long",
+                    size: 0.05,
+                    entry_price: 65000.50,
+                    unrealized_pnl: 1.25,
+                    leverage: 10
+                },
+                // short: {
+                //     side: "short",
+                //     size: 0.1,
+                //     entry_price: 67000.00,
+                //     unrealized_pnl: -0.50,
+                //     leverage: 5
+                // }
+            },
+            last_updated: new Date().toLocaleString(),
+        };
+
+        let mockBalanceInfo = {
+            available_balance: 500.00,
+            total_equity: 515.75,
+            unrealized_pnl: 1.25,
+        };
         
-        function refreshData() {
-            if (!autoRefresh) return;
-            
-            // Update bot status
-            fetch('/api/status')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        updateBotState(data.bot_state);
-                        updateBalanceInfo(data.balance_info);
-                        updateTradingStats(data.bot_state);
-                        updatePositionsTable(data.bot_state);
-                        document.getElementById('last-update').textContent = new Date().toLocaleString();
-                    }
-                })
-                .catch(error => {
-                    console.error('Error fetching status:', error);
-                });
-            
-            // Update logs
-            fetch('/api/logs')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success && data.logs) {
-                        const logsElement = document.getElementById('recent-logs');
-                        logsElement.textContent = data.logs.slice(-20).join('');
-                        logsElement.scrollTop = logsElement.scrollHeight;
-                    }
-                })
-                .catch(error => {
-                    console.error('Error fetching logs:', error);
-                });
+        let mockConfig = {
+            SYMBOL: 'BTCUSDT',
+            MIN_LEVERAGE: 5,
+            MAX_LEVERAGE: 20,
+            POLL_INTERVAL: 5,
+            MAX_CONSECUTIVE_LOSSES: 3,
+        };
+
+        let mockLogs = [
+            '2025-08-10 22:00:00 - INFO - Bot started.',
+            '2025-08-10 22:01:15 - TRADE - Opened LONG position on BTCUSDT at $65000.50.',
+            '2025-08-10 22:05:30 - UPDATE - Unrealized P&L is now $1.25.',
+        ];
+
+        // Functions to update the UI
+        function updateAllUI() {
+            updateHeader(mockBotState);
+            updateBalanceInfo(mockBalanceInfo);
+            updateTradingStats(mockBotState);
+            updateConfig(mockConfig);
+            updatePositionsTable(mockBotState);
+            updateBotState(mockBotState);
+            updateLogs(mockLogs);
+            document.getElementById('last-update').textContent = new Date().toLocaleString();
         }
-        
+
+        function updateHeader(state) {
+            const statusBadge = document.getElementById('bot-status-badge');
+            const paperTradingBadge = document.getElementById('paper-trading-badge');
+            
+            if (state.bot_running) {
+                statusBadge.className = 'badge bg-success me-2';
+                statusBadge.querySelector('i').className = 'fas fa-play';
+                statusBadge.querySelector('span').textContent = 'RODANDO';
+            } else {
+                statusBadge.className = 'badge bg-danger me-2';
+                statusBadge.querySelector('i').className = 'fas fa-stop';
+                statusBadge.querySelector('span').textContent = 'PARADO';
+            }
+
+            if (state.paper_trading) {
+                paperTradingBadge.style.display = 'block';
+            } else {
+                paperTradingBadge.style.display = 'none';
+            }
+        }
+
         function updateBotState(state) {
             const stateElement = document.getElementById('bot-state');
-            if (state) {
-                stateElement.textContent = JSON.stringify(state, null, 2);
-            }
+            stateElement.textContent = JSON.stringify(state, null, 2);
         }
-        
+
         function updateBalanceInfo(balance) {
             const balanceElement = document.getElementById('balance-info');
-            if (balance && !balance.error) {
-                balanceElement.innerHTML = `
-                    <div class="mb-2">
-                        <small class="text-muted">Available Balance</small>
-                        <div class="fs-5 fw-bold text-primary">
-                            $${parseFloat(balance.available_balance || 0).toFixed(2)}
-                        </div>
+            const unrealizedPnlClass = parseFloat(balance.unrealized_pnl || 0) >= 0 ? 'text-success' : 'text-danger';
+            
+            balanceElement.innerHTML = `
+                <div class="mb-2">
+                    <small class="text-muted">Saldo Disponível</small>
+                    <div class="fs-5 fw-bold text-primary">
+                        $${parseFloat(balance.available_balance || 0).toFixed(2)}
                     </div>
-                    <div class="mb-2">
-                        <small class="text-muted">Total Equity</small>
-                        <div class="fs-6">
-                            $${parseFloat(balance.total_equity || 0).toFixed(2)}
-                        </div>
+                </div>
+                <div class="mb-2">
+                    <small class="text-muted">Patrimônio Total</small>
+                    <div class="fs-6">
+                        $${parseFloat(balance.total_equity || 0).toFixed(2)}
                     </div>
-                    <div class="mb-2">
-                        <small class="text-muted">Unrealized P&L</small>
-                        <div class="fs-6 ${parseFloat(balance.unrealized_pnl || 0) >= 0 ? 'text-success' : 'text-danger'}">
-                            $${parseFloat(balance.unrealized_pnl || 0).toFixed(2)}
-                        </div>
+                </div>
+                <div class="mb-2">
+                    <small class="text-muted">P&L Não Realizado</small>
+                    <div class="fs-6 ${unrealizedPnlClass}">
+                        $${parseFloat(balance.unrealized_pnl || 0).toFixed(2)}
                     </div>
-                `;
-            }
+                </div>
+            `;
         }
-        
+
         function updateTradingStats(state) {
             const statsElement = document.getElementById('trading-stats');
-            if (state) {
-                const totalTrades = (state.winning_trades || 0) + (state.losing_trades || 0);
-                const winRate = totalTrades > 0 ? ((state.winning_trades || 0) / totalTrades * 100).toFixed(1) : 'N/A';
-                
-                statsElement.innerHTML = `
-                    <div class="mb-2">
-                        <small class="text-muted">Total Profit</small>
-                        <div class="fs-5 fw-bold ${parseFloat(state.total_profit || 0) >= 0 ? 'text-success' : 'text-danger'}">
-                            $${parseFloat(state.total_profit || 0).toFixed(2)}
+            const totalTrades = (state.winning_trades || 0) + (state.losing_trades || 0);
+            const winRate = totalTrades > 0 ? ((state.winning_trades || 0) / totalTrades * 100).toFixed(1) : 'N/A';
+            const totalProfitClass = parseFloat(state.total_profit || 0) >= 0 ? 'text-success' : 'text-danger';
+            
+            statsElement.innerHTML = `
+                <div class="mb-2">
+                    <small class="text-muted">Lucro Total</small>
+                    <div class="fs-5 fw-bold ${totalProfitClass}">
+                        $${parseFloat(state.total_profit || 0).toFixed(2)}
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-6">
+                        <small class="text-muted">Total de Trades</small>
+                        <div class="fw-bold">${state.total_trades || 0}</div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">Taxa de Vitórias</small>
+                        <div class="fw-bold">
+                            ${winRate}${winRate !== 'N/A' ? '%' : ''}
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col-6">
-                            <small class="text-muted">Total Trades</small>
-                            <div class="fw-bold">${state.total_trades || 0}</div>
-                        </div>
-                        <div class="col-6">
-                            <small class="text-muted">Win Rate</small>
-                            <div class="fw-bold">${winRate}${winRate !== 'N/A' ? '%' : ''}</div>
-                        </div>
-                    </div>
-                `;
-            }
+                </div>
+            `;
         }
         
+        function updateConfig(config) {
+            const configElement = document.getElementById('config-info');
+            configElement.innerHTML = `
+                <div class="mb-2">
+                    <small class="text-muted">Símbolo</small>
+                    <div class="fw-bold">${config.SYMBOL || 'N/A'}</div>
+                </div>
+                <div class="mb-2">
+                    <small class="text-muted">Alavancagem</small>
+                    <div>${config.MIN_LEVERAGE || 'N/A'}x - ${config.MAX_LEVERAGE || 'N/A'}x</div>
+                </div>
+                <div class="mb-2">
+                    <small class="text-muted">Intervalo de Sondagem</small>
+                    <div>${config.POLL_INTERVAL || 'N/A'}s</div>
+                </div>
+                <div class="mb-2">
+                    <small class="text-muted">Perdas Máximas</small>
+                    <div>${config.MAX_CONSECUTIVE_LOSSES || 'N/A'}</div>
+                </div>
+            `;
+        }
+
         function updatePositionsTable(state) {
             const positionsElement = document.getElementById('positions-table');
             const positions = state.current_positions || {};
@@ -423,19 +450,23 @@
             if (Object.keys(positions).length === 0) {
                 positionsElement.innerHTML = `
                     <div class="text-muted text-center py-3">
-                        <i class="fas fa-inbox"></i> No open positions
+                        <i class="fas fa-inbox"></i> Nenhuma posição aberta.
                     </div>
                 `;
             } else {
-                let html = '<div class="table-responsive"><table class="table table-striped"><thead><tr>';
-                html += '<th>Side</th><th>Size</th><th>Entry Price</th><th>Current P&L</th><th>Leverage</th></tr></thead><tbody>';
+                let html = '<div class="table-responsive"><table class="table table-dark table-striped"><thead><tr>';
+                html += '<th>Lado</th><th>Tamanho</th><th>Preço de Entrada</th><th>P&L Não Realizado</th><th>Alavancagem</th></tr></thead><tbody>';
                 
-                for (const [side, position] of Object.entries(positions)) {
+                for (const side in positions) {
+                    const position = positions[side];
+                    const sideBadgeClass = side === 'long' ? 'bg-success' : 'bg-danger';
+                    const pnlClass = parseFloat(position.unrealized_pnl || 0) >= 0 ? 'text-success' : 'text-danger';
+                    
                     html += `<tr>
-                        <td><span class="badge bg-${side === 'long' ? 'success' : 'danger'}">${side.toUpperCase()}</span></td>
+                        <td><span class="badge ${sideBadgeClass}">${side.toUpperCase()}</span></td>
                         <td>${parseFloat(position.size || 0).toFixed(4)}</td>
                         <td>$${parseFloat(position.entry_price || 0).toFixed(2)}</td>
-                        <td class="${parseFloat(position.unrealized_pnl || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                        <td class="${pnlClass}">
                             $${parseFloat(position.unrealized_pnl || 0).toFixed(2)}
                         </td>
                         <td>${position.leverage || 'N/A'}x</td>
@@ -447,57 +478,84 @@
             }
         }
         
-        function triggerGeminiFix() {
-            const modal = new bootstrap.Modal(document.getElementById('aiAnalysisModal'));
-            modal.show();
+        function updateLogs(logs) {
+            const logsElement = document.getElementById('recent-logs');
+            logsElement.textContent = logs.join('\n');
+            logsElement.scrollTop = logsElement.scrollHeight;
         }
-        
+
         function requestAiAnalysis() {
             const errorDescription = document.getElementById('errorDescription').value;
             const resultDiv = document.getElementById('aiAnalysisResult');
             const resultText = document.getElementById('aiResultText');
+            const loadingDiv = document.getElementById('ai-analysis-loading');
+            const errorDiv = document.getElementById('ai-analysis-error');
             
             if (!errorDescription.trim()) {
-                alert('Please enter an error description');
+                errorDiv.textContent = 'Por favor, insira uma descrição do erro.';
+                errorDiv.style.display = 'block';
                 return;
             }
             
-            resultText.textContent = 'Analyzing with Gemini AI...';
-            resultDiv.style.display = 'block';
-            
-            fetch('/api/gemini-fix', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    error: errorDescription
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    resultText.textContent = data.fix_suggestion;
+            // Hide previous results and errors, show loading
+            resultDiv.style.display = 'none';
+            errorDiv.style.display = 'none';
+            loadingDiv.style.display = 'block';
+
+            // Simulate the AI analysis
+            setTimeout(() => {
+                loadingDiv.style.display = 'none';
+                // Mock response from AI
+                const mockResponse = {
+                    fix_suggestion: `A análise da IA sugere que o erro pode estar relacionado à conexão com a API da Bitget. Verifique se as suas chaves de API estão corretas e se o bot tem permissão para acessar a conta.`,
+                    success: true
+                };
+
+                if (mockResponse.success) {
+                    resultText.textContent = mockResponse.fix_suggestion;
+                    resultDiv.style.display = 'block';
                 } else {
-                    resultText.textContent = `Error: ${data.error}`;
+                    errorDiv.textContent = `Erro da API: ${mockResponse.error}`;
+                    errorDiv.style.display = 'block';
                 }
-            })
-            .catch(error => {
-                resultText.textContent = `Network error: ${error.message}`;
-            });
+            }, 2000); // Simulate a 2-second API call
         }
-        
-        // Start auto-refresh
-        setInterval(refreshData, 5000);
-        refreshData(); // Initial load
-        
-        // Handle page visibility to pause/resume auto-refresh
-        document.addEventListener('visibilitychange', function() {
-            autoRefresh = !document.hidden;
-            if (autoRefresh) {
-                refreshData();
-            }
+
+        // Event listeners for buttons
+        document.getElementById('start-bot-btn').addEventListener('click', () => {
+            // In a real application, this would make a POST request to start the bot
+            mockBotState.bot_running = true;
+            updateAllUI();
+            showFlashMessage('success', 'Bot iniciado com sucesso!');
         });
+        
+        document.getElementById('stop-bot-btn').addEventListener('click', () => {
+            // In a real application, this would make a POST request to stop the bot
+            mockBotState.bot_running = false;
+            updateAllUI();
+            showFlashMessage('danger', 'Bot parado.');
+        });
+        
+        document.getElementById('refresh-btn').addEventListener('click', updateAllUI);
+
+        function showFlashMessage(category, message) {
+            const flashContainer = document.getElementById('flash-messages');
+            const categoryClass = category === 'error' ? 'danger' : category;
+            const iconClass = category === 'error' ? 'exclamation-circle' : category === 'info' ? 'info-circle' : 'check-circle';
+            const html = `
+                <div class="alert alert-${categoryClass} alert-dismissible fade show" role="alert">
+                    <i class="fas fa-${iconClass} me-2"></i>
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            `;
+            flashContainer.innerHTML = html;
+        }
+
+        // Initial load and periodic updates
+        updateAllUI();
+        setInterval(updateAllUI, mockConfig.POLL_INTERVAL * 1000);
+
     </script>
 </body>
 </html>
