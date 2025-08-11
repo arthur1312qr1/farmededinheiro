@@ -1,8 +1,8 @@
 [phases.setup]
-nixPkgs = ['python311', 'python311Packages.pip', 'python311Packages.setuptools', 'postgresql_16', 'gcc']
+nixPkgs = ['python311', 'python311Packages.pip', 'python311Packages.setuptools']
 
 [phases.install]
 cmds = ['pip install --break-system-packages -r requirements.txt']
 
 [start]
-cmd = 'python -m gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 main:app'
+cmd = 'python main.py'
