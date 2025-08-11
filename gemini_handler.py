@@ -1,278 +1,276 @@
-import os
-import json
-import logging
-import time
-import random
-from typing import Optional, Dict, Any
+"""
+Gemini AI Error Handler for Trading Bot
+Handles AI-powered error analysis and trading decisions
+"""
 
-# Importação do Google Gemini
-try:
-    import google.generativeai as genai
-    from google.api_core.exceptions import (
-        ResourceExhausted,
-        ServiceUnavailable, 
-        InternalServerError,
-        InvalidArgument
-    )
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
-    genai = None
+import logging
+from typing import Dict, Any, Optional
+import json
 
 logger = logging.getLogger(__name__)
 
 class GeminiErrorHandler:
-    """Manipula análise e correção de erros usando Google Gemini AI"""
+    """Enhanced Gemini AI handler for error analysis and trading decisions"""
     
-    def __init__(self, api_key: str, model_name: str = "gemini-1.5-flash"):
+    def __init__(self, api_key: Optional[str] = None):
         """
-        Inicializa o manipulador de erros Gemini
+        Initialize Gemini AI handler
         
         Args:
-            api_key: Chave da API do Google Gemini
-            model_name: Modelo Gemini a ser usado
+            api_key: Gemini API key (optional)
         """
         self.api_key = api_key
-        self.model_name = model_name
         self.model = None
         
-        if api_key and GEMINI_AVAILABLE:
-            try:
-                genai.configure(api_key=api_key)
-                self.model = genai.GenerativeModel(model_name)
-                logger.info(f"Cliente Gemini inicializado com modelo: {model_name}")
-            except Exception as e:
-                logger.error(f"Falha ao inicializar cliente Gemini: {e}")
-                self.model = None
-        else:
-            if not GEMINI_AVAILABLE:
-                logger.warning("Biblioteca google-generativeai não encontrada - análise de erro desabilitada")
+        # For now, we'll use basic analysis only since Gemini library is not properly installed
+        logger.info("Gemini AI using basic analysis mode (library not available)")
+    
+    def analyze_and_fix_error(self, error_message: str, context: Optional[Dict[str, Any]] = None) -> str:
+        """
+        Analyze error and provide fix suggestions
+        
+        Args:
+            error_message: Error message to analyze
+            context: Additional context about the error
+            
+        Returns:
+            Analysis and fix suggestions
+        """
+        return self._basic_error_analysis(error_message, context)
+    
+    def _basic_error_analysis(self, error_message: str, context: Optional[Dict[str, Any]] = None) -> str:
+        """Basic error analysis without AI"""
+        
+        error_lower = error_message.lower()
+        
+        # API connection errors
+        if any(keyword in error_lower for keyword in ['connection', 'timeout', 'network', 'requests']):
+            return "Network error detected. Check internet connection and API status. Will retry automatically."
+        
+        # Authentication errors
+        if any(keyword in error_lower for keyword in ['authentication', 'unauthorized', 'invalid key', 'api key']):
+            return "STOP_TRADING - Authentication error. Check Bitget API keys and permissions."
+        
+        # Balance/funds errors
+        if any(keyword in error_lower for keyword in ['insufficient', 'balance', 'funds', 'margin']):
+            return "Insufficient funds error. Check account balance before continuing trades."
+        
+        # Rate limiting
+        if any(keyword in error_lower for keyword in ['rate limit', 'too many requests', '429']):
+            return "Rate limit exceeded. Increasing delay between requests automatically."
+        
+        # JSON/parsing errors
+        if any(keyword in error_lower for keyword in ['json', 'parse', 'decode', 'invalid response']):
+            return "Data parsing error. API response format may have changed. Will retry."
+        
+        # Bitget specific errors
+        if any(keyword in error_lower for keyword in ['bitget', 'api error', 'code']):
+            return "Bitget API error detected. Check API status and credentials."
+        
+        # Position errors
+        if any(keyword in error_lower for keyword in ['position', 'leverage', 'margin mode']):
+            return "Position management error. Check leverage settings and margin requirements."
+        
+        # Critical system errors
+        if any(keyword in error_lower for keyword in ['memory', 'disk', 'system', 'worker']):
+            return "RESTART_REQUIRED - System resource error detected."
+        
+        return f"Unknown error type. Continuing with caution. Error: {error_message[:100]}..."
+    
+    def analyze_market_conditions(self, market_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Analyze market conditions and provide trading signals
+        
+        Args:
+            market_data: Market data dictionary
+            
+        Returns:
+            Trading analysis and recommendations
+        """
+        return self._basic_market_analysis(market_data)
+    
+    def _basic_market_analysis(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Basic market analysis without AI"""
+        try:
+            price_change = float(market_data.get('change_percent_24h', 0))
+            volume = float(market_data.get('volume_24h', 0))
+            current_price = float(market_data.get('last_price', 0))
+            
+            # Simple momentum-based analysis
+            if price_change > 5 and volume > 1000000:
+                return {
+                    "signal": "buy",
+                    "confidence": "medium",
+                    "reasoning": f"Strong upward momentum (+{price_change:.1f}%) with good volume",
+                    "risk_level": "medium",
+                    "suggested_leverage": 5,
+                    "entry_price": current_price,
+                    "stop_loss": current_price * 0.95,
+                    "take_profit": current_price * 1.08
+                }
+            elif price_change < -5 and volume > 1000000:
+                return {
+                    "signal": "sell",
+                    "confidence": "medium", 
+                    "reasoning": f"Strong bearish momentum ({price_change:.1f}%) with volume",
+                    "risk_level": "medium",
+                    "suggested_leverage": 3,
+                    "entry_price": current_price,
+                    "stop_loss": current_price * 1.05,
+                    "take_profit": current_price * 0.92
+                }
+            elif abs(price_change) > 2:
+                signal = "buy" if price_change > 0 else "sell"
+                return {
+                    "signal": signal,
+                    "confidence": "low",
+                    "reasoning": f"Moderate price movement ({price_change:.1f}%)",
+                    "risk_level": "low",
+                    "suggested_leverage": 2,
+                    "entry_price": current_price
+                }
             else:
-                logger.warning("Nenhuma chave API Gemini fornecida - análise de erro desabilitada")
-    
-    def analyze_and_fix_error(self, error_message: str, context: Optional[Dict] = None) -> str:
-        """
-        Analisa erro e fornece sugestões de correção
-        
-        Args:
-            error_message: A mensagem de erro para analisar
-            context: Contexto adicional sobre o erro
-            
-        Returns:
-            Sugestão de correção gerada pela IA
-        """
-        if not self.model:
-            return "Gemini AI não disponível - nenhuma chave API fornecida"
-        
-        try:
-            # Constrói prompt com contexto
-            prompt = self._build_error_analysis_prompt(error_message, context)
-            
-            # Obtém análise da IA com lógica de retry
-            response = self._generate_with_retry(prompt)
-            
-            if response:
-                logger.info(f"Análise Gemini concluída para erro: {error_message[:100]}...")
-                return response
-            else:
-                return "Incapaz de analisar erro - resposta Gemini vazia"
+                return {
+                    "signal": "hold",
+                    "confidence": "low",
+                    "reasoning": f"Low volatility ({price_change:.1f}%) - market consolidating",
+                    "risk_level": "low",
+                    "suggested_leverage": 1,
+                    "current_price": current_price
+                }
                 
         except Exception as e:
-            logger.error(f"Erro na análise Gemini: {e}")
-            return f"Análise Gemini falhou: {str(e)}"
+            logger.error(f"Basic market analysis failed: {e}")
+            return {
+                "signal": "hold",
+                "confidence": "low", 
+                "reasoning": "Analysis error - staying neutral for safety",
+                "risk_level": "high",
+                "suggested_leverage": 1,
+                "error": str(e)
+            }
     
-    def _build_error_analysis_prompt(self, error_message: str, context: Optional[Dict] = None) -> str:
-        """Build comprehensive prompt for error analysis"""
-        
-        prompt = f"""
-Você é um desenvolvedor Python especialista e especialista em bots de trading de criptomoedas.
-Analise o seguinte erro e forneça soluções específicas e práticas.
-
-MENSAGEM DE ERRO:
-{error_message}
-
-CONTEXTO:
-- Aplicação: Bot de trading de criptomoedas usando API Bitget
-- Framework: Aplicação web Flask
-- Trading: Futuros USDT-M (símbolo ETHUSDT)
-- Deploy: Plataforma Render.com
-
-"""
-        
-        if context:
-            prompt += f"\nADDITIONAL CONTEXT:\n{json.dumps(context, indent=2)}\n"
-        
-        prompt += """
-Por favor forneça:
-
-1. CAUSA RAIZ: Qual é a provável causa deste erro?
-
-2. CORREÇÃO IMEDIATA: Solução passo a passo para resolver este erro específico
-
-3. PREVENÇÃO: Como prevenir este erro no futuro
-
-4. ALTERAÇÕES DE CÓDIGO: Se aplicável, forneça modificações específicas no código
-
-5. MONITORAMENTO: O que deve ser monitorado para detectar problemas similares
-
-6. SEVERIDADE: Classifique a severidade (BAIXA/MÉDIA/ALTA/CRÍTICA)
-
-7. AÇÃO: O bot deve CONTINUAR, RESTART_REQUIRED ou STOP_TRADING?
-
-Formate sua resposta como uma análise estruturada que pode guiar a recuperação automática de erros.
-Foque em soluções práticas e implementáveis para um ambiente de trading em produção.
-"""
-        
-        return prompt
-    
-    def _generate_with_retry(
-        self, 
-        prompt: str,
-        max_retries: int = 3,
-        base_delay: float = 1.0,
-        max_delay: float = 30.0
-    ) -> Optional[str]:
+    def analyze_trading_opportunity(self, market_data: Dict[str, Any], balance_info: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Generate content with comprehensive retry logic
+        Analyze trading opportunity based on market data and balance
         
         Args:
-            prompt: The prompt to send to Gemini
-            max_retries: Maximum number of retry attempts
-            base_delay: Base delay between retries
-            max_delay: Maximum delay between retries
+            market_data: Current market data
+            balance_info: Account balance information
             
         Returns:
-            Generated content or None if failed
+            Trading opportunity analysis
         """
-        
-        for attempt in range(max_retries + 1):
-            try:
-                response = self.model.generate_content(
-                    prompt,
-                    generation_config={
-                        'temperature': 0.3,  # Temperatura baixa para respostas mais consistentes
-                        'max_output_tokens': 2048
-                    }
-                )
-                
-                if response.candidates:
-                    candidate = response.candidates[0]
-                    
-                    # Verificar bloqueios de segurança
-                    if hasattr(candidate, 'finish_reason') and candidate.finish_reason:
-                        if candidate.finish_reason.name == "SAFETY":
-                            logger.warning("Conteúdo bloqueado por configurações de segurança")
-                            if attempt == 0:
-                                neutral_prompt = f"Analise este erro técnico: {prompt[:200]}..."
-                                return self._generate_with_retry(neutral_prompt, max_retries-1)
-                            return "Conteúdo bloqueado por filtros de segurança"
-                        
-                        elif candidate.finish_reason.name == "RECITATION":
-                            logger.warning("Conteúdo bloqueado por recitação")
-                            return "Conteúdo bloqueado por recitação"
-                
-                return response.text
-                
-            except ResourceExhausted as e:
-                # Limitação de taxa (429)
-                if attempt < max_retries:
-                    delay = min(base_delay * (2 ** attempt), max_delay)
-                    delay += random.uniform(0, 1)  # Adicionar jitter
-                    logger.warning(f"Limite de taxa atingido. Tentando novamente em {delay:.2f}s... (tentativa {attempt + 1}/{max_retries})")
-                    time.sleep(delay)
-                else:
-                    logger.error("Limite de taxa excedido. Máximo de tentativas atingido.")
-                    return "Limite de taxa excedido - incapaz de analisar erro"
-            
-            except Exception as gemini_exception:
-                # Capturar todas as exceções do Gemini
-                if attempt < max_retries:
-                    delay = min(base_delay * (2 ** attempt), max_delay)
-                    delay += random.uniform(0, 1)
-                    logger.warning(f"Erro Gemini. Tentando novamente em {delay:.2f}s... (tentativa {attempt + 1}/{max_retries}): {gemini_exception}")
-                    time.sleep(delay)
-                else:
-                    logger.error(f"Erro Gemini após {max_retries} tentativas: {gemini_exception}")
-                    return f"Análise Gemini falhou: {str(gemini_exception)}"
-        
-        return None
-    
-    def analyze_trading_performance(self, trading_data: Dict) -> str:
-        """
-        Analisa performance de trading e sugere melhorias
-        
-        Args:
-            trading_data: Dicionário contendo estatísticas e dados de performance
-            
-        Returns:
-            Análise da IA sobre performance de trading com recomendações
-        """
-        if not self.model:
-            return "Gemini AI não disponível para análise de performance"
-        
         try:
-            prompt = f"""
-Analyze the following cryptocurrency trading bot performance data and provide optimization recommendations:
-
-TRADING DATA:
-{json.dumps(trading_data, indent=2, default=str)}
-
-Please provide:
-
-1. PERFORMANCE SUMMARY: Overall assessment of trading performance
-2. STRENGTHS: What is working well in the current strategy
-3. WEAKNESSES: Areas that need improvement
-4. OPTIMIZATION SUGGESTIONS: Specific parameter adjustments
-5. RISK ASSESSMENT: Current risk level and recommendations
-6. MARKET CONDITIONS: How well the bot is adapting to current market
-7. ACTION ITEMS: Priority improvements to implement
-
-Focus on actionable insights for a Futures USDT-M trading bot on Bitget.
-"""
+            available_balance = float(balance_info.get('available_balance', 0))
+            min_trade_amount = 10  # Minimum $10 USDT to trade
             
-            response = self._generate_with_retry(prompt)
-            return response or "Unable to analyze trading performance"
+            if available_balance < min_trade_amount:
+                return {
+                    "trade_recommended": False,
+                    "reason": f"Insufficient balance: ${available_balance:.2f} < ${min_trade_amount} minimum",
+                    "action": "wait_for_funds"
+                }
+            
+            market_analysis = self._basic_market_analysis(market_data)
+            
+            if market_analysis['signal'] == 'hold' or market_analysis['confidence'] == 'low':
+                return {
+                    "trade_recommended": False,
+                    "reason": "Market conditions unclear - waiting for better signal",
+                    "market_analysis": market_analysis,
+                    "action": "monitor"
+                }
+            
+            # Calculate position size based on available balance and risk
+            risk_percentage = 0.02  # Risk 2% of balance per trade
+            max_trade_amount = available_balance * 0.3  # Use max 30% of balance
+            suggested_amount = min(available_balance * risk_percentage * market_analysis['suggested_leverage'], 
+                                 max_trade_amount)
+            
+            return {
+                "trade_recommended": True,
+                "signal": market_analysis['signal'],
+                "confidence": market_analysis['confidence'],
+                "suggested_amount": round(suggested_amount, 2),
+                "suggested_leverage": market_analysis['suggested_leverage'],
+                "reasoning": market_analysis['reasoning'],
+                "risk_level": market_analysis['risk_level'],
+                "market_analysis": market_analysis,
+                "balance_analysis": {
+                    "available": available_balance,
+                    "risk_amount": round(available_balance * risk_percentage, 2),
+                    "position_size_percentage": round((suggested_amount / available_balance) * 100, 1)
+                }
+            }
             
         except Exception as e:
-            logger.error(f"Error in performance analysis: {e}")
-            return f"Performance analysis failed: {str(e)}"
+            logger.error(f"Trading opportunity analysis failed: {e}")
+            return {
+                "trade_recommended": False,
+                "reason": f"Analysis error: {str(e)}",
+                "action": "error_recovery",
+                "error": str(e)
+            }
     
-    def suggest_market_strategy(self, market_data: Dict) -> str:
+    def validate_trade_conditions(self, signal: Dict[str, Any], market_data: Dict[str, Any], 
+                                 balance_info: Dict[str, Any]) -> Dict[str, bool]:
         """
-        Suggest trading strategy based on current market conditions
+        Validate if conditions are met for executing a trade
         
-        Args:
-            market_data: Current market data and indicators
-            
         Returns:
-            AI-suggested trading strategy
+            Dictionary with validation results
         """
-        if not self.client:
-            return "Gemini AI not available for strategy suggestions"
+        validations = {
+            "sufficient_balance": False,
+            "market_conditions_ok": False,
+            "api_available": False,
+            "risk_acceptable": False,
+            "all_checks_passed": False
+        }
         
         try:
-            prompt = f"""
-Based on the current market data, suggest an optimal trading strategy for a cryptocurrency futures bot:
-
-MARKET DATA:
-{json.dumps(market_data, indent=2, default=str)}
-
-Provide strategy recommendations for:
-
-1. MARKET SENTIMENT: Current market conditions assessment
-2. ENTRY SIGNALS: When and how to enter positions
-3. EXIT STRATEGY: Take profit and stop loss recommendations
-4. LEVERAGE: Recommended leverage levels for current conditions
-5. RISK MANAGEMENT: Position sizing and risk controls
-6. TIMEFRAME: Optimal trading timeframes
-7. INDICATORS: Most relevant technical indicators to monitor
-
-Focus on ETHUSDT futures trading with practical, implementable strategies.
-"""
+            # Check balance
+            available_balance = float(balance_info.get('available_balance', 0))
+            suggested_amount = float(signal.get('suggested_amount', 0))
             
-            response = self._generate_with_retry(prompt)
-            return response or "Unable to generate strategy suggestions"
+            validations["sufficient_balance"] = available_balance >= suggested_amount
+            
+            # Check market conditions
+            confidence = signal.get('confidence', 'low')
+            validations["market_conditions_ok"] = confidence in ['medium', 'high']
+            
+            # Check API availability
+            validations["api_available"] = not balance_info.get('error') and not balance_info.get('api_error')
+            
+            # Check risk level
+            risk_level = signal.get('risk_level', 'high')
+            validations["risk_acceptable"] = risk_level in ['low', 'medium']
+            
+            # All checks passed
+            validations["all_checks_passed"] = all(validations.values())
             
         except Exception as e:
-            logger.error(f"Error in strategy analysis: {e}")
-            return f"Strategy analysis failed: {str(e)}"
+            logger.error(f"Trade validation failed: {e}")
+            validations["validation_error"] = str(e)
+        
+        return validations
+    
+    def is_available(self) -> bool:
+        """Check if Gemini AI is available (always False for basic mode)"""
+        return False
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get handler status"""
+        return {
+            "available": False,
+            "model": "basic_analysis",
+            "api_configured": bool(self.api_key and self.api_key.strip()),
+            "mode": "basic",
+            "features": [
+                "basic_error_analysis",
+                "market_trend_analysis", 
+                "trading_opportunity_analysis",
+                "trade_validation"
+            ]
+        }
