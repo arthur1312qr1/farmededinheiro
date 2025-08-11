@@ -1,3 +1,4 @@
+```python
 import os
 import logging
 import threading
@@ -71,8 +72,8 @@ def start_bot():
         logger.info("Trading bot started by user")
         
     except Exception as e:
-        logger.error(f"Erro ao iniciar bot: {e}")
-        flash(f"Erro ao iniciar bot: {str(e)}", "error")
+        logger.exception(f"Error starting bot: {e}")
+        flash(f"Error starting bot: {str(e)}", "error")
         bot_running = False
     
     return redirect(url_for('index'))
@@ -93,7 +94,7 @@ def stop_bot():
         logger.info("Trading bot stopped by user")
         
     except Exception as e:
-        logger.error(f"Error stopping bot: {e}")
+        logger.exception(f"Error stopping bot: {e}")
         flash(f"Error stopping bot: {str(e)}", "error")
     
     return redirect(url_for('index'))
@@ -119,7 +120,7 @@ def api_status():
         })
         
     except Exception as e:
-        logger.error(f"Error getting status: {e}")
+        logger.exception(f"Error getting status: {e}")
         return jsonify({
             "success": False,
             "error": str(e),
@@ -141,7 +142,7 @@ def api_logs():
         })
         
     except Exception as e:
-        logger.error(f"Error reading logs: {e}")
+        logger.exception(f"Error reading logs: {e}")
         return jsonify({
             "success": False,
             "error": str(e),
@@ -172,7 +173,7 @@ def gemini_fix():
         })
         
     except Exception as e:
-        logger.error(f"Error in Gemini fix: {e}")
+        logger.exception(f"Error in Gemini fix: {e}")
         return jsonify({
             "success": False,
             "error": str(e),
@@ -192,7 +193,7 @@ def run_bot_loop():
                 time.sleep(config.POLL_INTERVAL)
                 
             except Exception as e:
-                logger.error(f"Error in trading cycle: {e}")
+                logger.exception(f"Error in trading cycle: {e}")
                 
                 # Use Gemini AI to analyze and potentially fix the error
                 try:
@@ -206,7 +207,7 @@ def run_bot_loop():
                         break
                         
                 except Exception as gemini_error:
-                    logger.error(f"Gemini error analysis failed: {gemini_error}")
+                    logger.exception(f"Gemini error analysis failed: {gemini_error}")
                 
                 # Wait before retrying
                 time.sleep(config.POLL_INTERVAL * 2)
@@ -214,7 +215,7 @@ def run_bot_loop():
     except KeyboardInterrupt:
         logger.info("Bot loop interrupted")
     except Exception as e:
-        logger.error(f"Fatal error in bot loop: {e}")
+        logger.exception(f"Fatal error in bot loop: {e}")
     finally:
         bot_running = False
         logger.info("Bot loop ended")
@@ -225,7 +226,7 @@ def not_found_error(error):
 
 @app.errorhandler(500)
 def internal_error(error):
-    logger.error(f"Internal server error: {error}")
+    logger.exception(f"Internal server error: {error}")
     return render_template('500.html'), 500
 
 if __name__ == '__main__':
@@ -236,3 +237,4 @@ if __name__ == '__main__':
     
     logger.info(f"Starting Flask app on {host}:{port} (debug={debug})")
     app.run(host=host, port=port, debug=debug)
+```
