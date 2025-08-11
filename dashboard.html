@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot de Trading - Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background: #0d1421; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .card { background: #1a2332; border: 1px solid #243447; border-radius: 12px; }
+        .card-header { background: #243447; border-bottom: 1px solid #394c63; }
+        .btn-success { background: linear-gradient(135deg, #00d4aa, #00b894); border: none; }
+        .btn-danger { background: linear-gradient(135deg, #ff6b6b, #e55353); border: none; }
+        .metric-value { font-size: 1.8rem; font-weight: 700; }
+        .metric-label { color: #8b9dc3; font-size: 0.9rem; text-transform: uppercase; }
+        .status-active { color: #00d4aa; }
+        .status-inactive { color: #ff6b6b; }
+        .trade-row { padding: 8px; border-bottom: 1px solid #243447; }
+        .trade-buy { border-left: 3px solid #00d4aa; }
+        .trade-sell { border-left: 3px solid #ff6b6b; }
+        .balance-positive { color: #00d4aa; }
+        .balance-negative { color: #ff6b6b; }
+        .auto-refresh { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container">
+            <span class="navbar-brand">
+                <i class="fas fa-robot me-2"></i>Bot de Trading ETHUSDT
+            </span>
+            <div>
+                <span id="botStatus" class="badge bg-secondary">Carregando...</span>
+                <span class="badge bg-info ms-2">Auto-atualização <span class="auto-refresh">●</span></span>
+            </div>
+        </div>
+    </nav>
+   
+    <div class="container-fluid py-4">
+        <div class="row">
+            <!-- Controles -->
+            <div class="col-md-3">
+                <div class="card mb-3">
+                    <div class="card-header"><h6 class="mb-0">Controles do Bot</h6></div>
+                    <div class="card-body">
+                        <div class="d-grid gap-2">
+                            <button id="startBot" class="btn btn-success">
+                                <i class="fas fa-play me-2"></i>Iniciar Bot
+                            </button>
+                            <button id="stopBot" class="btn btn-warning">
+                                <i class="fas fa-pause me-2"></i>Parar Bot
+                            </button>
+                            <button id="forceAnalysis" class="btn btn-info">
+                                <i class="fas fa-brain me-2"></i>Analisar Agora
+                            </button>
+                            <button id="emergencyStop" class="btn btn-danger">
+                                <i class="fas fa-stop me-2"></i>Parada de Emergência
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Saldo -->
+                <div class="card">
+                    <div class="card-header"><h6 class="mb-0">Saldo da Conta</h6></div>
+                    <div class="card-body text-center">
+                        <div class="metric-value" id="totalBalance">$0.00</div>
+                        <div class="metric-label">Saldo Total</div>
+                        <hr>
+                        <div class="row">
+                            <div class="col-6">
+                                <div class="metric-value" style="font-size: 1.2rem;" id="availableBalance">$0.00</div>
+                                <div class="metric-label">Disponível</div>
+                            </div>
+                            <div class="col-6">
+                                <div class="metric-value" style="font-size: 1.2rem;" id="marginUsed">$0.00</div>
+                                <div class="metric-label">Em Margem</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dashboard Principal -->
+            <div class="col-md-9">
+                <!-- Métricas -->
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body">
+                                <div class="metric-value" id="currentPrice">$0.00</div>
+                                <div class="metric-label">Preço ETHUSDT</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body">
+                                <div class="metric-value" id="totalTrades">0</div>
+                                <div class="metric-label">Total Trades</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body">
+                                <div class="metric-value" id="winRate">0%</div>
+                                <div class="metric-label">Taxa de Vitória</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body">
+                                <div class="metric-value" id="totalPnl">$0.00</div>
+                                <div class="metric-label">P&L Total</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Posições Abertas -->
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="mb-0">Posições Abertas</h6>
+                            </div>
+                            <div class="card-body">
+                                <div id="openPositions">
+                                    <div class="text-center text-muted py-3">
+                                        <i class="fas fa-inbox fa-2x mb-2"></i>
+                                        <p>Nenhuma posição aberta</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="mb-0">Última Análise IA</h6>
+                            </div>
+                            <div class="card-body">
+                                <div id="lastAnalysis">
+                                    <div class="text-center text-muted py-3">
+                                        <i class="fas fa-brain fa-2x mb-2"></i>
+                                        <p>Aguardando análise...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Histórico de Transações -->
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0">Histórico de Transações</h6>
+                        <button id="refreshTrades" class="btn btn-sm btn-outline-light">
+                            <i class="fas fa-sync-alt"></i> Atualizar
+                        </button>
+                    </div>
+                    <div class="card-body">
+[truncated]
+[truncated]
