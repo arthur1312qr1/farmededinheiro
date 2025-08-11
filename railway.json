@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "python -m gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 main:app",
+    "startCommand": "python main.py",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   },
@@ -14,9 +14,7 @@
         "PAPER_TRADING": "true",
         "SYMBOL": "ETHUSDT",
         "POLL_INTERVAL": "3.0",
-        "MIN_BALANCE_USDT": "20.0",
-        "MAX_RETRIES": "3",
-        "PIP_BREAK_SYSTEM_PACKAGES": "1"
+        "MIN_BALANCE_USDT": "20.0"
       }
     }
   }
