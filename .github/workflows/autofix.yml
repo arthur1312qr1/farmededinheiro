@@ -56,4 +56,5 @@ jobs:
           git config --global user.email "github-actions@github.com"
           git add ${{ github.event.inputs.file_to_fix_path }}
           git commit -m "chore(autofix): corrigido erro no arquivo ${{ github.event.inputs.file_to_fix_path }}"
+          git pull --rebase origin main
           git push
