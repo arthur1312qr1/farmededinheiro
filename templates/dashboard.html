@@ -3,478 +3,404 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bot de Trading - Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <title>Dashboard - ETH/USDT Trading Bot</title>
+    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { background: #0d1421; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .card { background: #1a2332; border: 1px solid #243447; border-radius: 12px; }
-        .card-header { background: #243447; border-bottom: 1px solid #394c63; }
-        .btn-success { background: linear-gradient(135deg, #00d4aa, #00b894); border: none; }
-        .btn-danger { background: linear-gradient(135deg, #ff6b6b, #e55353); border: none; }
-        .metric-value { font-size: 1.8rem; font-weight: 700; }
-        .metric-label { color: #8b9dc3; font-size: 0.9rem; text-transform: uppercase; }
-        .status-active { color: #00d4aa; }
-        .status-inactive { color: #ff6b6b; }
-        .trade-row { padding: 8px; border-bottom: 1px solid #243447; }
-        .trade-buy { border-left: 3px solid #00d4aa; }
-        .trade-sell { border-left: 3px solid #ff6b6b; }
-        .balance-positive { color: #00d4aa; }
-        .balance-negative { color: #ff6b6b; }
-        .auto-refresh { animation: pulse 2s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        body { 
+            background: var(--bs-dark); 
+            color: var(--bs-light);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        .stat-card {
+            border-radius: 12px;
+            border: 1px solid var(--bs-border-color-translucent);
+            background: linear-gradient(135deg, var(--bs-gray-800) 0%, var(--bs-gray-900) 100%);
+            transition: transform 0.2s ease;
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+        .profit-positive { color: #28a745; }
+        .profit-negative { color: #dc3545; }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+        .status-running { background-color: #28a745; }
+        .status-stopped { background-color: #dc3545; }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .back-btn {
+            background: linear-gradient(45deg, var(--bs-secondary), var(--bs-gray-700));
+            border: none;
+            color: white;
+            padding: 8px 20px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        .back-btn:hover {
+            transform: translateY(-1px);
+            color: white;
+        }
     </style>
 </head>
 <body>
-    <nav class="navbar navbar-dark bg-dark">
-        <div class="container">
-            <span class="navbar-brand">
-                <i class="fas fa-robot me-2"></i>Bot de Trading ETHUSDT
-            </span>
-            <div>
-                <span id="botStatus" class="badge bg-secondary">Carregando...</span>
-                <span class="badge bg-info ms-2">Auto-atualização <span class="auto-refresh">●</span></span>
+    <div class="container-fluid my-4">
+        <!-- Header -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h1 class="mb-1">
+                            <i class="fas fa-chart-bar me-2"></i>Dashboard de Trading
+                        </h1>
+                        <p class="text-muted mb-0">
+                            <span class="status-indicator {{ 'status-running' if bot_status.running else 'status-stopped' }}"></span>
+                            Bot {{ 'ativo' if bot_status.running else 'inativo' }} - ETH/USDT Futures
+                        </p>
+                    </div>
+                    <div>
+                        <a href="/" class="btn back-btn">
+                            <i class="fas fa-arrow-left me-2"></i>Voltar
+                        </a>
+                    </div>
+                </div>
             </div>
         </div>
-    </nav>
 
-    <div class="container-fluid py-4">
-        <div class="row">
-            <!-- Controles -->
-            <div class="col-md-3">
-                <div class="card mb-3">
-                    <div class="card-header"><h6 class="mb-0">Controles do Bot</h6></div>
-                    <div class="card-body">
-                        <div class="d-grid gap-2">
-                            <button id="startBot" class="btn btn-success">
-                                <i class="fas fa-play me-2"></i>Iniciar Bot
-                            </button>
-                            <button id="stopBot" class="btn btn-warning">
-                                <i class="fas fa-pause me-2"></i>Parar Bot
-                            </button>
-                            <button id="forceAnalysis" class="btn btn-info">
-                                <i class="fas fa-brain me-2"></i>Analisar Agora
-                            </button>
-                            <button id="emergencyStop" class="btn btn-danger">
-                                <i class="fas fa-stop me-2"></i>Parada de Emergência
-                            </button>
+        <!-- Cards de Estatísticas -->
+        <div class="row mb-4">
+            <div class="col-lg-3 col-md-6 mb-3">
+                <div class="card stat-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-chart-line fa-2x text-primary mb-3"></i>
+                        <h6 class="card-title text-muted">Total de Trades</h6>
+                        <div class="stat-value text-info">
+                            {{ trading_stats.total_trades or 0 }}
                         </div>
                     </div>
                 </div>
-
-                <!-- Saldo -->
-                <div class="card">
-                    <div class="card-header"><h6 class="mb-0">Saldo da Conta</h6></div>
+            </div>
+            <div class="col-lg-3 col-md-6 mb-3">
+                <div class="card stat-card">
                     <div class="card-body text-center">
-                        <div class="metric-value" id="totalBalance">$0.00</div>
-                        <div class="metric-label">Saldo Total</div>
-                        <hr>
-                        <div class="row">
-                            <div class="col-6">
-                                <div class="metric-value" style="font-size: 1.2rem;" id="availableBalance">$0.00</div>
-                                <div class="metric-label">Disponível</div>
-                            </div>
-                            <div class="col-6">
-                                <div class="metric-value" style="font-size: 1.2rem;" id="marginUsed">$0.00</div>
-                                <div class="metric-label">Em Margem</div>
-                            </div>
+                        <i class="fas fa-percentage fa-2x text-success mb-3"></i>
+                        <h6 class="card-title text-muted">Taxa de Acerto</h6>
+                        <div class="stat-value text-success">
+                            {{ "%.1f"|format(trading_stats.win_rate or 0) }}%
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-3 col-md-6 mb-3">
+                <div class="card stat-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-dollar-sign fa-2x {{ 'text-success' if (trading_stats.total_profit or 0) >= 0 else 'text-danger' }} mb-3"></i>
+                        <h6 class="card-title text-muted">P&L Total</h6>
+                        <div class="stat-value {{ 'profit-positive' if (trading_stats.total_profit or 0) >= 0 else 'profit-negative' }}">
+                            ${{ "%.2f"|format(trading_stats.total_profit or 0) }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-3 col-md-6 mb-3">
+                <div class="card stat-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-wallet fa-2x text-warning mb-3"></i>
+                        <h6 class="card-title text-muted">Saldo Disponível</h6>
+                        <div class="stat-value text-warning">
+                            ${{ "%.2f"|format(balance_info.available_balance or 0) }}
+                        </div>
+                        {% if balance_info.paper_trading %}
+                        <small class="badge bg-info mt-1">PAPER</small>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gráficos e Detalhes -->
+        <div class="row mb-4">
+            <!-- Gráfico de Performance -->
+            <div class="col-lg-8 mb-3">
+                <div class="card">
+                    <div class="card-header bg-transparent border-0">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-chart-area me-2"></i>Performance do Saldo
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="balanceChart"></canvas>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Dashboard Principal -->
-            <div class="col-md-9">
-                <!-- Métricas -->
-                <div class="row mb-4">
-                    <div class="col-md-3">
-                        <div class="card text-center">
-                            <div class="card-body">
-                                <div class="metric-value" id="currentPrice">$0.00</div>
-                                <div class="metric-label">Preço ETHUSDT</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="card text-center">
-                            <div class="card-body">
-                                <div class="metric-value" id="totalTrades">0</div>
-                                <div class="metric-label">Total Trades</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="card text-center">
-                            <div class="card-body">
-                                <div class="metric-value" id="winRate">0%</div>
-                                <div class="metric-label">Taxa de Vitória</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="card text-center">
-                            <div class="card-body">
-                                <div class="metric-value" id="totalPnl">$0.00</div>
-                                <div class="metric-label">P&L Total</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Posições Abertas -->
-                <div class="row mb-4">
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-header">
-                                <h6 class="mb-0">Posições Abertas</h6>
-                            </div>
-                            <div class="card-body">
-                                <div id="openPositions">
-                                    <div class="text-center text-muted py-3">
-                                        <i class="fas fa-inbox fa-2x mb-2"></i>
-                                        <p>Nenhuma posição aberta</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-header">
-                                <h6 class="mb-0">Última Análise IA</h6>
-                            </div>
-                            <div class="card-body">
-                                <div id="lastAnalysis">
-                                    <div class="text-center text-muted py-3">
-                                        <i class="fas fa-brain fa-2x mb-2"></i>
-                                        <p>Aguardando análise...</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Histórico de Transações -->
+            <!-- Estatísticas Detalhadas -->
+            <div class="col-lg-4 mb-3">
                 <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h6 class="mb-0">Histórico de Transações</h6>
-                        <button id="refreshTrades" class="btn btn-sm btn-outline-light">
-                            <i class="fas fa-sync-alt"></i> Atualizar
-                        </button>
+                    <div class="card-header bg-transparent border-0">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-info-circle me-2"></i>Detalhes
+                        </h5>
                     </div>
                     <div class="card-body">
-                        <div id="tradesHistory" style="max-height: 400px; overflow-y: auto;">
-                            <div class="text-center text-muted py-4">
-                                <i class="fas fa-history fa-2x mb-2"></i>
-                                <p>Nenhuma transação realizada</p>
+                        <div class="mb-3">
+                            <small class="text-muted">Trades Ganhos</small>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="text-success">{{ trading_stats.winning_trades or 0 }}</span>
+                                <div class="progress flex-grow-1 ms-2" style="height: 8px;">
+                                    <div class="progress-bar bg-success" style="width: {{ (trading_stats.win_rate or 0) }}%"></div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <small class="text-muted">Trades Perdidos</small>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="text-danger">{{ trading_stats.losing_trades or 0 }}</span>
+                                <div class="progress flex-grow-1 ms-2" style="height: 8px;">
+                                    <div class="progress-bar bg-danger" style="width: {{ (100 - (trading_stats.win_rate or 0)) }}%"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <small class="text-muted">Perdas Consecutivas</small>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="badge {{ 'bg-danger' if (trading_stats.consecutive_losses or 0) >= 3 else 'bg-secondary' }}">
+                                    {{ trading_stats.consecutive_losses or 0 }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <hr class="my-3">
+
+                        <div class="mb-2">
+                            <small class="text-muted">Uptime</small>
+                            <div class="text-info">{{ bot_status.uptime or 'N/A' }}</div>
+                        </div>
+
+                        <div class="mb-2">
+                            <small class="text-muted">Último Trade</small>
+                            <div class="small">
+                                {% if trading_stats.last_trade_time %}
+                                {{ trading_stats.last_trade_time[:19] | replace('T', ' ') }}
+                                {% else %}
+                                Nenhum trade ainda
+                                {% endif %}
                             </div>
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Configurações do Sistema -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-transparent border-0">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-cogs me-2"></i>Configurações do Sistema
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-2 col-6 mb-3">
+                                <small class="text-muted">Modo</small>
+                                <div>
+                                    <span class="badge {{ 'bg-success' if config.real_trading else 'bg-info' }}">
+                                        {{ 'REAL' if config.real_trading else 'PAPER' }}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="col-md-2 col-6 mb-3">
+                                <small class="text-muted">Símbolo</small>
+                                <div class="fw-bold">{{ config.symbol }}</div>
+                            </div>
+                            <div class="col-md-2 col-6 mb-3">
+                                <small class="text-muted">Leverage</small>
+                                <div class="fw-bold text-warning">{{ config.min_leverage }}x - {{ config.max_leverage }}x</div>
+                            </div>
+                            <div class="col-md-2 col-6 mb-3">
+                                <small class="text-muted">Poll Interval</small>
+                                <div class="fw-bold text-info">{{ config.poll_interval }}s</div>
+                            </div>
+                            <div class="col-md-2 col-6 mb-3">
+                                <small class="text-muted">Margem Min</small>
+                                <div class="fw-bold text-success">{{ config.min_margin_usage }}%</div>
+                            </div>
+                            <div class="col-md-2 col-6 mb-3">
+                                <small class="text-muted">API Status</small>
+                                <div>
+                                    <span class="badge {{ 'bg-success' if config.api_keys_configured else 'bg-danger' }}">
+                                        {{ 'OK' if config.api_keys_configured else 'ERRO' }}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="row mt-4">
+            <div class="col-12 text-center text-muted">
+                <small>
+                    <i class="fas fa-server me-2"></i>Railway Deploy
+                    <span class="mx-2">|</span>
+                    <i class="fas fa-sync me-2"></i>Auto-refresh a cada 30s
+                    <span class="mx-2">|</span>
+                    <i class="fas fa-shield-alt me-2"></i>Bitget Exchange
+                </small>
             </div>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
-        let updateInterval;
-        let isUpdating = false;
+        // Configuração do Chart.js para tema dark
+        Chart.defaults.color = '#adb5bd';
+        Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.1)';
 
-        // Inicializar dashboard
-        document.addEventListener('DOMContentLoaded', function() {
-            setupEventListeners();
-            startAutoUpdate();
-            updateDashboard();
+        // Inicializar gráfico de saldo
+        const balanceChartCtx = document.getElementById('balanceChart').getContext('2d');
+        
+        // Dados do histórico de saldo
+        const balanceHistory = {{ trading_stats.balance_history | tojson }};
+        const chartLabels = balanceHistory.map((item, index) => `${index + 1}`);
+        const chartData = balanceHistory.map(item => parseFloat(item.balance || 0));
+
+        // Se não houver dados, criar dados simulados
+        if (chartData.length === 0) {
+            chartLabels.push('1');
+            chartData.push({{ balance_info.available_balance or 1000 }});
+        }
+
+        const balanceChart = new Chart(balanceChartCtx, {
+            type: 'line',
+            data: {
+                labels: chartLabels,
+                datasets: [{
+                    label: 'Saldo USDT',
+                    data: chartData,
+                    borderColor: '#17a2b8',
+                    backgroundColor: 'rgba(23, 162, 184, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4,
+                    pointBackgroundColor: '#17a2b8',
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(33, 37, 41, 0.9)',
+                        titleColor: '#ffffff',
+                        bodyColor: '#ffffff',
+                        borderColor: '#17a2b8',
+                        borderWidth: 1,
+                        displayColors: false,
+                        callbacks: {
+                            title: function(context) {
+                                return 'Ponto ' + context[0].label;
+                            },
+                            label: function(context) {
+                                return 'Saldo: $' + context.parsed.y.toFixed(2);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)'
+                        },
+                        title: {
+                            display: true,
+                            text: 'Histórico de Pontos'
+                        }
+                    },
+                    y: {
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)'
+                        },
+                        title: {
+                            display: true,
+                            text: 'Saldo (USDT)'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value.toFixed(2);
+                            }
+                        }
+                    }
+                }
+            }
         });
 
-        function setupEventListeners() {
-            document.getElementById('startBot').addEventListener('click', () => controlBot('start'));
-            document.getElementById('stopBot').addEventListener('click', () => controlBot('stop'));
-            document.getElementById('emergencyStop').addEventListener('click', () => controlBot('emergency'));
-            document.getElementById('forceAnalysis').addEventListener('click', forceAnalysis);
-            document.getElementById('refreshTrades').addEventListener('click', updateTradesHistory);
-        }
+        // Auto-refresh da página a cada 30 segundos
+        let refreshInterval = setInterval(function() {
+            // Fazer requisição AJAX para atualizar dados sem recarregar completamente
+            fetch('/api/bot/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.error) {
+                        // Atualizar indicador de status
+                        const statusIndicator = document.querySelector('.status-indicator');
+                        if (statusIndicator) {
+                            statusIndicator.className = `status-indicator ${data.running ? 'status-running' : 'status-stopped'}`;
+                        }
+                    }
+                })
+                .catch(error => console.log('Erro ao atualizar status:', error));
+        }, 30000);
 
-        function startAutoUpdate() {
-            updateInterval = setInterval(updateDashboard, 2000); // Atualiza a cada 2 segundos
-        }
-
-        async function updateDashboard() {
-            if (isUpdating) return;
-            isUpdating = true;
-
-            try {
-                // Atualizar status do bot
-                await updateBotStatus();
-                
-                // Atualizar dados de mercado
-                await updateMarketData();
-                
-                // Atualizar saldo
-                await updateBalance();
-                
-                // Atualizar posições
-                await updatePositions();
-                
-                // Atualizar trades
-                await updateTradesHistory();
-                
-                // Atualizar análise
-                await updateLastAnalysis();
-                
-            } catch (error) {
-                console.error('Erro ao atualizar dashboard:', error);
-            } finally {
-                isUpdating = false;
-            }
-        }
-
-        async function updateBotStatus() {
-            try {
-                const response = await fetch('/api/status');
-                const data = await response.json();
-                
-                const statusElement = document.getElementById('botStatus');
-                if (data.running) {
-                    statusElement.textContent = 'ATIVO';
-                    statusElement.className = 'badge bg-success';
-                } else {
-                    statusElement.textContent = 'PARADO';
-                    statusElement.className = 'badge bg-danger';
-                }
-            } catch (error) {
-                console.error('Erro ao atualizar status:', error);
-            }
-        }
-
-        async function updateMarketData() {
-            try {
-                const response = await fetch('/api/market_data');
-                const data = await response.json();
-                
-                if (data.market_data && data.market_data.success) {
-                    document.getElementById('currentPrice').textContent = '$' + parseFloat(data.market_data.price || 0).toFixed(2);
-                }
-            } catch (error) {
-                console.error('Erro ao atualizar dados de mercado:', error);
-            }
-        }
-
-        async function updateBalance() {
-            try {
-                const response = await fetch('/api/balance');
-                const data = await response.json();
-                
-                if (data.success) {
-                    document.getElementById('totalBalance').textContent = '$' + parseFloat(data.total_wallet_balance || 0).toFixed(2);
-                    document.getElementById('availableBalance').textContent = '$' + parseFloat(data.available_balance || 0).toFixed(2);
-                    document.getElementById('marginUsed').textContent = '$' + parseFloat(data.margin_balance || 0).toFixed(2);
-                }
-            } catch (error) {
-                console.error('Erro ao atualizar saldo:', error);
-            }
-        }
-
-        async function updatePositions() {
-            try {
-                const response = await fetch('/api/positions');
-                const data = await response.json();
-                
-                const container = document.getElementById('openPositions');
-                
-                if (data.positions && data.positions.length > 0) {
-                    container.innerHTML = data.positions.map(pos => `
-                        <div class="trade-row ${pos.side === 'buy' ? 'trade-buy' : 'trade-sell'}">
-                            <div class="d-flex justify-content-between">
-                                <div>
-                                    <strong>${pos.symbol}</strong> ${pos.side.toUpperCase()}
-                                    <br><small>Tamanho: ${pos.size} | Leverage: ${pos.leverage}x</small>
-                                </div>
-                                <div class="text-end">
-                                    <div class="${pos.unrealized_pnl >= 0 ? 'balance-positive' : 'balance-negative'}">
-                                        $${pos.unrealized_pnl.toFixed(2)}
-                                    </div>
-                                    <small>Entrada: $${pos.entry_price}</small>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('');
-                } else {
-                    container.innerHTML = `
-                        <div class="text-center text-muted py-3">
-                            <i class="fas fa-inbox fa-2x mb-2"></i>
-                            <p>Nenhuma posição aberta</p>
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                console.error('Erro ao atualizar posições:', error);
-            }
-        }
-
-        async function updateTradesHistory() {
-            try {
-                const response = await fetch('/api/trade_history');
-                const data = await response.json();
-                
-                const container = document.getElementById('tradesHistory');
-                
-                if (data.trades && data.trades.length > 0) {
-                    // Atualizar métricas
-                    const totalTrades = data.trades.length;
-                    const profitableTrades = data.trades.filter(t => (t.realized_pnl || 0) > 0).length;
-                    const totalPnl = data.trades.reduce((sum, t) => sum + (t.realized_pnl || 0), 0);
-                    const winRate = totalTrades > 0 ? (profitableTrades / totalTrades * 100) : 0;
-                    
-                    document.getElementById('totalTrades').textContent = totalTrades;
-                    document.getElementById('winRate').textContent = winRate.toFixed(1) + '%';
-                    
-                    const pnlElement = document.getElementById('totalPnl');
-                    pnlElement.textContent = '$' + totalPnl.toFixed(2);
-                    pnlElement.className = 'metric-value ' + (totalPnl >= 0 ? 'balance-positive' : 'balance-negative');
-                    
-                    // Mostrar trades
-                    container.innerHTML = data.trades.map(trade => `
-                        <div class="trade-row ${trade.side === 'buy' ? 'trade-buy' : 'trade-sell'}">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div>
-                                    <strong>${trade.symbol || 'ETHUSDT'}</strong> 
-                                    <span class="badge ${trade.side === 'buy' ? 'bg-success' : 'bg-danger'}">${(trade.side || '').toUpperCase()}</span>
-                                    <br>
-                                    <small class="text-muted">
-                                        ${new Date(trade.timestamp || Date.now()).toLocaleString('pt-BR')}
-                                        ${trade.leverage ? `| ${trade.leverage}x` : ''}
-                                        ${trade.confidence ? `| Confiança: ${(trade.confidence * 100).toFixed(0)}%` : ''}
-                                    </small>
-                                </div>
-                                <div class="text-end">
-                                    <div class="${(trade.realized_pnl || 0) >= 0 ? 'balance-positive' : 'balance-negative'}">
-                                        ${trade.realized_pnl ? '$' + trade.realized_pnl.toFixed(2) : 'Aguardando'}
-                                    </div>
-                                    <small class="text-muted">
-                                        Qtd: ${trade.amount || trade.size || 0}
-                                        ${trade.entry_price ? `| $${trade.entry_price}` : ''}
-                                    </small>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('');
-                } else {
-                    container.innerHTML = `
-                        <div class="text-center text-muted py-4">
-                            <i class="fas fa-history fa-2x mb-2"></i>
-                            <p>Nenhuma transação realizada</p>
-                            <small>O bot precisa estar ativo para executar trades</small>
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                console.error('Erro ao atualizar histórico:', error);
-            }
-        }
-
-        async function updateLastAnalysis() {
-            try {
-                const response = await fetch('/api/last_analysis');
-                const data = await response.json();
-                
-                const container = document.getElementById('lastAnalysis');
-                
-                if (data.analysis) {
-                    const analysis = data.analysis;
-                    const confidence = (analysis.confidence || 0) * 100;
-                    
-                    container.innerHTML = `
-                        <div class="mb-2">
-                            <strong>Sinal:</strong> 
-                            <span class="badge ${analysis.signal === 'buy' ? 'bg-success' : analysis.signal === 'sell' ? 'bg-danger' : 'bg-secondary'}">
-                                ${(analysis.signal || '').toUpperCase()}
-                            </span>
-                        </div>
-                        <div class="mb-2">
-                            <strong>Confiança:</strong> ${confidence.toFixed(1)}%
-                        </div>
-                        <div class="mb-2">
-                            <strong>Análise:</strong>
-                            <small class="d-block">${analysis.reasoning || 'Sem detalhes disponíveis'}</small>
-                        </div>
-                        <small class="text-muted">
-                            Atualizado: ${new Date(data.timestamp || Date.now()).toLocaleTimeString('pt-BR')}
-                        </small>
-                    `;
-                } else {
-                    container.innerHTML = `
-                        <div class="text-center text-muted py-3">
-                            <i class="fas fa-brain fa-2x mb-2"></i>
-                            <p>Aguardando análise...</p>
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                console.error('Erro ao atualizar análise:', error);
-            }
-        }
-
-        async function controlBot(action) {
-            try {
-                let endpoint = '';
-                let confirmMessage = '';
-                
-                switch(action) {
-                    case 'start':
-                        endpoint = '/api/start_bot';
-                        break;
-                    case 'stop':
-                        endpoint = '/api/stop_bot';
-                        break;
-                    case 'emergency':
-                        endpoint = '/api/emergency_stop';
-                        confirmMessage = 'Tem certeza que quer parar o bot e fechar todas as posições?';
-                        break;
-                }
-                
-                if (confirmMessage && !confirm(confirmMessage)) {
-                    return;
-                }
-                
-                const response = await fetch(endpoint, { method: 'POST' });
-                const result = await response.json();
-                
-                // Mostrar resultado
-                alert(result.message || `Comando ${action} enviado`);
-                
-                // Atualizar status imediatamente
-                setTimeout(updateBotStatus, 1000);
-                
-            } catch (error) {
-                console.error(`Erro ao ${action} bot:`, error);
-                alert(`Erro ao ${action} bot`);
-            }
-        }
-
-        async function forceAnalysis() {
-            try {
-                const response = await fetch('/api/analyze_market', { method: 'POST' });
-                const result = await response.json();
-                
-                if (result.analysis) {
-                    alert(`Análise: ${result.analysis.signal} (${(result.analysis.confidence * 100).toFixed(1)}%)`);
-                    updateLastAnalysis();
-                } else {
-                    alert('Análise solicitada');
-                }
-            } catch (error) {
-                console.error('Erro ao forçar análise:', error);
-                alert('Erro ao solicitar análise');
-            }
-        }
-
-        // Parar auto-update quando a página for fechada
+        // Limpar interval ao sair da página
         window.addEventListener('beforeunload', function() {
-            if (updateInterval) {
-                clearInterval(updateInterval);
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+        });
+
+        // Adicionar responsividade ao gráfico
+        window.addEventListener('resize', function() {
+            if (balanceChart) {
+                balanceChart.resize();
             }
         });
     </script>
