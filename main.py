@@ -1,28 +1,28 @@
-#!/usr/bin/env python3
-"""
-Entry point for Railway deployment - Active Trading Bot
-"""
 import os
 import logging
-from app_active import app
+from app import app
 
-# Configure logging for Railway
+# Configure logging otimizado para Railway
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    handlers=[logging.StreamHandler()]
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
 logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    logger.info(f"Starting Active Trading Bot server on port {port}")
-    logger.info(f"Environment: {os.environ.get('RAILWAY_ENVIRONMENT', 'development')}")
+    logger.info(f"🚀 Iniciando Trading Bot Server na porta {port} - Railway Deploy")
     
+    # Railway production settings otimizadas
     try:
-        app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+        app.run(
+            host="0.0.0.0",
+            port=port,
+            debug=False,
+            threaded=True,
+            use_reloader=False  # Importante para Railway
+        )
     except Exception as e:
-        logger.error(f"Failed to start server: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"❌ Erro ao iniciar servidor: {e}")
+        raise
