@@ -1,4 +1,5 @@
 Flask>=3.1.1
+Flask-SocketIO>=5.3.6Flask>=3.1.1
 Flask-SocketIO>=5.3.6
 requests>=2.32.4
 pandas>=2.3.1
