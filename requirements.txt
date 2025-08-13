@@ -1,5 +1,4 @@
 Flask>=3.1.1
-Flask-SocketIO>=5.3.6Flask>=3.1.1
 Flask-SocketIO>=5.3.6
 requests>=2.32.4
 pandas>=2.3.1
@@ -9,7 +8,7 @@ python-dotenv>=1.1.1
 gunicorn>=23.0.0
 google-generativeai>=0.8.5
 werkzeug>=3.1.3
-flask-sqlalchemy>=5.3.6
+flask-sqlalchemy>=3.1.1
 psycopg2-binary>=2.9.10
 email-validator>=2.2.0
 eventlet>=0.36.1
