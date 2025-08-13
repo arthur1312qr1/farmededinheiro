@@ -1,12 +1,10 @@
 import os
 from dotenv import load_dotenv
 
-# Carrega .env apenas se existir (para desenvolvimento local)
 load_dotenv()
 
 class Config:
-    # Configurações básicas
-    SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-key-apenas'
+    SECRET_KEY = os.environ.get('SECRET_KEY') or 'chave-secreta-producao'
     
     # Database
     DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -39,11 +37,6 @@ class Config:
     MAX_RETRIES = int(os.environ.get('MAX_RETRIES', '3'))
     RETRY_DELAY = float(os.environ.get('RETRY_DELAY', '5.0'))
     
-    # Server - PORTA FIXA 5000
+    # Server
     PORT = int(os.environ.get('PORT', 5000))
     HOST = '0.0.0.0'
-    
-    @staticmethod
-    def get_port():
-        """Retorna sempre porta 5000"""
-        return int(os.environ.get('PORT', 5000))
