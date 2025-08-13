@@ -1,44 +1,45 @@
-import os
-import logging
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
-from flask_socketio import SocketIO
-from sqlalchemy.orm import DeclarativeBase
-from werkzeug.middleware.proxy_fix import ProxyFix
+import eventlet
+eventlet.monkey_patch()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+import os
+from flask import Flask, render_template
+from flask_socketio import SocketIO
+from config import Config
+
+app = Flask(__name__)
+app.config.from_object(Config)
+
+# Configurar SocketIO para Render
+socketio = SocketIO(
+    app, 
+    async_mode='eventlet',
+    cors_allowed_origins="*",
+    logger=False,
+    engineio_logger=False
 )
 
-class Base(DeclarativeBase):
-    pass
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-db = SQLAlchemy(model_class=Base)
-socketio = SocketIO(cors_allowed_origins="*", async_mode='threading')
+@app.route('/health')
+def health():
+    return {'status': 'healthy', 'service': 'farmededinheiro-bot'}, 200
 
-# Create the app
-app = Flask(__name__)
-app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-key-change-in-production")
-app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+@socketio.on('connect')
+def handle_connect():
+    print('Cliente conectado')
 
-# Configure the database
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///trading_bot.db")
-app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-    "pool_recycle": 300,
-    "pool_pre_ping": True,
-}
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Cliente desconectado')
 
-# Initialize extensions
-db.init_app(app)
-socketio.init_app(app)
+# Importar suas rotas aqui
+try:
+    from routes import *
+except ImportError:
+    print("Routes não encontrado, usando rotas básicas")
 
-with app.app_context():
-    # Import models to ensure tables are created
-    import models
-    db.create_all()
-
-# Import routes after app initialization
-from routes import *
-from websocket_handler import *
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)
