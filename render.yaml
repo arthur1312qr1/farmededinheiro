@@ -3,39 +3,6 @@ services:
     name: farmededinheiro-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 300 --keep-alive 2 --max-requests 1000 --preload main:app
+    startCommand: gunicorn --bind 0.0.0.0:5000 --workers 1 --timeout 300 --keep-alive 2 --max-requests 1000 --preload main:app
     healthCheckPath: /health
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
-      - key: RAILWAY_ENVIRONMENT
-        value: production
-      - key: PAPER_TRADING
-        value: "false"
-      - key: SYMBOL
-        value: "ethusdt_UMCBL"
-      - key: MIN_LEVERAGE
-        value: "9"
-      - key: MAX_LEVERAGE
-        value: "60"
-      - key: MIN_MARGIN_USAGE_PERCENT
-        value: "80.0"
-      - key: POLL_INTERVAL
-        value: "1.0"
-      - key: DRAWDOWN_CLOSE_PCT
-        value: "0.03"
-      - key: LIQ_DIST_THRESHOLD
-        value: "0.03"
-      - key: MAX_CONSECUTIVE_LOSSES
-        value: "5"
-      - key: MIN_BALANCE_USDT
-        value: "50.0"
-      - key: MAX_RETRIES
-        value: "3"
-      - key: RETRY_DELAY
-        value: "5.0"
-
-databases:
-  - name: farmededinheiro-db
-    databaseName: farmededinheiro
-    user: farmededinheiro_user
+    env: web
