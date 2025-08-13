@@ -1,15 +1,30 @@
-Flask>=3.1.1
-Flask-SocketIO>=5.3.6
-requests>=2.32.4
-pandas>=2.3.1
-numpy>=2.3.2
-beautifulsoup4>=4.13.4
-python-dotenv>=1.1.1
-gunicorn>=23.0.0
-google-generativeai>=0.8.5
-werkzeug>=3.1.3
-flask-sqlalchemy>=3.1.1
-psycopg2-binary>=2.9.10
-email-validator>=2.2.0
-eventlet>=0.36.1
-python-socketio>=5.11.0
+import eventlet
+eventlet.monkey_patch()
+
+import os
+from flask import Flask
+from flask_socketio import SocketIO
+
+# Criar app Flask simples
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key')
+
+# Configurar SocketIO
+socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*")
+
+@app.route('/')
+def home():
+    return "Bot rodando no Render! ✅"
+
+@app.route('/health')
+def health():
+    return {'status': 'ok', 'message': 'Bot funcionando'}, 200
+
+@socketio.on('connect')
+def handle_connect():
+    print('Cliente conectado via WebSocket')
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    print(f"Iniciando bot na porta {port}")
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)
