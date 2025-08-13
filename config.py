@@ -1,52 +1,45 @@
 import os
+from dotenv import load_dotenv
+
+# Carrega variáveis do .env se existir
+load_dotenv()
 
 class Config:
-    # Bitget API Configuration
-    BITGET_API_KEY = os.getenv('BITGET_API_KEY', '')
-    BITGET_API_SECRET = os.getenv('BITGET_API_SECRET', '')
-    BITGET_PASSPHRASE = os.getenv('BITGET_PASSPHRASE', '')
-    BITGET_BASE_URL = "https://api.bitget.com"
+    # Configurações básicas
+    SECRET_KEY = os.environ.get('SECRET_KEY') or 'sua-chave-secreta-aqui'
     
-    # Trading Configuration
-    SYMBOL = "ETHUSDT"
-    LEVERAGE = 10.0
-    MAX_POSITION_PERCENT = 80.0  # 80% of balance for maximum aggression
-    STOP_LOSS_PERCENT = 5.0  # 5% stop loss
-    TAKE_PROFIT_PERCENT = 5.0  # 5% take profit as requested
-    MIN_BALANCE = 0.0  # No minimum balance required
+    # Configurações de banco de dados para Render
+    DATABASE_URL = os.environ.get('DATABASE_URL')
+    if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
+        DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://')
     
-    # Risk Management - Aggressive settings for high frequency
-    MAX_CONSECUTIVE_LOSSES = 999999  # No limit on consecutive losses
-    MAX_DAILY_TRADES = 999999  # No limit on daily trades
-    ANALYSIS_INTERVAL = 15  # Analyze every 15 seconds for higher frequency
+    SQLALCHEMY_DATABASE_URI = DATABASE_URL or 'sqlite:///app.db'
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
     
-    # Technical Analysis Settings
-    RSI_PERIODS = [14, 21]
-    MACD_FAST = 12
-    MACD_SLOW = 26
-    MACD_SIGNAL = 9
-    BB_PERIOD = 20
-    BB_STD = 2
-    EMA_PERIODS = [9, 21, 50]
+    # Configurações do bot
+    PAPER_TRADING = os.environ.get('PAPER_TRADING', 'true').lower() == 'true'
     
-    # Timeframes for multi-timeframe analysis
-    TIMEFRAMES = ['1m', '5m', '15m', '1h']
+    # Configurações da Bitget
+    BITGET_API_KEY = os.environ.get('BITGET_API_KEY', '')
+    BITGET_API_SECRET = os.environ.get('BITGET_API_SECRET', '')
+    BITGET_PASSPHRASE = os.environ.get('BITGET_PASSPHRASE', '')
     
-    # Signal Confidence Thresholds - More aggressive for frequent trading
-    MIN_SIGNAL_CONFIDENCE = 0.55  # Lower threshold for more frequent trades
-    HIGH_CONFIDENCE_THRESHOLD = 0.75
+    # Configurações do Gemini
+    GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
     
-    # WebSocket Settings
-    PRICE_UPDATE_INTERVAL = 1  # Update price every second
+    # Configurações de trading
+    SYMBOL = os.environ.get('SYMBOL', 'ethusdt_UMCBL')
+    MIN_LEVERAGE = int(os.environ.get('MIN_LEVERAGE', '9'))
+    MAX_LEVERAGE = int(os.environ.get('MAX_LEVERAGE', '60'))
+    MIN_MARGIN_USAGE_PERCENT = float(os.environ.get('MIN_MARGIN_USAGE_PERCENT', '80.0'))
+    POLL_INTERVAL = float(os.environ.get('POLL_INTERVAL', '1.0'))
+    DRAWDOWN_CLOSE_PCT = float(os.environ.get('DRAWDOWN_CLOSE_PCT', '0.03'))
+    LIQ_DIST_THRESHOLD = float(os.environ.get('LIQ_DIST_THRESHOLD', '0.03'))
+    MAX_CONSECUTIVE_LOSSES = int(os.environ.get('MAX_CONSECUTIVE_LOSSES', '5'))
+    MIN_BALANCE_USDT = float(os.environ.get('MIN_BALANCE_USDT', '50.0'))
+    MAX_RETRIES = int(os.environ.get('MAX_RETRIES', '3'))
+    RETRY_DELAY = float(os.environ.get('RETRY_DELAY', '5.0'))
     
-    # Paper Trading (set to False for real trading)
-    PAPER_TRADING = os.getenv('PAPER_TRADING', 'True').lower() == 'true'
-    
-    @classmethod
-    def validate_api_keys(cls):
-        """Validate that API keys are present for real trading"""
-        if not cls.PAPER_TRADING:
-            required_keys = [cls.BITGET_API_KEY, cls.BITGET_API_SECRET, cls.BITGET_PASSPHRASE]
-            if not all(required_keys):
-                raise ValueError("API keys are required for real trading mode")
-        return True
+    # Configuração para Render
+    PORT = int(os.environ.get('PORT', 5000))
+    HOST = '0.0.0.0'
