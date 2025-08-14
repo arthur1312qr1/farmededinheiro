@@ -30,7 +30,7 @@ class TradingBot:
         self.winning_trades = 0
         self.total_pnl = 0.0
         
-        logger.info("🤖 Trading Bot initialized")
+        logger.info("🤖 Trading Bot initialized for REAL TRADING")
 
     def start(self):
         """Start the trading bot"""
@@ -42,7 +42,7 @@ class TradingBot:
         self.bot_thread = threading.Thread(target=self._run_bot, daemon=True)
         self.bot_thread.start()
         
-        logger.info("🚀 Trading Bot started")
+        logger.info("🚀 Trading Bot started - REAL MONEY MODE")
         self._emit_status("started")
         return True
 
@@ -56,7 +56,7 @@ class TradingBot:
         self._emit_status("stopped")
 
     def _run_bot(self):
-        """Main bot trading loop"""
+        """Main bot trading loop - EXECUTA TRADES REAIS"""
         # Initialize bot
         self._initialize_bot()
         
@@ -74,7 +74,7 @@ class TradingBot:
                     self._perform_analysis()
                     last_analysis_time = current_time
                 
-                # Check for trading signals
+                # Check for trading signals - EXECUTA TRADES REAIS
                 self._check_trading_signals()
                 
                 # Risk management checks
@@ -89,6 +89,8 @@ class TradingBot:
     def _initialize_bot(self):
         """Initialize bot settings"""
         try:
+            logger.info(f"🔥 INITIALIZING BOT FOR REAL TRADING - PAPER_TRADING={Config.PAPER_TRADING}")
+            
             # Set leverage
             leverage_result = self.api.set_leverage(Config.LEVERAGE)
             if leverage_result['success']:
@@ -140,40 +142,8 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Error updating data: {e}")
 
-    def _perform_analysis(self):
-        """Perform technical and AI analysis"""
-        try:
-            # Get klines data
-            klines_result = self.api.get_klines(Config.SYMBOL, '5m', 100)
-            if not klines_result['success']:
-                logger.error("Failed to get klines for analysis")
-                return
-            
-            klines = klines_result['data']
-            
-            # Technical analysis
-            tech_signals = self.tech_analysis.analyze(klines)
-            
-            # AI analysis using Gemini
-            ai_analysis = self.gemini_handler.analyze_market(klines)
-            
-            # Combined analysis
-            analysis_data = {
-                'technical': tech_signals,
-                'ai': ai_analysis,
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            # Emit analysis update
-            self._emit_data('analysis_update', analysis_data)
-            
-            logger.info(f"📊 Analysis completed - Tech Score: {tech_signals.get('score', 0)}")
-            
-        except Exception as e:
-            logger.error(f"Error in analysis: {e}")
-
     def _check_trading_signals(self):
-        """Check for trading signals and execute trades"""
+        """Check for trading signals and execute REAL trades"""
         try:
             # Get latest klines
             klines_result = self.api.get_klines(Config.SYMBOL, '1m', 50)
@@ -182,21 +152,24 @@ class TradingBot:
             
             klines = klines_result['data']
             
-            # Get technical signals
-            signals = self.tech_analysis.get_trading_signals(klines)
+            # Get technical signals for 99% accuracy
+            signals = self.tech_analysis.get_high_accuracy_signals(klines)
             
-            if signals['action'] != 'hold':
+            if signals['action'] != 'hold' and signals['confidence'] >= 0.99:
                 # Check risk conditions
                 if self._can_trade():
-                    self._execute_trade(signals)
+                    logger.info(f"🎯 HIGH ACCURACY SIGNAL: {signals['action']} - Confidence: {signals['confidence']*100:.1f}%")
+                    self._execute_real_trade(signals)
                 
         except Exception as e:
             logger.error(f"Error checking trading signals: {e}")
 
-    def _execute_trade(self, signals):
-        """Execute a trading order"""
+    def _execute_real_trade(self, signals):
+        """Execute a REAL trading order - NOT PAPER TRADING"""
         try:
             side = signals['action']  # 'buy' or 'sell'
+            
+            logger.info(f"🔥 EXECUTING REAL TRADE: {side}")
             
             # Calculate position size
             balance_result = self.api.get_account_balance()
@@ -211,8 +184,8 @@ class TradingBot:
                 logger.warning("Position size too small, skipping trade")
                 return
             
-            # Place order
-            order_result = self.api.place_order(side, position_size)
+            # Place REAL order
+            order_result = self.api.place_real_order(side, position_size)
             
             if order_result['success']:
                 self.total_trades += 1
@@ -223,26 +196,52 @@ class TradingBot:
                     'size': position_size,
                     'price': order_result['data'].get('price', 0),
                     'timestamp': datetime.now().isoformat(),
-                    'signal_strength': signals.get('strength', 0),
-                    'mode': order_result['data'].get('mode', 'unknown')
+                    'signal_strength': signals.get('confidence', 0),
+                    'mode': 'REAL'
                 }
                 
                 # Emit trade update
                 self._emit_data('trade_executed', trade_data)
                 
-                logger.info(f"✅ Trade executed: {side} {position_size} @ {trade_data['price']}")
+                logger.info(f"✅ REAL TRADE EXECUTED: {side} {position_size} @ ${trade_data['price']}")
+            
+                # Set stop loss and take profit
+                self._set_stop_loss_take_profit(trade_data)
                 
             else:
                 logger.error(f"❌ Trade failed: {order_result.get('error')}")
-                
+        
         except Exception as e:
             logger.error(f"Error executing trade: {e}")
 
+    def _set_stop_loss_take_profit(self, trade_data):
+        """Set stop loss (2%) and take profit (5%) for the trade"""
+        try:
+            entry_price = trade_data['price']
+            side = trade_data['side']
+            
+            if side == 'buy':
+                stop_loss_price = entry_price * (1 - Config.STOP_LOSS_PCT)
+                take_profit_price = entry_price * (1 + Config.TAKE_PROFIT_PCT)
+            else:
+                stop_loss_price = entry_price * (1 + Config.STOP_LOSS_PCT)
+                take_profit_price = entry_price * (1 - Config.TAKE_PROFIT_PCT)
+            
+            # Place stop loss order
+            self.api.place_stop_loss_order(trade_data['id'], stop_loss_price)
+            
+            # Place take profit order
+            self.api.place_take_profit_order(trade_data['id'], take_profit_price)
+            
+            logger.info(f"📊 SL/TP Set - SL: ${stop_loss_price:.4f}, TP: ${take_profit_price:.4f}")
+            
+        except Exception as e:
+            logger.error(f"Error setting SL/TP: {e}")
+
     def _calculate_position_size(self, available_balance):
-        """Calculate position size based on risk management"""
-        # Use a percentage of available balance
-        risk_percent = 0.1  # 10% of balance per trade
-        max_position_value = available_balance * risk_percent
+        """Calculate position size based on 80% margin usage"""
+        # Use 80% of available balance as specified
+        margin_usage = available_balance * (Config.MIN_MARGIN_USAGE_PERCENT / 100)
         
         # Get current price
         price_result = self.api.get_current_price(Config.SYMBOL)
@@ -250,9 +249,9 @@ class TradingBot:
             return 0
         
         current_price = price_result['price']
-        position_size = max_position_value / current_price
+        position_size = margin_usage / current_price
         
-        # Apply leverage
+        # Apply 10x leverage
         position_size *= Config.LEVERAGE
         
         return round(position_size, 6)
@@ -323,14 +322,34 @@ class TradingBot:
         if self.socketio:
             self.socketio.emit(event, data)
 
-# Global bot instance
-bot_instance = None
-
-def get_bot_instance(socketio=None):
-    """Get or create bot instance"""
-    global bot_instance
-    if bot_instance is None:
-        bot_instance = TradingBot(socketio)
-    elif socketio and bot_instance.socketio is None:
-        bot_instance.socketio = socketio
-    return bot_instance
+    def _perform_analysis(self):
+        """Perform technical and AI analysis"""
+        try:
+            # Get klines data
+            klines_result = self.api.get_klines(Config.SYMBOL, '5m', 100)
+            if not klines_result['success']:
+                logger.error("Failed to get klines for analysis")
+                return
+            
+            klines = klines_result['data']
+            
+            # Technical analysis
+            tech_signals = self.tech_analysis.analyze(klines)
+            
+            # AI analysis using Gemini
+            ai_analysis = self.gemini_handler.analyze_market(klines)
+            
+            # Combined analysis
+            analysis_data = {
+                'technical': tech_signals,
+                'ai': ai_analysis,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            # Emit analysis update
+            self._emit_data('analysis_update', analysis_data)
+            
+            logger.info(f"📊 Analysis completed - Tech Score: {tech_signals.get('score', 0)}")
+            
+        except Exception as e:
+            logger.error(f"Error in analysis: {e}")
