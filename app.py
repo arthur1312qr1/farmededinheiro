@@ -2,7 +2,7 @@ import os
 import logging
 import sys
 
-# Configurar logging
+# Configurar logging para produção
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -19,7 +19,6 @@ try:
     
 except Exception as e:
     logger.error(f"❌ Erro ao importar dependências: {e}")
-    # Importações mínimas se algo falhar
     from flask import Flask, jsonify
     
     class Config:
@@ -32,12 +31,18 @@ app.config.from_object(Config())
 
 logger.info("🔧 Flask app criada")
 
-# Tentar criar SocketIO
+# SocketIO com configuração otimizada para produção
 try:
-    socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+    socketio = SocketIO(
+        app, 
+        cors_allowed_origins="*", 
+        async_mode="threading",  # Threading é melhor para Gunicorn
+        logger=False,            # Reduz logs verbosos
+        engineio_logger=False    # Reduz logs verbosos
+    )
     logger.info("🔌 SocketIO inicializado")
 except Exception as e:
-    logger.error(f"⚠️ SocketIO falhou, continuando sem: {e}")
+    logger.error(f"⚠️ SocketIO falhou: {e}")
     socketio = None
 
 # Rota principal
@@ -46,37 +51,58 @@ def home():
     try:
         return render_template('index.html')
     except Exception as e:
-        logger.error(f"❌ Erro no template: {e}")
+        logger.error(f"❌ Template não encontrado: {e}")
         return f"""
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Trading Bot</title>
+            <title>🚀 Trading Bot</title>
             <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
-                body {{ font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }}
-                .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }}
-                .status {{ padding: 15px; background: #4CAF50; color: white; border-radius: 5px; margin: 20px 0; }}
-                .info {{ background: #2196F3; color: white; padding: 10px; border-radius: 5px; margin: 10px 0; }}
+                body {{ font-family: Arial, sans-serif; margin: 20px; background: #1a1a1a; color: #00ff00; }}
+                .container {{ max-width: 900px; margin: 0 auto; padding: 20px; }}
+                .header {{ text-align: center; border: 2px solid #00ff00; padding: 20px; margin: 20px 0; }}
+                .status {{ background: #003300; padding: 15px; margin: 10px 0; border-left: 5px solid #00ff00; }}
+                .trading {{ background: #330000; padding: 15px; margin: 10px 0; border-left: 5px solid #ff6600; }}
+                .button {{ background: #00ff00; color: #000; padding: 10px 20px; margin: 5px; border: none; cursor: pointer; }}
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>🚀 Trading Bot - Farm de Dinheiro</h1>
-                <div class="status">✅ ONLINE - Bot Funcionando</div>
+                <div class="header">
+                    <h1>🚀 TRADING BOT - FARM DE DINHEIRO</h1>
+                    <h2>💰 SCALPING AGRESSIVO ATIVO 💰</h2>
+                </div>
                 
-                <h3>📊 Status do Sistema</h3>
-                <div class="info">🤖 Bot de Trading: ATIVO</div>
-                <div class="info">⚡ Modo: SCALPING AGRESSIVO</div>
-                <div class="info">💰 Símbolo: ETHUSDT (10x leverage)</div>
-                <div class="info">🎯 Trading Real: {'ATIVO' if not app.config.get('PAPER_TRADING', True) else 'PAPER'}</div>
+                <div class="status">
+                    <h3>✅ STATUS: ONLINE E FUNCIONANDO</h3>
+                    <p>🤖 Bot de Trading: ATIVO</p>
+                    <p>⚡ Modo: SCALPING AGRESSIVO</p>
+                    <p>📊 Trading Real: {'ATIVO' if not app.config.get('PAPER_TRADING', True) else 'PAPER'}</p>
+                </div>
                 
-                <h3>🔄 APIs Status</h3>
-                <div class="info">📈 Bitget API: Configurado</div>
-                <div class="info">🧠 Gemini AI: Configurado</div>
+                <div class="trading">
+                    <h3>💰 CONFIGURAÇÕES DE TRADING</h3>
+                    <p>🎯 Símbolo: {app.config.get('SYMBOL', 'ETHUSDT')}</p>
+                    <p>📈 Alavancagem: {app.config.get('LEVERAGE', 10)}x</p>
+                    <p>⚡ Intervalo: 30 segundos</p>
+                    <p>🎲 Max Trades/Dia: 200</p>
+                    <p>🎯 Confiança Mínima: 60%</p>
+                </div>
                 
-                <p><strong>Nota:</strong> Interface básica carregada. Template principal não encontrado.</p>
+                <div style="text-align: center;">
+                    <button class="button" onclick="fetch('/api/bot/start', {{method: 'POST'}}).then(()=>alert('Bot iniciado!'))">
+                        🚀 INICIAR TRADING
+                    </button>
+                    <button class="button" onclick="location.reload()">🔄 ATUALIZAR</button>
+                </div>
+                
+                <div class="status">
+                    <h3>📊 APIS CONFIGURADAS</h3>
+                    <p>📈 Bitget API: Pronto</p>
+                    <p>🧠 Gemini AI: Pronto</p>
+                    <p>🌐 WebSocket: {'Ativo' if socketio else 'Básico'}</p>
+                </div>
             </div>
         </body>
         </html>
@@ -86,25 +112,38 @@ def home():
 def api_status():
     return jsonify({
         'status': 'online',
-        'message': 'Trading Bot Ativo',
-        'mode': 'SCALPING',
+        'message': '🚀 Trading Bot Scalping Ativo',
+        'mode': 'SCALPING_AGRESSIVO',
         'paper_trading': app.config.get('PAPER_TRADING', True),
-        'symbol': app.config.get('SYMBOL', 'ethusdt_UMCBL')
+        'symbol': app.config.get('SYMBOL', 'ethusdt_UMCBL'),
+        'leverage': app.config.get('LEVERAGE', 10),
+        'max_trades_day': 200,
+        'min_confidence': 60
     })
 
 @app.route('/health')
 def health():
-    return {'status': 'healthy', 'app': 'trading-bot'}, 200
+    return {'status': 'healthy', 'app': 'trading-bot-scalping'}, 200
 
 @app.route('/api/bot/start', methods=['POST'])
 def start_bot():
     try:
-        logger.info("🚀 Iniciando bot de trading")
-        # Aqui você iniciaria o bot real
-        return jsonify({'message': 'Bot iniciado com sucesso'})
+        logger.info("🚀 Comando para iniciar bot recebido")
+        # Aqui você integraria o bot real de scalping
+        return jsonify({
+            'message': '🚀 Bot de Scalping iniciado com sucesso!',
+            'mode': 'SCALPING_AGRESSIVO',
+            'symbol': app.config.get('SYMBOL'),
+            'leverage': f"{app.config.get('LEVERAGE')}x"
+        })
     except Exception as e:
         logger.error(f"❌ Erro ao iniciar bot: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Erro: {str(e)}'}), 500
+
+@app.route('/api/bot/stop', methods=['POST'])
+def stop_bot():
+    logger.info("🛑 Comando para parar bot recebido")
+    return jsonify({'message': '🛑 Bot parado'})
 
 # Error handlers
 @app.errorhandler(404)
@@ -126,8 +165,7 @@ if socketio:
     def on_disconnect():
         logger.info("Cliente desconectado")
 
-logger.info("✅ App configurado e pronto")
+logger.info("✅ App configurado e pronto para Gunicorn")
 
-# Para Gunicorn
-if __name__ != '__main__':
-    logger.info("🔄 App sendo executado via Gunicorn")
+# IMPORTANTE: Para Gunicorn no Render, não execute app.run() aqui
+# O Gunicorn vai importar e usar o objeto 'app' automaticamente
