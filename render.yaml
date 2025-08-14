@@ -1,8 +1,15 @@
 services:
   - type: web
-    name: farmededinheiro-bot
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT main:app
-    healthCheckPath: /health
-    env: web
+    name: trading-bot-scalping
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 300 main:app"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PAPER_TRADING
+        value: "false"
+      - key: LEVERAGE
+        value: "10"
+      - key: SYMBOL
+        value: "ethusdt_UMCBL"
