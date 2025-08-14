@@ -5,7 +5,7 @@ from websocket_handler import setup_websocket
 import os
 
 def create_app():
-    app = Flask(__name__)
+    app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY", "minha_chave_secreta")
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get("DATABASE_URL", "sqlite:///meubanco.db")
 
