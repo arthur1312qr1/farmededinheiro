@@ -1,45 +1,48 @@
 import os
 import logging
-import eventlet
-eventlet.monkey_patch()
-
 from flask import Flask
 from flask_socketio import SocketIO
-from flask_sqlalchemy import SQLAlchemy
-from config import Config
+import eventlet
+import threading
 
-# Logging básico
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Flask
-app = Flask(__name__, template_folder="templates", static_folder="static")
-app.config.from_object(Config)
+# Initialize Flask app
+app = Flask(__name__)
+app.secret_key = os.environ.get('SESSION_SECRET', 'dev-secret-key')
 
-# Banco de dados (AGORA EXISTE!)
-db = SQLAlchemy(app)
+# Initialize SocketIO with eventlet
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='eventlet',
+    logger=True,
+    engineio_logger=True
+)
 
-# Socket.IO com eventlet
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+# Initialize trading bot
+trading_bot = None
 
-# Cria tabelas se ainda não existirem
-with app.app_context():
-    try:
-        db.create_all()
-        logger.info("✅ Tabelas verificadas/criadas com sucesso.")
-    except Exception as e:
-        logger.error(f"❌ Erro ao inicializar o banco: {e}")
+def create_trading_bot():
+    """Create and configure trading bot"""
+    global trading_bot
+    if trading_bot is None:
+        from trading_bot import TradingBot
+        trading_bot = TradingBot(socketio)
+        logger.info("🤖 Trading Bot created and ready")
+        # Iniciar o bot automaticamente
+        if not trading_bot.is_running:
+            trading_bot.start()
+    return trading_bot
 
-# IMPORTANTE: importe as rotas e websocket DEPOIS de criar app/db/socketio
-# (assim evita importação circular e mantém seu site original)
-import routes      # noqa: F401
-import websocket_handler  # noqa: F401
+# Import routes after app creation to avoid circular imports
+from routes import *
+from websocket_handler import *
 
-if __name__ == "__main__":
-    host = getattr(Config, "HOST", "0.0.0.0")
-    port = int(getattr(Config, "PORT", os.environ.get("PORT", 5000)))
-    logger.info(f"🚀 Subindo servidor em http://{host}:{port}")
-    socketio.run(app, host=host, port=port)
+# Chamar a função para criar e iniciar o bot
+# Isso garante que ele esteja pronto quando o servidor iniciar
+create_trading_bot()
+
+# Entry point moved to main.py for proper deployment
