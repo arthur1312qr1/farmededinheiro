@@ -1,40 +1,24 @@
-import os
-import logging
 from flask import Flask
-from flask_socketio import SocketIO
-import eventlet
+from extensions import db, socketio
+from routes import routes
+from websocket_handler import setup_websocket
+import os
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+def create_app():
+    app = Flask(__name__)
+    app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY", "minha_chave_secreta")
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get("DATABASE_URL", "sqlite:///meubanco.db")
 
-# Initialize Flask app
-app = Flask(__name__)
-app.secret_key = os.environ.get('SESSION_SECRET', 'dev-secret-key')
+    db.init_app(app)
+    socketio.init_app(app)
 
-# Initialize SocketIO with eventlet
-socketio = SocketIO(
-    app,
-    cors_allowed_origins="*",
-    async_mode='eventlet',
-    logger=True,
-    engineio_logger=True
-)
+    app.register_blueprint(routes)
 
-# Initialize trading bot
-trading_bot = None
+    setup_websocket(socketio)
 
-def create_trading_bot():
-    """Create and configure trading bot"""
-    global trading_bot
-    if trading_bot is None:
-        from trading_bot import TradingBot
-        trading_bot = TradingBot(socketio)
-        logger.info("🤖 Trading Bot created and ready")
-    return trading_bot
+    return app
 
-# Import routes after app creation to avoid circular imports
-from routes import *
-from websocket_handler import *
+app = create_app()
 
-# Entry point moved to main.py for proper deployment
+if __name__ == "__main__":
+    socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
