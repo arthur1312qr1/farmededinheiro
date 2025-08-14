@@ -1,10 +1,10 @@
 """
-Arquivo principal otimizado para Render
+Entrada principal otimizada para Gunicorn no Render
 """
 import os
 import logging
 
-# Configurar logging antes de tudo
+# Configurar logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -12,38 +12,37 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Importar app
 try:
-    # Importar app somente se necessário
     from app import app, socketio
-    logger.info("✅ App importado com sucesso")
+    logger.info("✅ App importado para Gunicorn")
     
-    if __name__ == "__main__":
-        # Para execução local
-        port = int(os.environ.get('PORT', 5000))
-        logger.info(f"🚀 Iniciando servidor local na porta {port}")
-        socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    # Para Gunicorn, não usar socketio.run()
+    # O Gunicorn vai usar o objeto 'app' diretamente
     
 except Exception as e:
-    logger.error(f"❌ Erro ao importar app: {e}")
-    
-    # Fallback - App mínimo caso algo dê errado
+    logger.error(f"❌ Erro crítico: {e}")
+    # App de fallback mínimo
     from flask import Flask
     
     app = Flask(__name__)
     
     @app.route('/')
     def home():
-        return """
-        <h1>🤖 Trading Bot</h1>
-        <p>Status: Online (Modo Fallback)</p>
-        <p>O bot está funcionando mas com configuração mínima.</p>
-        <p>Verifique os logs para mais detalhes.</p>
-        """
+        return "<h1>🤖 Trading Bot</h1><p>Modo de emergência ativo</p>"
     
     @app.route('/health')
     def health():
-        return {'status': 'ok'}, 200
+        return {'status': 'emergency'}, 200
+
+# Esta linha é importante para o Gunicorn encontrar o app
+if __name__ == "__main__":
+    # Apenas para desenvolvimento local
+    port = int(os.environ.get('PORT', 5000))
+    logger.info(f"🔧 Executando localmente na porta {port}")
     
-    if __name__ == "__main__":
-        port = int(os.environ.get('PORT', 5000))
+    # Para desenvolvimento local, usar socketio se disponível
+    if 'socketio' in globals():
+        socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    else:
         app.run(host='0.0.0.0', port=port, debug=False)
