@@ -18,7 +18,9 @@ class BitgetAPI:
         self.base_url = Config.BITGET_BASE_URL
         self.paper_trading = Config.PAPER_TRADING
         
-        # Paper trading state
+        logger.info(f"🔥 BitgetAPI initialized - PAPER_TRADING={self.paper_trading}")
+        
+        # Paper trading state (only used if PAPER_TRADING=true)
         self.paper_balance = 1000.0
         self.paper_positions = []
 
@@ -53,7 +55,7 @@ class BitgetAPI:
         return headers
 
     def get_account_balance(self):
-        """Get account balance with enhanced real money detection"""
+        """Get account balance - CONNECTS TO REAL BITGET ACCOUNT"""
         if self.paper_trading:
             logger.info(f"Paper Trading Mode - Balance: ${self.paper_balance}")
             return {
@@ -66,7 +68,9 @@ class BitgetAPI:
             }
 
         try:
-            # Try futures account endpoint first
+            logger.info("🔗 CONNECTING TO REAL BITGET ACCOUNT...")
+            
+            # Futures account endpoint
             request_path = "/api/mix/v1/account/accounts"
             url = f"{self.base_url}{request_path}"
             headers = self._get_headers('GET', request_path)
@@ -91,54 +95,29 @@ class BitgetAPI:
                                 'available': available,
                                 'total': equity,
                                 'margin_coin': 'USDT',
-                                'mode': 'real'
+                                'mode': 'REAL'
                             }
                         }
-
-            # Fallback endpoint
-            request_path_fallback = "/api/mix/v1/account/account"
-            url_fallback = f"{self.base_url}{request_path_fallback}"
-            headers_fallback = self._get_headers('GET', request_path_fallback)
-            
-            response_fallback = requests.get(url_fallback, headers=headers_fallback, timeout=15)
-            data_fallback = response_fallback.json()
-
-            if data_fallback.get('code') == '00000' and data_fallback.get('data'):
-                balance_data = data_fallback.get('data', [])
-                if balance_data:
-                    available = float(balance_data[0].get('available', 0))
-                    equity = float(balance_data[0].get('equity', 0))
-                    
-                    logger.info(f"✅ REAL BALANCE (Fallback) - Available: ${available:.2f}, Equity: ${equity:.2f}")
-                    
-                    return {
-                        'success': True,
-                        'data': {
-                            'available': available,
-                            'total': equity,
-                            'mode': 'real'
-                        }
-                    }
 
             logger.error(f"❌ Failed to get balance - Response: {data}")
             return {'success': False, 'error': 'Failed to connect to Bitget API'}
 
         except Exception as e:
-            logger.error(f"❌ Error getting balance: {e}")
+            logger.error(f"Error getting balance: {e}")
             return {'success': False, 'error': str(e)}
 
-    def get_current_price(self, symbol="ETHUSDT_UMCBL"):
+    def get_current_price(self, symbol):
         """Get current price for symbol"""
         try:
-            # Clean symbol format for API
-            api_symbol = symbol.replace('_UMCBL', 'USDT_UMCBL')
-            url = f"{self.base_url}/api/mix/v1/market/ticker?symbol={api_symbol}"
+            request_path = "/api/mix/v1/market/ticker"
+            url = f"{self.base_url}{request_path}"
+            params = {'symbol': symbol}
             
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, params=params, timeout=10)
             data = response.json()
-
+            
             if data.get('code') == '00000' and data.get('data'):
-                price = float(data['data'][0]['last'])
+                price = float(data['data']['last'])
                 return {'success': True, 'price': price}
             
             return {'success': False, 'error': 'Failed to get price'}
@@ -147,42 +126,22 @@ class BitgetAPI:
             logger.error(f"Error getting price: {e}")
             return {'success': False, 'error': str(e)}
 
-    def get_klines(self, symbol="ETHUSDT_UMCBL", granularity="1m", limit=100):
-        """Get kline data for technical analysis"""
+    def get_klines(self, symbol, granularity, limit):
+        """Get kline data"""
         try:
-            # Granularity mapping
-            granularity_map = {
-                '1m': '1m', '5m': '5m', '15m': '15m', 
-                '1h': '1H', '4h': '4H', '1d': '1D'
-            }
-            bg_granularity = granularity_map.get(granularity, '1m')
-            
-            # Clean symbol format
-            api_symbol = symbol.replace('_UMCBL', 'USDT_UMCBL')
-            url = f"{self.base_url}/api/mix/v1/market/candles"
-            
+            request_path = "/api/mix/v1/market/candles"
+            url = f"{self.base_url}{request_path}"
             params = {
-                'symbol': api_symbol,
-                'granularity': bg_granularity,
+                'symbol': symbol,
+                'granularity': granularity,
                 'limit': limit
             }
-
+            
             response = requests.get(url, params=params, timeout=15)
             data = response.json()
-
+            
             if data.get('code') == '00000' and data.get('data'):
-                klines = []
-                for kline in data['data']:
-                    klines.append({
-                        'timestamp': int(kline[0]),
-                        'open': float(kline[1]),
-                        'high': float(kline[2]),
-                        'low': float(kline[3]),
-                        'close': float(kline[4]),
-                        'volume': float(kline[5])
-                    })
-                
-                return {'success': True, 'data': sorted(klines, key=lambda x: x['timestamp'])}
+                return {'success': True, 'data': data['data']}
             
             return {'success': False, 'error': 'Failed to get klines'}
             
@@ -190,95 +149,158 @@ class BitgetAPI:
             logger.error(f"Error getting klines: {e}")
             return {'success': False, 'error': str(e)}
 
-    def place_order(self, side, size, price=None, order_type='market'):
-        """Place a trading order"""
-        if self.paper_trading:
-            # Paper trading simulation
-            current_price_result = self.get_current_price()
-            if current_price_result['success']:
-                execution_price = current_price_result['price']
-                
-                # Simulate order execution
-                order_id = f"paper_{int(time.time())}"
-                
-                return {
-                    'success': True,
-                    'data': {
-                        'orderId': order_id,
-                        'side': side,
-                        'size': size,
-                        'price': execution_price,
-                        'status': 'filled',
-                        'mode': 'paper'
-                    }
-                }
-            return {'success': False, 'error': 'Failed to get price for paper trade'}
-
-        try:
-            request_path = "/api/mix/v1/order/placeOrder"
-            url = f"{self.base_url}{request_path}"
-            
-            # Clean symbol format
-            api_symbol = Config.SYMBOL.replace('_UMCBL', 'USDT_UMCBL')
-            
-            order_data = {
-                'symbol': api_symbol,
-                'marginCoin': 'USDT',
-                'side': 'open_long' if side == 'buy' else 'open_short',
-                'orderType': order_type,
-                'size': str(size)
-            }
-
-            if price and order_type != 'market':
-                order_data['price'] = str(price)
-
-            body = json.dumps(order_data)
-            headers = self._get_headers('POST', request_path, body)
-
-            response = requests.post(url, data=body, headers=headers, timeout=10)
-            data = response.json()
-
-            if data.get('code') == '00000':
-                return {'success': True, 'data': data.get('data'), 'mode': 'real'}
-            
-            return {'success': False, 'error': data.get('msg', 'Order failed')}
-
-        except Exception as e:
-            logger.error(f"Error placing order: {e}")
-            return {'success': False, 'error': str(e)}
-
     def set_leverage(self, leverage):
-        """Set leverage for symbol"""
+        """Set leverage for the symbol"""
         if self.paper_trading:
             logger.info(f"Paper Trading - Leverage set to {leverage}x")
-            return {'success': True, 'data': {'leverage': leverage}}
-
+            return {'success': True}
+            
         try:
             request_path = "/api/mix/v1/account/setLeverage"
             url = f"{self.base_url}{request_path}"
             
-            # Clean symbol format
-            api_symbol = Config.SYMBOL.replace('_UMCBL', 'USDT_UMCBL')
-            
-            leverage_data = {
-                'symbol': api_symbol,
+            body_data = {
+                'symbol': Config.SYMBOL,
                 'marginCoin': 'USDT',
                 'leverage': str(leverage)
             }
-
-            body = json.dumps(leverage_data)
+            body = json.dumps(body_data)
             headers = self._get_headers('POST', request_path, body)
-
-            response = requests.post(url, data=body, headers=headers, timeout=10)
-            data = response.json()
-
-            if data.get('code') == '00000':
-                logger.info(f"✅ Leverage set to {leverage}x successfully")
-                return {'success': True, 'data': data.get('data')}
             
-            logger.error(f"❌ Failed to set leverage: {data.get('msg')}")
-            return {'success': False, 'error': data.get('msg', 'Leverage set failed')}
-
+            response = requests.post(url, headers=headers, data=body, timeout=15)
+            data = response.json()
+            
+            if data.get('code') == '00000':
+                logger.info(f"✅ REAL LEVERAGE SET: {leverage}x")
+                return {'success': True}
+            
+            logger.error(f"Failed to set leverage: {data}")
+            return {'success': False, 'error': data.get('msg', 'Unknown error')}
+            
         except Exception as e:
             logger.error(f"Error setting leverage: {e}")
             return {'success': False, 'error': str(e)}
+
+    def place_real_order(self, side, size):
+        """Place a REAL order on Bitget - NOT PAPER TRADING"""
+        if self.paper_trading:
+            logger.info(f"Paper Trading - Order placed: {side} {size}")
+            return {
+                'success': True,
+                'data': {
+                    'orderId': f'paper_{int(time.time())}',
+                    'price': 2000.0,
+                    'mode': 'paper'
+                }
+            }
+        
+        try:
+            logger.info(f"🔥 PLACING REAL ORDER: {side} {size} on {Config.SYMBOL}")
+            
+            request_path = "/api/mix/v1/order/placeOrder"
+            url = f"{self.base_url}{request_path}"
+            
+            # Convert side to Bitget format
+            bitget_side = 'buy_long' if side == 'buy' else 'sell_short'
+            
+            body_data = {
+                'symbol': Config.SYMBOL,
+                'marginCoin': 'USDT',
+                'side': bitget_side,
+                'orderType': 'market',
+                'size': str(size)
+            }
+            body = json.dumps(body_data)
+            headers = self._get_headers('POST', request_path, body)
+            
+            response = requests.post(url, headers=headers, data=body, timeout=15)
+            data = response.json()
+            
+            logger.info(f"REAL ORDER Response: {data}")
+            
+            if data.get('code') == '00000':
+                logger.info(f"✅ REAL ORDER EXECUTED: {side} {size}")
+                return {
+                    'success': True,
+                    'data': {
+                        'orderId': data['data']['orderId'],
+                        'price': data['data'].get('price', 0),
+                        'mode': 'REAL'
+                    }
+                }
+            
+            logger.error(f"❌ REAL ORDER FAILED: {data}")
+            return {'success': False, 'error': data.get('msg', 'Order failed')}
+            
+        except Exception as e:
+            logger.error(f"Error placing real order: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def place_stop_loss_order(self, position_id, stop_price):
+        """Place stop loss order (2%)"""
+        if self.paper_trading:
+            return {'success': True}
+            
+        try:
+            request_path = "/api/mix/v1/plan/placePlan"
+            url = f"{self.base_url}{request_path}"
+            
+            body_data = {
+                'symbol': Config.SYMBOL,
+                'marginCoin': 'USDT',
+                'planType': 'loss_plan',
+                'triggerPrice': str(stop_price),
+                'orderType': 'market'
+            }
+            body = json.dumps(body_data)
+            headers = self._get_headers('POST', request_path, body)
+            
+            response = requests.post(url, headers=headers, data=body, timeout=15)
+            data = response.json()
+            
+            if data.get('code') == '00000':
+                logger.info(f"✅ STOP LOSS SET: ${stop_price:.4f}")
+                return {'success': True}
+            
+            return {'success': False, 'error': data.get('msg', 'Failed to set stop loss')}
+            
+        except Exception as e:
+            logger.error(f"Error setting stop loss: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def place_take_profit_order(self, position_id, take_profit_price):
+        """Place take profit order (5%)"""
+        if self.paper_trading:
+            return {'success': True}
+            
+        try:
+            request_path = "/api/mix/v1/plan/placePlan"
+            url = f"{self.base_url}{request_path}"
+            
+            body_data = {
+                'symbol': Config.SYMBOL,
+                'marginCoin': 'USDT',
+                'planType': 'profit_plan',
+                'triggerPrice': str(take_profit_price),
+                'orderType': 'market'
+            }
+            body = json.dumps(body_data)
+            headers = self._get_headers('POST', request_path, body)
+            
+            response = requests.post(url, headers=headers, data=body, timeout=15)
+            data = response.json()
+            
+            if data.get('code') == '00000':
+                logger.info(f"✅ TAKE PROFIT SET: ${take_profit_price:.4f}")
+                return {'success': True}
+            
+            return {'success': False, 'error': data.get('msg', 'Failed to set take profit')}
+            
+        except Exception as e:
+            logger.error(f"Error setting take profit: {e}")
+            return {'success': False, 'error': str(e)}
+
+    # Legacy method for compatibility
+    def place_order(self, side, size):
+        """Legacy method - redirects to place_real_order"""
+        return self.place_real_order(side, size)
