@@ -1,24 +1,45 @@
-from flask import Flask
-from extensions import db, socketio
-from routes import routes
-from websocket_handler import setup_websocket
 import os
+import logging
+import eventlet
+eventlet.monkey_patch()
 
-def create_app():
-    app = Flask(__name__, template_folder="templates", static_folder="static")
-    app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY", "minha_chave_secreta")
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get("DATABASE_URL", "sqlite:///meubanco.db")
+from flask import Flask
+from flask_socketio import SocketIO
+from flask_sqlalchemy import SQLAlchemy
+from config import Config
 
-    db.init_app(app)
-    socketio.init_app(app)
+# Logging básico
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
-    app.register_blueprint(routes)
+# Flask
+app = Flask(__name__, template_folder="templates", static_folder="static")
+app.config.from_object(Config)
 
-    setup_websocket(socketio)
+# Banco de dados (AGORA EXISTE!)
+db = SQLAlchemy(app)
 
-    return app
+# Socket.IO com eventlet
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
-app = create_app()
+# Cria tabelas se ainda não existirem
+with app.app_context():
+    try:
+        db.create_all()
+        logger.info("✅ Tabelas verificadas/criadas com sucesso.")
+    except Exception as e:
+        logger.error(f"❌ Erro ao inicializar o banco: {e}")
+
+# IMPORTANTE: importe as rotas e websocket DEPOIS de criar app/db/socketio
+# (assim evita importação circular e mantém seu site original)
+import routes      # noqa: F401
+import websocket_handler  # noqa: F401
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    host = getattr(Config, "HOST", "0.0.0.0")
+    port = int(getattr(Config, "PORT", os.environ.get("PORT", 5000)))
+    logger.info(f"🚀 Subindo servidor em http://{host}:{port}")
+    socketio.run(app, host=host, port=port)
