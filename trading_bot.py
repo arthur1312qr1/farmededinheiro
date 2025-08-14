@@ -1,444 +1,336 @@
-import logging
-import time
 import threading
-import random
-from datetime import datetime, timedelta
+import time
+import logging
+from datetime import datetime
 from bitget_api import BitgetAPI
+from risk_manager import RiskManager
+from technical_analysis import TechnicalAnalysis
+from gemini_handler import GeminiHandler
+from config import Config
 
 logger = logging.getLogger(__name__)
 
 class TradingBot:
-    """Bot de trading ETH/USDT futures otimizado para Railway 24/7"""
-    
-    def __init__(self, config):
-        self.config = config
-        self.bitget_api = None
-        self.running = False
-        self.start_time = None
-        self.error_count = 0
-        self.lock = threading.Lock()
+    def __init__(self, socketio=None):
+        self.api = BitgetAPI()
+        self.risk_manager = RiskManager()
+        self.tech_analysis = TechnicalAnalysis()
+        self.gemini_handler = GeminiHandler()
+        self.socketio = socketio
         
-        # Estatísticas de trading com sistema de gerenciamento de risco
-        self.stats = {
-            'total_trades': 0,
-            'winning_trades': 0,
-            'losing_trades': 0,
-            'total_profit': 0.0,
-            'consecutive_losses': 0,
-            'last_trade_time': None,
-            'current_positions': {},
-            'balance_history': [],
-            'daily_profit': 0.0,
-            'max_drawdown': 0.0,
-            'current_leverage': self.config.MIN_LEVERAGE
-        }
+        # Bot state
+        self.is_running = False
+        self.current_position = None
+        self.consecutive_losses = 0
+        self.last_balance = 0
+        self.bot_thread = None
         
-        # Sistema de gestão de risco
-        self.risk_management = {
-            'emergency_stop': False,
-            'max_daily_loss': 100.0,  # USD
-            'current_daily_pnl': 0.0,
-            'position_size_pct': 0.1,  # 10% do saldo por posição
-            'stop_loss_pct': self.config.DRAWDOWN_CLOSE_PCT,
-            'take_profit_pct': 0.06,  # 6% take profit
-            'last_balance_check': None
-        }
+        # Statistics
+        self.total_trades = 0
+        self.winning_trades = 0
+        self.total_pnl = 0.0
         
-        # Cache para reduzir chamadas à API
-        self.balance_cache = None
-        self.balance_cache_time = None
-        self.cache_duration = 10  # 10 segundos para trading mais ativo
-        
-        logger.info(f"TradingBot inicializado para {config.SYMBOL} - Modo: {'Real' if not config.PAPER_TRADING else 'Paper'}")
-    
-    def initialize(self) -> bool:
-        """Inicializar o bot e conexões"""
-        try:
-            # Inicializar API Bitget se não estiver em paper trading
-            if not self.config.PAPER_TRADING:
-                if not self.config.validate_api_keys():
-                    logger.error("Chaves da API não configuradas")
-                    return False
-                
-                self.bitget_api = BitgetAPI(
-                    api_key=self.config.BITGET_API_KEY,
-                    api_secret=self.config.BITGET_API_SECRET,
-                    passphrase=self.config.BITGET_PASSPHRASE
-                )
-                
-                # Testar conexão
-                balance_result = self.bitget_api.get_balance()
-                if balance_result.get('error'):
-                    logger.error(f"Falha ao conectar com Bitget: {balance_result['error']}")
-                    return False
-                
-                logger.info("Conexão com Bitget API estabelecida")
-            else:
-                logger.info("Modo paper trading ativo")
-            
-            self.start_time = datetime.now()
-            return True
-            
-        except Exception as e:
-            logger.error(f"Erro ao inicializar bot: {e}")
+        logger.info("🤖 Trading Bot initialized")
+
+    def start(self):
+        """Start the trading bot"""
+        if self.is_running:
+            logger.warning("Bot is already running")
             return False
-    
-    def get_balance_info(self):
-        """Obter informações de saldo com cache"""
+            
+        self.is_running = True
+        self.bot_thread = threading.Thread(target=self._run_bot, daemon=True)
+        self.bot_thread.start()
+        
+        logger.info("🚀 Trading Bot started")
+        self._emit_status("started")
+        return True
+
+    def stop(self):
+        """Stop the trading bot"""
+        self.is_running = False
+        if self.bot_thread:
+            self.bot_thread.join(timeout=5.0)
+        
+        logger.info("⏹️ Trading Bot stopped")
+        self._emit_status("stopped")
+
+    def _run_bot(self):
+        """Main bot trading loop"""
+        # Initialize bot
+        self._initialize_bot()
+        
+        last_analysis_time = 0
+        
+        while self.is_running:
+            try:
+                current_time = time.time()
+                
+                # Update balance and price
+                self._update_data()
+                
+                # Perform analysis every 30 seconds
+                if current_time - last_analysis_time >= Config.ANALYSIS_INTERVAL:
+                    self._perform_analysis()
+                    last_analysis_time = current_time
+                
+                # Check for trading signals
+                self._check_trading_signals()
+                
+                # Risk management checks
+                self._check_risk_conditions()
+                
+                time.sleep(Config.POLL_INTERVAL)
+                
+            except Exception as e:
+                logger.error(f"Error in bot loop: {e}")
+                time.sleep(5)
+
+    def _initialize_bot(self):
+        """Initialize bot settings"""
         try:
-            # Verificar cache
-            now = time.time()
-            if (self.balance_cache and self.balance_cache_time and 
-                now - self.balance_cache_time < self.cache_duration):
-                return self.balance_cache
-            
-            # Paper trading
-            if self.config.PAPER_TRADING or not self.bitget_api:
-                balance_info = {
-                    'available_balance': 1000.0,
-                    'total_equity': 1000.0,
-                    'unrealized_pnl': 0.0,
-                    'currency': 'USDT',
-                    'paper_trading': True,
-                    'sufficient_balance': True,
-                    'last_updated': datetime.now().isoformat(),
-                    'success': True
-                }
+            # Set leverage
+            leverage_result = self.api.set_leverage(Config.LEVERAGE)
+            if leverage_result['success']:
+                logger.info(f"✅ Leverage set to {Config.LEVERAGE}x")
             else:
-                # Trading real
-                balance_info = self.bitget_api.get_balance()
-                if balance_info.get('success'):
-                    balance_info['paper_trading'] = False
-                    balance_info['sufficient_balance'] = (
-                        balance_info.get('available_balance', 0) >= self.config.MIN_BALANCE_USDT
-                    )
-                else:
-                    # Retornar erro se falhou
-                    return {
-                        'error': balance_info.get('error', 'Erro desconhecido'),
-                        'success': False,
-                        'paper_trading': False,
-                        'last_updated': datetime.now().isoformat()
-                    }
+                logger.error(f"❌ Failed to set leverage: {leverage_result.get('error')}")
             
-            # Atualizar cache
-            self.balance_cache = balance_info
-            self.balance_cache_time = now
-            
-            return balance_info
+            # Get initial balance
+            balance_result = self.api.get_account_balance()
+            if balance_result['success']:
+                self.last_balance = balance_result['data']['available']
+                mode = balance_result['data'].get('mode', 'unknown')
+                logger.info(f"✅ Initial balance: ${self.last_balance:.2f} ({mode} mode)")
             
         except Exception as e:
-            logger.error(f"Erro ao obter saldo: {e}")
-            self.error_count += 1
-            return {
-                'error': str(e),
-                'success': False,
-                'last_updated': datetime.now().isoformat()
-            }
-    
-    def execute_trading_cycle(self):
-        """Executar um ciclo de trading"""
-        if not self.running:
-            return
-        
-        with self.lock:
-            try:
-                # Obter saldo atual
-                balance_info = self.get_balance_info()
-                if balance_info.get('error'):
-                    logger.warning(f"Erro no saldo: {balance_info['error']}")
-                    return
+            logger.error(f"Error initializing bot: {e}")
+
+    def _update_data(self):
+        """Update balance and price data"""
+        try:
+            # Get current balance
+            balance_result = self.api.get_account_balance()
+            if balance_result['success']:
+                current_balance = balance_result['data']['available']
+                mode = balance_result['data'].get('mode', 'unknown')
                 
-                # Verificar saldo suficiente
-                if not balance_info.get('sufficient_balance', False):
-                    logger.warning(f"Saldo insuficiente: ${balance_info.get('available_balance', 0):.2f}")
-                    return
-                
-                # Atualizar estatísticas
-                current_balance = balance_info.get('available_balance', 0)
-                self.stats['balance_history'].append({
+                # Emit balance update
+                self._emit_data('balance_update', {
                     'balance': current_balance,
+                    'total': balance_result['data']['total'],
+                    'mode': mode,
                     'timestamp': datetime.now().isoformat()
                 })
                 
-                # Manter apenas últimas 100 entradas
-                if len(self.stats['balance_history']) > 100:
-                    self.stats['balance_history'] = self.stats['balance_history'][-100:]
-                
-                # Análise de mercado e estratégia de trading
-                self.analyze_market_and_trade(balance_info)
-                
-                # Log do ciclo
-                if balance_info.get('paper_trading'):
-                    logger.debug(f"Ciclo paper trading - Saldo: ${current_balance:.2f}")
-                else:
-                    logger.info(f"Ciclo de trading - Saldo: ${current_balance:.2f} USDT")
-                
-            except Exception as e:
-                logger.error(f"Erro no ciclo de trading: {e}")
-                self.error_count += 1
-                
-                # Parar bot se muitos erros
-                if self.error_count >= self.config.MAX_CONSECUTIVE_LOSSES * 2:
-                    logger.critical("Muitos erros. Parando bot por segurança.")
-                    self.running = False
-    
-    def analyze_market_and_trade(self, balance_info):
-        """Analisar mercado e executar trades com estratégia automatizada"""
-        try:
-            current_balance = balance_info.get('available_balance', 0)
+                self.last_balance = current_balance
             
-            # Verificar se não está em emergency stop
-            if self.risk_management['emergency_stop']:
-                logger.warning("Bot em modo emergency stop - não executando trades")
+            # Get current price
+            price_result = self.api.get_current_price(Config.SYMBOL)
+            if price_result['success']:
+                current_price = price_result['price']
+                
+                # Emit price update
+                self._emit_data('price_update', {
+                    'symbol': Config.SYMBOL,
+                    'price': current_price,
+                    'timestamp': datetime.now().isoformat()
+                })
+                
+        except Exception as e:
+            logger.error(f"Error updating data: {e}")
+
+    def _perform_analysis(self):
+        """Perform technical and AI analysis"""
+        try:
+            # Get klines data
+            klines_result = self.api.get_klines(Config.SYMBOL, '5m', 100)
+            if not klines_result['success']:
+                logger.error("Failed to get klines for analysis")
                 return
             
-            # Verificar limite diário de perdas
-            if abs(self.risk_management['current_daily_pnl']) > self.risk_management['max_daily_loss']:
-                logger.warning("Limite diário de perdas atingido - parando trading por hoje")
-                self.risk_management['emergency_stop'] = True
-                return
+            klines = klines_result['data']
             
-            if not self.config.PAPER_TRADING and self.bitget_api:
-                # Trading real - obter dados de mercado
-                market_data = self.bitget_api.get_market_data(self.config.SYMBOL)
-                if market_data.get('success'):
-                    current_price = market_data.get('price', 0)
-                    price_change = market_data.get('change_24h', 0)
-                    
-                    # Estratégia automatizada baseada em momentum e volatilidade
-                    signal = self._generate_trading_signal(current_price, price_change, market_data)
-                    
-                    if signal != 'hold':
-                        self._execute_trade_signal(signal, current_price, current_balance)
-                    else:
-                        logger.info(f"⏸️ HOLD para {self.config.SYMBOL} - Preço: ${current_price:.2f} | Mudança: {price_change:.2f}%")
-                        
-            else:
-                # Paper trading com simulação realística
-                self._simulate_paper_trading(current_balance)
-                
-        except Exception as e:
-            logger.error(f"Erro na análise de mercado: {e}")
-            self.error_count += 1
-    
-    def _generate_trading_signal(self, price, price_change_24h, market_data):
-        """Gerar sinal de trading baseado em indicadores simples"""
-        try:
-            # Estratégia simples baseada em momentum e volatilidade
-            volume_24h = market_data.get('volume_24h', 0)
-            high_24h = market_data.get('high_24h', 0)
-            low_24h = market_data.get('low_24h', 0)
+            # Technical analysis
+            tech_signals = self.tech_analysis.analyze(klines)
             
-            # Calcular volatilidade
-            volatility = ((high_24h - low_24h) / price) * 100 if price > 0 else 0
+            # AI analysis using Gemini
+            ai_analysis = self.gemini_handler.analyze_market(klines)
             
-            # Condições mais agressivas para trading frequente
-            # Log das condições para monitoramento
-            logger.info(f"📊 Análise {self.config.SYMBOL}: Preço=${price:.2f}, Mudança 24h={price_change_24h:.2f}%, "
-                       f"Volatilidade={volatility:.2f}%, Volume={volume_24h}, Perdas consecutivas={self.stats['consecutive_losses']}")
-            
-            # Condições para compra (long) - mais flexíveis
-            if (price_change_24h > 0.5 and volatility > 1.0 and 
-                self.stats['consecutive_losses'] < 5 and volume_24h > 100):
-                logger.info(f"🟢 SINAL BUY: Mudança +{price_change_24h:.2f}%, Vol={volatility:.2f}%")
-                return 'buy'
-            
-            # Condições para venda (short) - mais flexíveis  
-            elif (price_change_24h < -0.5 and volatility > 1.0 and 
-                  self.stats['consecutive_losses'] < 5 and volume_24h > 100):
-                logger.info(f"🔴 SINAL SELL: Mudança {price_change_24h:.2f}%, Vol={volatility:.2f}%")
-                return 'sell'
-            
-            # Trading baseado em volatilidade mesmo sem mudança significativa
-            elif (volatility > 2.0 and self.stats['consecutive_losses'] < 3):
-                # Escolher direção baseada em tendência de curto prazo
-                signal_choice = 'buy' if random.random() > 0.5 else 'sell'
-                logger.info(f"🟡 SINAL VOLATILIDADE: {signal_choice.upper()} - Vol={volatility:.2f}%")
-                return signal_choice
-            
-            return 'hold'
-            
-        except Exception as e:
-            logger.error(f"Erro ao gerar sinal: {e}")
-            return 'hold'
-    
-    def _execute_trade_signal(self, signal, price, balance):
-        """Executar ordem baseada no sinal"""
-        try:
-            # Calcular tamanho da posição
-            position_size = balance * self.risk_management['position_size_pct']
-            
-            if position_size < 10:  # Mínimo de $10 por posição
-                logger.warning(f"Posição muito pequena: ${position_size:.2f} - ignorando sinal")
-                return
-            
-            # Calcular leverage dinâmico
-            leverage = min(self.config.MAX_LEVERAGE, 
-                          max(self.config.MIN_LEVERAGE, 
-                              int(20 - self.stats['consecutive_losses'] * 2)))
-            
-            # Executar ordem real na Bitget se API estiver disponível
-            if self.bitget_api:
-                logger.info(f"EXECUTANDO {signal.upper()}: Preço=${price:.2f}, Tamanho=${position_size:.2f}, Leverage={leverage}x")
-                
-                # Executar ordem real
-                order_result = self.bitget_api.place_order(
-                    symbol=self.config.SYMBOL,
-                    side='buy' if signal == 'buy' else 'sell',
-                    size=position_size / price,  # Converter para quantidade de ETH
-                    order_type='market',
-                    leverage=leverage
-                )
-                
-                if order_result.get('success'):
-                    logger.info(f"✅ Ordem executada com sucesso: {order_result.get('order_id')}")
-                    # Atualizar estatísticas com ordem real
-                    self._update_real_trading_stats(signal, price, position_size, leverage, order_result)
-                else:
-                    logger.error(f"❌ Falha na ordem: {order_result.get('error')}")
-                    self.error_count += 1
-            else:
-                # Fallback para simulação se API não disponível
-                logger.info(f"SIMULANDO {signal.upper()}: Preço=${price:.2f}, Tamanho=${position_size:.2f}, Leverage={leverage}x")
-                self._update_trading_stats(signal, price, position_size, leverage)
-            
-        except Exception as e:
-            logger.error(f"Erro ao executar trade: {e}")
-    
-    def _simulate_paper_trading(self, balance):
-        """Simular trading para paper trading mode"""
-        try:
-            # Gerar preço simulado com volatilidade realística
-            base_price = 3500.0  # Preço base do ETH
-            volatility = random.uniform(-0.05, 0.05)  # ±5%
-            simulated_price = base_price * (1 + volatility)
-            
-            # Gerar sinal aleatório com bias realístico
-            if random.random() < 0.1:  # 10% chance de trade
-                signal = random.choice(['buy', 'sell'])
-                position_size = balance * 0.1
-                leverage = random.randint(self.config.MIN_LEVERAGE, self.config.MAX_LEVERAGE)
-                
-                logger.debug(f"PAPER TRADE {signal.upper()}: ${simulated_price:.2f}, Size=${position_size:.2f}")
-                self._update_trading_stats(signal, simulated_price, position_size, leverage)
-            
-        except Exception as e:
-            logger.error(f"Erro no paper trading: {e}")
-    
-    def _update_trading_stats(self, signal, price, size, leverage):
-        """Atualizar estatísticas de trading"""
-        try:
-            # Simular resultado do trade
-            profit_chance = 0.6  # 60% chance de lucro
-            is_profitable = random.random() < profit_chance
-            
-            # Calcular P&L simulado
-            if is_profitable:
-                pnl = size * random.uniform(0.02, 0.08)  # 2-8% lucro
-                self.stats['winning_trades'] += 1
-                self.stats['consecutive_losses'] = 0
-            else:
-                pnl = -size * random.uniform(0.01, 0.03)  # 1-3% perda
-                self.stats['losing_trades'] += 1
-                self.stats['consecutive_losses'] += 1
-            
-            self.stats['total_trades'] += 1
-            self.stats['total_profit'] += pnl
-            self.stats['last_trade_time'] = datetime.now().isoformat()
-            self.risk_management['current_daily_pnl'] += pnl
-            
-            # Log do resultado
-            result_emoji = "📈" if is_profitable else "📉"
-            logger.info(f"{result_emoji} Trade {self.stats['total_trades']}: {signal.upper()} "
-                       f"${price:.2f} | P&L: ${pnl:.2f} | Total: ${self.stats['total_profit']:.2f}")
-            
-        except Exception as e:
-            logger.error(f"Erro ao atualizar estatísticas: {e}")
-    
-    def _update_real_trading_stats(self, signal, price, size, leverage, order_result):
-        """Atualizar estatísticas com dados de trading real"""
-        try:
-            # Para trading real, aguardar um pouco para verificar resultado
-            order_id = order_result.get('order_id')
-            
-            # Por agora, assumir que ordem foi executada com sucesso
-            # Em implementação futura, verificar status real da ordem
-            
-            self.stats['total_trades'] += 1
-            self.stats['last_trade_time'] = datetime.now().isoformat()
-            
-            # Log da execução real
-            logger.info(f"🔥 TRADE REAL {self.stats['total_trades']}: {signal.upper()} "
-                       f"${price:.2f} | Size: ${size:.2f} | Leverage: {leverage}x | Order: {order_id}")
-            
-            # Adicionar à história de trades
-            if 'trade_history' not in self.stats:
-                self.stats['trade_history'] = []
-            
-            self.stats['trade_history'].append({
-                'id': order_id,
-                'signal': signal,
-                'price': price,
-                'size': size,
-                'leverage': leverage,
-                'timestamp': datetime.now().isoformat(),
-                'status': 'executed'
-            })
-            
-            # Manter apenas últimos 100 trades na história
-            if len(self.stats['trade_history']) > 100:
-                self.stats['trade_history'] = self.stats['trade_history'][-100:]
-            
-        except Exception as e:
-            logger.error(f"Erro ao atualizar estatísticas reais: {e}")
-    
-    def get_trading_stats(self):
-        """Obter estatísticas de trading"""
-        try:
-            win_rate = 0
-            if self.stats['total_trades'] > 0:
-                win_rate = (self.stats['winning_trades'] / self.stats['total_trades']) * 100
-            
-            return {
-                'total_trades': self.stats['total_trades'],
-                'winning_trades': self.stats['winning_trades'],
-                'losing_trades': self.stats['losing_trades'],
-                'win_rate': round(win_rate, 2),
-                'total_profit': round(self.stats['total_profit'], 2),
-                'consecutive_losses': self.stats['consecutive_losses'],
-                'last_trade_time': self.stats['last_trade_time'],
-                'current_positions': self.stats['current_positions'],
-                'balance_history': self.stats['balance_history'][-10:]  # Últimas 10 entradas
+            # Combined analysis
+            analysis_data = {
+                'technical': tech_signals,
+                'ai': ai_analysis,
+                'timestamp': datetime.now().isoformat()
             }
+            
+            # Emit analysis update
+            self._emit_data('analysis_update', analysis_data)
+            
+            logger.info(f"📊 Analysis completed - Tech Score: {tech_signals.get('score', 0)}")
+            
         except Exception as e:
-            logger.error(f"Erro ao obter estatísticas: {e}")
-            return {}
-    
-    def get_uptime(self):
-        """Obter tempo de atividade do bot"""
-        if not self.start_time:
-            return "N/A"
+            logger.error(f"Error in analysis: {e}")
+
+    def _check_trading_signals(self):
+        """Check for trading signals and execute trades"""
+        try:
+            # Get latest klines
+            klines_result = self.api.get_klines(Config.SYMBOL, '1m', 50)
+            if not klines_result['success']:
+                return
+            
+            klines = klines_result['data']
+            
+            # Get technical signals
+            signals = self.tech_analysis.get_trading_signals(klines)
+            
+            if signals['action'] != 'hold':
+                # Check risk conditions
+                if self._can_trade():
+                    self._execute_trade(signals)
+                
+        except Exception as e:
+            logger.error(f"Error checking trading signals: {e}")
+
+    def _execute_trade(self, signals):
+        """Execute a trading order"""
+        try:
+            side = signals['action']  # 'buy' or 'sell'
+            
+            # Calculate position size
+            balance_result = self.api.get_account_balance()
+            if not balance_result['success']:
+                logger.error("Failed to get balance for trade")
+                return
+            
+            available_balance = balance_result['data']['available']
+            position_size = self._calculate_position_size(available_balance)
+            
+            if position_size <= 0:
+                logger.warning("Position size too small, skipping trade")
+                return
+            
+            # Place order
+            order_result = self.api.place_order(side, position_size)
+            
+            if order_result['success']:
+                self.total_trades += 1
+                
+                trade_data = {
+                    'id': order_result['data']['orderId'],
+                    'side': side,
+                    'size': position_size,
+                    'price': order_result['data'].get('price', 0),
+                    'timestamp': datetime.now().isoformat(),
+                    'signal_strength': signals.get('strength', 0),
+                    'mode': order_result['data'].get('mode', 'unknown')
+                }
+                
+                # Emit trade update
+                self._emit_data('trade_executed', trade_data)
+                
+                logger.info(f"✅ Trade executed: {side} {position_size} @ {trade_data['price']}")
+                
+            else:
+                logger.error(f"❌ Trade failed: {order_result.get('error')}")
+                
+        except Exception as e:
+            logger.error(f"Error executing trade: {e}")
+
+    def _calculate_position_size(self, available_balance):
+        """Calculate position size based on risk management"""
+        # Use a percentage of available balance
+        risk_percent = 0.1  # 10% of balance per trade
+        max_position_value = available_balance * risk_percent
         
-        uptime = datetime.now() - self.start_time
-        return str(uptime).split('.')[0]  # Remover microssegundos
-    
-    def get_error_count(self):
-        """Obter contagem de erros"""
-        return self.error_count
-    
-    def start(self):
-        """Iniciar o bot"""
-        self.running = True
-        if not self.start_time:
-            self.start_time = datetime.now()
-        logger.info("Bot de trading iniciado")
-    
-    def stop(self):
-        """Parar o bot"""
-        self.running = False
-        logger.info("Bot de trading parado")
-    
-    def is_running(self):
-        """Verificar se o bot está rodando"""
-        return self.running
+        # Get current price
+        price_result = self.api.get_current_price(Config.SYMBOL)
+        if not price_result['success']:
+            return 0
+        
+        current_price = price_result['price']
+        position_size = max_position_value / current_price
+        
+        # Apply leverage
+        position_size *= Config.LEVERAGE
+        
+        return round(position_size, 6)
+
+    def _can_trade(self):
+        """Check if bot can trade based on risk conditions"""
+        # Check consecutive losses
+        if self.consecutive_losses >= Config.MAX_CONSECUTIVE_LOSSES:
+            logger.warning(f"Max consecutive losses reached: {self.consecutive_losses}")
+            return False
+        
+        # Check minimum balance
+        if self.last_balance < Config.MIN_BALANCE_USDT:
+            logger.warning(f"Balance too low: ${self.last_balance}")
+            return False
+        
+        return True
+
+    def _check_risk_conditions(self):
+        """Check and handle risk conditions"""
+        try:
+            # Check drawdown
+            balance_result = self.api.get_account_balance()
+            if balance_result['success']:
+                current_balance = balance_result['data']['available']
+                
+                if self.last_balance > 0:
+                    drawdown = (self.last_balance - current_balance) / self.last_balance
+                    
+                    if drawdown >= Config.DRAWDOWN_CLOSE_PCT:
+                        logger.warning(f"⚠️ High drawdown detected: {drawdown*100:.2f}%")
+                        self._emergency_stop()
+            
+        except Exception as e:
+            logger.error(f"Error checking risk conditions: {e}")
+
+    def _emergency_stop(self):
+        """Emergency stop all trading"""
+        logger.critical("🛑 EMERGENCY STOP TRIGGERED")
+        self.stop()
+        
+        self._emit_data('emergency_stop', {
+            'reason': 'High drawdown detected',
+            'timestamp': datetime.now().isoformat()
+        })
+
+    def get_statistics(self):
+        """Get bot statistics"""
+        win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0
+        
+        return {
+            'is_running': self.is_running,
+            'total_trades': self.total_trades,
+            'winning_trades': self.winning_trades,
+            'win_rate': round(win_rate, 2),
+            'total_pnl': round(self.total_pnl, 2),
+            'consecutive_losses': self.consecutive_losses,
+            'last_balance': round(self.last_balance, 2)
+        }
+
+    def _emit_status(self, status):
+        """Emit bot status update"""
+        if self.socketio:
+            self.socketio.emit('bot_status', {'status': status})
+
+    def _emit_data(self, event, data):
+        """Emit data update"""
+        if self.socketio:
+            self.socketio.emit(event, data)
+
+# Global bot instance
+bot_instance = None
+
+def get_bot_instance(socketio=None):
+    """Get or create bot instance"""
+    global bot_instance
+    if bot_instance is None:
+        bot_instance = TradingBot(socketio)
+    elif socketio and bot_instance.socketio is None:
+        bot_instance.socketio = socketio
+    return bot_instance
