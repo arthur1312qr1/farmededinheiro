@@ -1,251 +1,156 @@
 import logging
-import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, Optional
-from models import BotStatus, Trade
-from app import db
 from config import Config
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
 class RiskManager:
-    """Advanced risk management system"""
-    
     def __init__(self):
-        self.config = Config
-    
-    def check_trading_conditions(self) -> Dict:
-        """
-        Check if trading conditions are met
-        Returns: {'allowed': bool, 'reason': str}
-        """
+        self.max_drawdown = Config.DRAWDOWN_CLOSE_PCT
+        self.max_consecutive_losses = Config.MAX_CONSECUTIVE_LOSSES
+        self.min_balance = Config.MIN_BALANCE_USDT
+        self.liq_distance_threshold = Config.LIQ_DIST_THRESHOLD
+        
+        # Risk tracking
+        self.consecutive_losses = 0
+        self.peak_balance = 0
+        self.daily_trades = 0
+        self.last_trade_time = None
+        
+        logger.info("🛡️ Risk Manager initialized")
+
+    def check_balance_risk(self, current_balance, peak_balance):
+        """Check if balance is at risk"""
+        if current_balance < self.min_balance:
+            return {
+                'risk': True,
+                'level': 'high',
+                'reason': f'Balance below minimum: ${current_balance:.2f} < ${self.min_balance:.2f}'
+            }
+        
+        if peak_balance > 0:
+            drawdown = (peak_balance - current_balance) / peak_balance
+            if drawdown >= self.max_drawdown:
+                return {
+                    'risk': True,
+                    'level': 'critical',
+                    'reason': f'High drawdown: {drawdown*100:.2f}% >= {self.max_drawdown*100:.2f}%'
+                }
+        
+        return {'risk': False}
+
+    def check_consecutive_losses(self, losses_count):
+        """Check consecutive losses risk"""
+        if losses_count >= self.max_consecutive_losses:
+            return {
+                'risk': True,
+                'level': 'high',
+                'reason': f'Max consecutive losses reached: {losses_count}'
+            }
+        
+        return {'risk': False}
+
+    def check_trading_frequency(self):
+        """Check if trading too frequently"""
+        current_time = datetime.now()
+        
+        if self.last_trade_time:
+            time_diff = current_time - self.last_trade_time
+            if time_diff < timedelta(minutes=5):
+                return {
+                    'risk': True,
+                    'level': 'medium',
+                    'reason': 'Trading too frequently'
+                }
+        
+        return {'risk': False}
+
+    def calculate_position_size(self, balance, leverage, risk_percent=0.05):
+        """Calculate safe position size"""
+        # Maximum risk per trade
+        max_risk_amount = balance * risk_percent
+        
+        # Account for leverage
+        position_value = max_risk_amount * leverage
+        
+        return {
+            'recommended_size': position_value,
+            'max_loss': max_risk_amount,
+            'leverage_used': leverage
+        }
+
+    def check_liquidation_risk(self, position_size, entry_price, current_price, leverage):
+        """Check liquidation distance"""
         try:
-            # Get bot status
-            bot_status = BotStatus.query.first()
-            if not bot_status:
-                return {'allowed': False, 'reason': 'Bot status not initialized'}
+            # Calculate liquidation price (simplified)
+            maintenance_margin_rate = 0.005  # 0.5% for most crypto futures
+            liquidation_price = entry_price * (1 - (1 / leverage) + maintenance_margin_rate)
             
-            # Check if bot is active
-            if not bot_status.is_active:
-                return {'allowed': False, 'reason': 'Bot is not active'}
+            # Calculate distance to liquidation
+            distance_to_liq = abs(current_price - liquidation_price) / current_price
             
-            # Skip minimum balance check since MIN_BALANCE is 0
-            # Balance check removed for aggressive trading
-            
-            # Check consecutive losses (more aggressive - allow up to 5)
-            if bot_status.consecutive_losses >= self.config.MAX_CONSECUTIVE_LOSSES:
-                return {'allowed': False, 'reason': f'Max consecutive losses reached: {bot_status.consecutive_losses}'}
-            
-            # All checks passed
-            return {'allowed': True, 'reason': 'All conditions met'}
-            
-        except Exception as e:
-            logger.error(f"Error checking trading conditions: {e}")
-            return {'allowed': False, 'reason': f'Error: {str(e)}'}
-    
-    def calculate_position_size(self, balance: float, confidence: float) -> float:
-        """
-        Calculate position size based on balance and signal confidence
-        More aggressive sizing for high frequency trading
-        """
-        try:
-            # Base position size (up to 80% of balance for high frequency)
-            base_percentage = self.config.MAX_POSITION_PERCENT
-            
-            # Adjust based on confidence (higher confidence = larger position)
-            confidence_multiplier = 0.5 + (confidence * 0.5)  # 0.5 to 1.0
-            
-            position_percentage = base_percentage * confidence_multiplier
-            position_size = balance * (position_percentage / 100)
-            
-            # Apply leverage
-            position_size *= self.config.LEVERAGE
-            
-            logger.info(f"Position size calculated: ${position_size:.2f} ({position_percentage:.1f}% of balance)")
-            
-            return max(10, position_size)  # Minimum $10 position
-            
-        except Exception as e:
-            logger.error(f"Error calculating position size: {e}")
-            return 10.0
-    
-    def calculate_stop_loss(self, entry_price: float, side: str) -> float:
-        """Calculate stop loss price"""
-        try:
-            stop_loss_percentage = self.config.STOP_LOSS_PERCENT / 100
-            
-            if side == 'long':
-                return entry_price * (1 - stop_loss_percentage)
-            else:  # short
-                return entry_price * (1 + stop_loss_percentage)
-                
-        except Exception as e:
-            logger.error(f"Error calculating stop loss: {e}")
-            return entry_price
-    
-    def calculate_take_profit(self, entry_price: float, side: str) -> float:
-        """Calculate take profit price"""
-        try:
-            take_profit_percentage = self.config.TAKE_PROFIT_PERCENT / 100
-            
-            if side == 'long':
-                return entry_price * (1 + take_profit_percentage)
-            else:  # short
-                return entry_price * (1 - take_profit_percentage)
-                
-        except Exception as e:
-            logger.error(f"Error calculating take profit: {e}")
-            return entry_price
-    
-    def should_close_position(self, trade: Trade, current_price: float) -> Dict:
-        """
-        Check if position should be closed
-        Returns: {'should_close': bool, 'reason': str}
-        """
-        try:
-            if trade.status != 'open':
-                return {'should_close': False, 'reason': 'Trade not open'}
-            
-            # Check stop loss
-            if trade.side == 'long' and current_price <= trade.stop_loss:
-                return {'should_close': True, 'reason': 'Stop loss hit'}
-            elif trade.side == 'short' and current_price >= trade.stop_loss:
-                return {'should_close': True, 'reason': 'Stop loss hit'}
-            
-            # Check take profit
-            if trade.side == 'long' and current_price >= trade.take_profit:
-                return {'should_close': True, 'reason': 'Take profit reached'}
-            elif trade.side == 'short' and current_price <= trade.take_profit:
-                return {'should_close': True, 'reason': 'Take profit reached'}
-            
-            # Check for early exit on trend reversal (intelligent stop loss)
-            reversal_check = self._check_trend_reversal(trade, current_price)
-            if reversal_check['should_exit']:
-                return {'should_close': True, 'reason': reversal_check['reason']}
-            
-            return {'should_close': False, 'reason': 'All conditions normal'}
-            
-        except Exception as e:
-            logger.error(f"Error checking position closure: {e}")
-            return {'should_close': False, 'reason': f'Error: {str(e)}'}
-    
-    def _check_trend_reversal(self, trade: Trade, current_price: float) -> Dict:
-        """Check for trend reversal for early exit"""
-        try:
-            # Calculate current P&L percentage
-            if trade.side == 'long':
-                pnl_percentage = ((current_price - trade.entry_price) / trade.entry_price) * 100
-            else:
-                pnl_percentage = ((trade.entry_price - current_price) / trade.entry_price) * 100
-            
-            # Apply leverage effect
-            pnl_percentage *= trade.leverage
-            
-            # Intelligent early exit on trend reversal - more aggressive
-            if pnl_percentage < -2.0:
-                return {'should_exit': True, 'reason': 'Trend reversal detected - immediate exit'}
-            
-            # Take profits on good moves
-            if pnl_percentage > 8.0:
-                return {'should_exit': True, 'reason': 'Good profit - secure gains'}
-            
-            return {'should_exit': False, 'reason': 'No reversal detected'}
-            
-        except Exception as e:
-            logger.error(f"Error checking trend reversal: {e}")
-            return {'should_exit': False, 'reason': 'Error in reversal check'}
-    
-    def update_trade_pnl(self, trade: Trade, current_price: float):
-        """Update trade P&L"""
-        try:
-            if trade.side == 'long':
-                price_diff = current_price - trade.entry_price
-            else:
-                price_diff = trade.entry_price - current_price
-            
-            # Calculate P&L with leverage
-            pnl = (price_diff / trade.entry_price) * trade.quantity * trade.leverage
-            pnl_percentage = (price_diff / trade.entry_price) * trade.leverage * 100
-            
-            trade.pnl = pnl
-            trade.pnl_percentage = pnl_percentage
-            
-            db.session.commit()
-            
-        except Exception as e:
-            logger.error(f"Error updating trade P&L: {e}")
-    
-    def record_trade_result(self, trade: Trade, exit_price: float, reason: str):
-        """Record trade result and update statistics"""
-        try:
-            # Update trade
-            trade.exit_price = exit_price
-            trade.exit_time = datetime.utcnow()
-            trade.status = 'closed'
-            
-            # Calculate final P&L
-            if trade.side == 'long':
-                price_diff = exit_price - trade.entry_price
-            else:
-                price_diff = trade.entry_price - exit_price
-            
-            trade.pnl = (price_diff / trade.entry_price) * trade.quantity * trade.leverage
-            trade.pnl_percentage = (price_diff / trade.entry_price) * trade.leverage * 100
-            
-            # Update bot statistics
-            bot_status = BotStatus.query.first()
-            if bot_status:
-                bot_status.total_trades += 1
-                bot_status.daily_pnl += trade.pnl
-                bot_status.balance += trade.pnl
-                
-                if trade.pnl > 0:
-                    bot_status.winning_trades += 1
-                    bot_status.consecutive_losses = 0  # Reset on win
-                else:
-                    bot_status.losing_trades += 1
-                    bot_status.consecutive_losses += 1
-                
-                bot_status.last_updated = datetime.utcnow()
-            
-            db.session.commit()
-            
-            logger.info(f"Trade closed: {trade.side} {trade.symbol} P&L: ${trade.pnl:.2f} ({trade.pnl_percentage:.2f}%)")
-            
-        except Exception as e:
-            logger.error(f"Error recording trade result: {e}")
-            db.session.rollback()
-    
-    def get_risk_metrics(self) -> Dict:
-        """Get current risk metrics"""
-        try:
-            bot_status = BotStatus.query.first()
-            if not bot_status:
-                return {'error': 'No bot status found'}
-            
-            # Get recent trades for additional metrics
-            recent_trades = Trade.query.filter(
-                Trade.entry_time >= datetime.utcnow() - timedelta(days=1),
-                Trade.status == 'closed'
-            ).all()
-            
-            # Calculate additional metrics
-            total_pnl = sum(trade.pnl for trade in recent_trades if trade.pnl)
-            avg_win = np.mean([trade.pnl for trade in recent_trades if trade.pnl and trade.pnl > 0]) if recent_trades else 0
-            avg_loss = np.mean([trade.pnl for trade in recent_trades if trade.pnl and trade.pnl < 0]) if recent_trades else 0
+            if distance_to_liq <= self.liq_distance_threshold:
+                return {
+                    'risk': True,
+                    'level': 'critical',
+                    'reason': f'Close to liquidation: {distance_to_liq*100:.2f}%',
+                    'liquidation_price': liquidation_price
+                }
             
             return {
-                'balance': bot_status.balance,
-                'daily_pnl': bot_status.daily_pnl,
-                'total_trades': bot_status.total_trades,
-                'win_rate': (bot_status.winning_trades / max(bot_status.total_trades, 1)) * 100,
-                'consecutive_losses': bot_status.consecutive_losses,
-                'avg_win': avg_win,
-                'avg_loss': avg_loss,
-                'profit_factor': abs(avg_win / avg_loss) if avg_loss != 0 else float('inf'),
-                'trades_today': len(recent_trades)
+                'risk': False,
+                'liquidation_price': liquidation_price,
+                'distance': distance_to_liq
             }
             
         except Exception as e:
-            logger.error(f"Error getting risk metrics: {e}")
-            return {'error': str(e)}
+            logger.error(f"Error calculating liquidation risk: {e}")
+            return {'risk': False}
+
+    def update_trade_result(self, is_profitable):
+        """Update risk tracking with trade result"""
+        self.last_trade_time = datetime.now()
+        
+        if is_profitable:
+            self.consecutive_losses = 0
+        else:
+            self.consecutive_losses += 1
+        
+        self.daily_trades += 1
+        
+        logger.info(f"Trade result updated - Consecutive losses: {self.consecutive_losses}")
+
+    def get_risk_summary(self, balance, peak_balance):
+        """Get comprehensive risk summary"""
+        risks = []
+        
+        # Check all risk factors
+        balance_risk = self.check_balance_risk(balance, peak_balance)
+        if balance_risk['risk']:
+            risks.append(balance_risk)
+        
+        losses_risk = self.check_consecutive_losses(self.consecutive_losses)
+        if losses_risk['risk']:
+            risks.append(losses_risk)
+        
+        frequency_risk = self.check_trading_frequency()
+        if frequency_risk['risk']:
+            risks.append(frequency_risk)
+        
+        # Determine overall risk level
+        if any(risk['level'] == 'critical' for risk in risks):
+            overall_level = 'critical'
+        elif any(risk['level'] == 'high' for risk in risks):
+            overall_level = 'high'
+        elif risks:
+            overall_level = 'medium'
+        else:
+            overall_level = 'low'
+        
+        return {
+            'overall_level': overall_level,
+            'risks': risks,
+            'consecutive_losses': self.consecutive_losses,
+            'daily_trades': self.daily_trades,
+            'safe_to_trade': len([r for r in risks if r['level'] in ['critical', 'high']]) == 0
+        }
