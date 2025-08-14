@@ -1,251 +1,190 @@
 import numpy as np
+import pandas as pd
+from typing import Dict, List
 import logging
-from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
-class TechnicalAnalysis:
+class ScalpingAnalysis:
     def __init__(self):
-        logger.info("📈 Technical Analysis initialized for 99% ACCURACY")
-
-    def get_high_accuracy_signals(self, klines):
-        """Get high accuracy trading signals (99% accuracy target)"""
+        self.lookback_period = 20  # Análise rápida
+        
+    async def quick_analysis(self, prices: List[float], volumes: List[float], market_data: Dict) -> Dict:
+        """Análise técnica ultra-rápida para scalping"""
         try:
-            if not klines or len(klines) < 50:
-                return {'action': 'hold', 'confidence': 0.0, 'reason': 'Insufficient data'}
+            if len(prices) < 14:
+                return {}
             
-            # Extract prices
-            closes = [float(k[4]) for k in klines]  # Close prices
-            highs = [float(k[2]) for k in klines]   # High prices
-            lows = [float(k[3]) for k in klines]    # Low prices
-            volumes = [float(k[5]) for k in klines] # Volume
+            # Converter para arrays numpy
+            price_array = np.array(prices)
+            volume_array = np.array(volumes)
             
-            # Calculate indicators
-            sma_20 = self.calculate_sma(closes, 20)
-            sma_50 = self.calculate_sma(closes, 50)
-            ema_12 = self.calculate_ema(closes, 12)
-            ema_26 = self.calculate_ema(closes, 26)
-            rsi = self.calculate_rsi(closes, 14)
-            macd_data = self.calculate_macd(closes)
-            bb_data = self.calculate_bollinger_bands(closes, 20)
-            
-            if not all([sma_20, sma_50, ema_12, ema_26, rsi, bb_data]):
-                return {'action': 'hold', 'confidence': 0.0, 'reason': 'Indicator calculation failed'}
-            
-            # Current values
-            current_price = closes[-1]
-            current_rsi = rsi[-1] if rsi else 50
-            current_macd = macd_data['macd'][-1] if macd_data['macd'] else 0
-            current_signal = macd_data['signal'][-1] if macd_data['signal'] else 0
-            
-            # Volume analysis
-            avg_volume = sum(volumes[-20:]) / 20
-            current_volume = volumes[-1]
-            volume_surge = current_volume > avg_volume * 1.5
-            
-            # Signal scoring system for 99% accuracy
-            buy_score = 0
-            sell_score = 0
-            confidence = 0.0
-            
-            # Trend Analysis (40% weight)
-            if len(sma_20) > 0 and len(sma_50) > 0:
-                if sma_20[-1] > sma_50[-1] and current_price > sma_20[-1]:
-                    buy_score += 40
-                elif sma_20[-1] < sma_50[-1] and current_price < sma_20[-1]:
-                    sell_score += 40
-
-            # RSI Analysis (25% weight)
-            if current_rsi < 30 and current_rsi > 25:  # Strong oversold but not extreme
-                buy_score += 25
-            elif current_rsi > 70 and current_rsi < 75:  # Strong overbought but not extreme
-                sell_score += 25
-            
-            # MACD Analysis (20% weight)
-            if current_macd > current_signal and current_macd > 0:
-                buy_score += 20
-            elif current_macd < current_signal and current_macd < 0:
-                sell_score += 20
-            
-            # Volume Confirmation (15% weight)
-            if volume_surge:
-                if buy_score > sell_score:
-                    buy_score += 15
-                else:
-                    sell_score += 15
-            
-            # Rejection Signal Detection
-            rejection_detected = self._detect_rejection_signals(closes, highs, lows, rsi, current_price)
-
-            # Determine action with 99% accuracy requirement
-            max_score = max(buy_score, sell_score)
-            confidence = max_score / 100.0
-
-            # ONLY TRADE WITH 99% CONFIDENCE
-            if confidence >= 0.99:
-                if buy_score > sell_score:
-                    action = 'buy'
-                    reason = f'Strong BUY signal - Score: {buy_score}/100'
-                else:
-                    action = 'sell'
-                    reason = f'Strong SELL signal - Score: {sell_score}/100'
-            else:
-                action = 'hold'
-                reason = f'Confidence too low: {confidence*100:.1f}% < 99%'
-            
-            # Override with rejection detection if rejection_detected['detected'] and confidence >= 0.85:
-            if rejection_detected['detected'] and confidence >= 0.85:
-                action = 'hold'
-                reason = f'Rejection signal detected: {rejection_detected["reason"]}'
-                confidence = 0.85
-
-            return {
-                'action': action,
-                'confidence': confidence,
-                'reason': reason,
-                'buy_score': buy_score,
-                'sell_score': sell_score,
-                'rsi': current_rsi,
-                'volume_surge': volume_surge,
-                'rejection': rejection_detected
+            # Análises rápidas
+            signals = {
+                'rsi': self.fast_rsi(price_array, period=7),  # RSI rápido
+                'ema_direction': self.ema_direction(price_array),
+                'ema_trend': self.ema_trend_strength(price_array),
+                'macd_signal': self.fast_macd_signal(price_array),
+                'bb_position': self.bollinger_position(price_array),
+                'volume_spike': self.volume_spike(volume_array),
+                'momentum': self.price_momentum(price_array),
+                'support_resistance': self.quick_sr_levels(price_array)
             }
-        except Exception as e:
-            logger.error(f"Error in high accuracy signals: {e}")
-            return {'action': 'hold', 'confidence': 0.0, 'reason': f'Error: {e}'}
-
-    def _detect_rejection_signals(self, closes, highs, lows, rsi, current_price):
-        """Detect rejection signals before reaching take profit"""
-        try:
-            if len(closes) < 10:
-                return {'detected': False, 'reason': 'Insufficient data'}
-
-            # Check for price rejection at resistance/support
-            recent_highs = highs[-5:]
-            recent_lows = lows[-5:]
-            recent_closes = closes[-5:]
-
-            # Doji pattern detection
-            last_candle_range = highs[-1] - lows[-1]
-            body_size = abs(closes[-1] - closes[-2]) if len(closes) > 1 else 0
-            if last_candle_range > 0 and body_size / last_candle_range < 0.1:
-                return {'detected': True, 'reason': 'Doji pattern detected'}
             
-            # RSI divergence
-            if len(rsi) >= 5:
-                price_trend = recent_closes[-1] > recent_closes[0]
-                rsi_trend = rsi[-1] > rsi[-5]
-                if price_trend != rsi_trend:
-                    return {'detected': True, 'reason': 'RSI divergence detected'}
-
-            # Support/Resistance rejection
-            resistance_level = max(recent_highs)
-            support_level = min(recent_lows)
-            if current_price >= resistance_level * 0.999:
-                return {'detected': True, 'reason': 'Price at resistance level'}
-            elif current_price <= support_level * 1.001:
-                return {'detected': True, 'reason': 'Price at support level'}
-
-            return {'detected': False, 'reason': 'No rejection signals'}
+            return signals
+            
         except Exception as e:
-            logger.error(f"Error detecting rejection: {e}")
-            return {'detected': False, 'reason': f'Error: {e}'}
-
-    def calculate_sma(self, prices: List[float], period: int) -> List[float]:
-        """Calculate Simple Moving Average"""
-        if len(prices) < period:
-            return []
-        sma = []
-        for i in range(period - 1, len(prices)):
-            avg = sum(prices[i - period + 1:i + 1]) / period
-            sma.append(avg)
-        return sma
-
-    def calculate_ema(self, prices: List[float], period: int) -> List[float]:
-        """Calculate Exponential Moving Average"""
-        if len(prices) < period:
-            return []
-        multiplier = 2 / (period + 1)
-        ema = [prices[0]]
-        for price in prices[1:]:
-            ema_value = (price * multiplier) + (ema[-1] * (1 - multiplier))
-            ema.append(ema_value)
-        return ema
-
-    def calculate_rsi(self, prices: List[float], period: int = 14) -> List[float]:
-        """Calculate Relative Strength Index"""
+            logger.error(f"❌ Erro na análise técnica: {e}")
+            return {}
+    
+    def fast_rsi(self, prices: np.array, period: int = 7) -> float:
+        """RSI rápido para scalping"""
         if len(prices) < period + 1:
-            return []
-        deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
-        gains = [delta if delta > 0 else 0 for delta in deltas]
-        losses = [-delta if delta < 0 else 0 for delta in deltas]
-        avg_gain = sum(gains[:period]) / period
-        avg_loss = sum(losses[:period]) / period
-        rsi = []
-        for i in range(period, len(deltas)):
-            if avg_loss == 0:
-                rsi.append(100)
-            else:
-                rs = avg_gain / avg_loss
-                rsi_value = 100 - (100 / (1 + rs))
-                rsi.append(rsi_value)
-            # Update averages
-            current_gain = gains[i] if i < len(gains) else 0
-            current_loss = losses[i] if i < len(losses) else 0
-            avg_gain = (avg_gain * (period - 1) + current_gain) / period
-            avg_loss = (avg_loss * (period - 1) + current_loss) / period
+            return 50.0
+        
+        deltas = np.diff(prices)
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+        
+        avg_gain = np.mean(gains[-period:])
+        avg_loss = np.mean(losses[-period:])
+        
+        if avg_loss == 0:
+            return 100.0
+        
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
         return rsi
-
-    def calculate_macd(self, prices: List[float], fast: int = 12, slow: int = 26, signal: int = 9):
-        """Calculate MACD"""
-        if len(prices) < slow:
-            return {'macd': [], 'signal': [], 'histogram': []}
-        ema_fast = self.calculate_ema(prices, fast)
-        ema_slow = self.calculate_ema(prices, slow)
-        if not ema_fast or not ema_slow:
-            return {'macd': [], 'signal': [], 'histogram': []}
-        # Align arrays
-        min_len = min(len(ema_fast), len(ema_slow))
-        macd_line = [ema_fast[i] - ema_slow[i] for i in range(min_len)]
-        signal_line = self.calculate_ema(macd_line, signal)
-        # Calculate histogram
-        histogram = []
-        if signal_line:
-            min_len = min(len(macd_line), len(signal_line))
-            histogram = [macd_line[i] - signal_line[i] for i in range(min_len)]
-        return {
-            'macd': macd_line,
-            'signal': signal_line,
-            'histogram': histogram
-        }
-
-    def calculate_bollinger_bands(self, prices: List[float], period: int = 20, std_dev: float = 2):
-        """Calculate Bollinger Bands"""
+    
+    def ema_direction(self, prices: np.array) -> str:
+        """Direção da EMA"""
+        if len(prices) < 9:
+            return 'neutral'
+        
+        # EMA 9
+        ema9 = self.calculate_ema(prices, 9)
+        current_ema = ema9[-1]
+        prev_ema = ema9[-2]
+        
+        if current_ema > prev_ema:
+            return 'up'
+        elif current_ema < prev_ema:
+            return 'down'
+        else:
+            return 'neutral'
+    
+    def ema_trend_strength(self, prices: np.array) -> str:
+        """Força da tendência EMA"""
+        if len(prices) < 21:
+            return 'weak'
+        
+        ema9 = self.calculate_ema(prices, 9)[-1]
+        ema21 = self.calculate_ema(prices, 21)[-1]
+        current_price = prices[-1]
+        
+        # Alinhamento das EMAs
+        if current_price > ema9 > ema21:
+            return 'strong'  # Tendência de alta forte
+        elif current_price < ema9 < ema21:
+            return 'strong'  # Tendência de baixa forte
+        else:
+            return 'weak'
+    
+    def fast_macd_signal(self, prices: np.array) -> str:
+        """MACD rápido"""
+        if len(prices) < 26:
+            return 'neutral'
+        
+        # MACD (12, 26, 9)
+        ema12 = self.calculate_ema(prices, 12)
+        ema26 = self.calculate_ema(prices, 26)
+        
+        macd_line = ema12 - ema26
+        signal_line = self.calculate_ema(macd_line, 9)
+        
+        # Últimos 2 valores
+        current_macd = macd_line[-1]
+        current_signal = signal_line[-1]
+        prev_macd = macd_line[-2]
+        prev_signal = signal_line[-2]
+        
+        # Cruzamentos
+        if current_macd > current_signal and prev_macd <= prev_signal:
+            return 'bullish'
+        elif current_macd < current_signal and prev_macd >= prev_signal:
+            return 'bearish'
+        else:
+            return 'neutral'
+    
+    def bollinger_position(self, prices: np.array, period: int = 20) -> str:
+        """Posição nas Bandas de Bollinger"""
         if len(prices) < period:
-            return {'upper': [], 'middle': [], 'lower': []}
-        sma = self.calculate_sma(prices, period)
-        upper_band = []
-        lower_band = []
-        for i in range(len(sma)):
-            price_slice = prices[i:i + period]
-            if len(price_slice) == period:
-                std = (sum([(p - sma[i]) ** 2 for p in price_slice]) / period) ** 0.5
-                upper_band.append(sma[i] + (std_dev * std))
-                lower_band.append(sma[i] - (std_dev * std))
+            return 'middle'
+        
+        sma = np.mean(prices[-period:])
+        std = np.std(prices[-period:])
+        
+        upper_band = sma + (2 * std)
+        lower_band = sma - (2 * std)
+        current_price = prices[-1]
+        
+        if current_price <= lower_band:
+            return 'lower'
+        elif current_price >= upper_band:
+            return 'upper'
+        else:
+            return 'middle'
+    
+    def volume_spike(self, volumes: np.array) -> bool:
+        """Detecta pico de volume"""
+        if len(volumes) < 10:
+            return False
+        
+        current_volume = volumes[-1]
+        avg_volume = np.mean(volumes[-10:-1])
+        
+        return current_volume > (avg_volume * 1.5)  # 50% acima da média
+    
+    def price_momentum(self, prices: np.array) -> str:
+        """Momentum do preço"""
+        if len(prices) < 5:
+            return 'neutral'
+        
+        # Comparar últimos 3 preços
+        recent_change = (prices[-1] - prices[-4]) / prices[-4]
+        
+        if recent_change > 0.002:  # 0.2% para cima
+            return 'up'
+        elif recent_change < -0.002:  # 0.2% para baixo
+            return 'down'
+        else:
+            return 'neutral'
+    
+    def quick_sr_levels(self, prices: np.array) -> Dict:
+        """Níveis rápidos de suporte e resistência"""
+        if len(prices) < 20:
+            return {'support': 0, 'resistance': 0}
+        
+        recent_prices = prices[-20:]
+        support = np.min(recent_prices)
+        resistance = np.max(recent_prices)
+        
         return {
-            'upper': upper_band,
-            'middle': sma,
-            'lower': lower_band
+            'support': support,
+            'resistance': resistance,
+            'current': prices[-1]
         }
-
-    # Legacy methods for compatibility
-    def analyze(self, klines):
-        """Legacy analyze method"""
-        signals = self.get_high_accuracy_signals(klines)
-        return {
-            'score': signals.get('confidence', 0) * 100,
-            'signals': signals
-        }
-
-    def get_trading_signals(self, klines):
-        """Legacy method"""
-        return self.get_high_accuracy_signals(klines)
+    
+    def calculate_ema(self, prices: np.array, period: int) -> np.array:
+        """Calcula EMA"""
+        if len(prices) < period:
+            return prices
+        
+        alpha = 2 / (period + 1)
+        ema = np.zeros_like(prices)
+        ema[0] = prices[0]
+        
+        for i in range(1, len(prices)):
+            ema[i] = alpha * prices[i] + (1 - alpha) * ema[i-1]
+        
+        return ema
