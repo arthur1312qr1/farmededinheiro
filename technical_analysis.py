@@ -1,243 +1,270 @@
 import numpy as np
-import pandas as pd
-from typing import Dict, List, Tuple
 import logging
-from config import Config
+from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
 class TechnicalAnalysis:
-    """Advanced technical analysis with multiple indicators"""
-    
-    @staticmethod
-    def calculate_rsi(prices: List[float], period: int = 14) -> List[float]:
-        """Calculate RSI (Relative Strength Index)"""
+    def __init__(self):
+        logger.info("📈 Technical Analysis initialized")
+
+    def calculate_sma(self, prices: List[float], period: int) -> List[float]:
+        """Calculate Simple Moving Average"""
+        if len(prices) < period:
+            return []
+        
+        sma = []
+        for i in range(period - 1, len(prices)):
+            avg = sum(prices[i - period + 1:i + 1]) / period
+            sma.append(avg)
+        
+        return sma
+
+    def calculate_ema(self, prices: List[float], period: int) -> List[float]:
+        """Calculate Exponential Moving Average"""
+        if len(prices) < period:
+            return []
+        
+        multiplier = 2 / (period + 1)
+        ema = [prices[0]]
+        
+        for price in prices[1:]:
+            ema_value = (price * multiplier) + (ema[-1] * (1 - multiplier))
+            ema.append(ema_value)
+        
+        return ema
+
+    def calculate_rsi(self, prices: List[float], period: int = 14) -> List[float]:
+        """Calculate Relative Strength Index"""
         if len(prices) < period + 1:
             return []
         
-        df = pd.DataFrame({'price': prices})
-        delta = df['price'].diff()
+        deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
         
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        gains = [delta if delta > 0 else 0 for delta in deltas]
+        losses = [-delta if delta < 0 else 0 for delta in deltas]
         
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
+        avg_gain = sum(gains[:period]) / period
+        avg_loss = sum(losses[:period]) / period
         
-        return rsi.fillna(50).tolist()
-    
-    @staticmethod
-    def calculate_macd(prices: List[float], fast: int = 12, slow: int = 26, signal: int = 9) -> Dict:
-        """Calculate MACD (Moving Average Convergence Divergence)"""
+        rsi = []
+        
+        for i in range(period, len(deltas)):
+            if avg_loss == 0:
+                rsi.append(100)
+            else:
+                rs = avg_gain / avg_loss
+                rsi_value = 100 - (100 / (1 + rs))
+                rsi.append(rsi_value)
+            
+            # Update averages
+            current_gain = gains[i] if i < len(gains) else 0
+            current_loss = losses[i] if i < len(losses) else 0
+            
+            avg_gain = (avg_gain * (period - 1) + current_gain) / period
+            avg_loss = (avg_loss * (period - 1) + current_loss) / period
+        
+        return rsi
+
+    def calculate_macd(self, prices: List[float], fast: int = 12, slow: int = 26, signal: int = 9):
+        """Calculate MACD"""
         if len(prices) < slow:
             return {'macd': [], 'signal': [], 'histogram': []}
         
-        df = pd.DataFrame({'price': prices})
+        ema_fast = self.calculate_ema(prices, fast)
+        ema_slow = self.calculate_ema(prices, slow)
         
-        ema_fast = df['price'].ewm(span=fast).mean()
-        ema_slow = df['price'].ewm(span=slow).mean()
+        # Align EMAs
+        if len(ema_fast) > len(ema_slow):
+            ema_fast = ema_fast[-len(ema_slow):]
+        elif len(ema_slow) > len(ema_fast):
+            ema_slow = ema_slow[-len(ema_fast):]
         
-        macd = ema_fast - ema_slow
-        signal_line = macd.ewm(span=signal).mean()
-        histogram = macd - signal_line
+        macd_line = [fast_val - slow_val for fast_val, slow_val in zip(ema_fast, ema_slow)]
+        signal_line = self.calculate_ema(macd_line, signal)
+        
+        # Align MACD and signal
+        if len(macd_line) > len(signal_line):
+            macd_aligned = macd_line[-len(signal_line):]
+        else:
+            macd_aligned = macd_line
+            
+        histogram = [macd_val - signal_val for macd_val, signal_val in zip(macd_aligned, signal_line)]
         
         return {
-            'macd': macd.fillna(0).tolist(),
-            'signal': signal_line.fillna(0).tolist(),
-            'histogram': histogram.fillna(0).tolist()
+            'macd': macd_aligned,
+            'signal': signal_line,
+            'histogram': histogram
         }
-    
-    @staticmethod
-    def calculate_bollinger_bands(prices: List[float], period: int = 20, std: int = 2) -> Dict:
+
+    def calculate_bollinger_bands(self, prices: List[float], period: int = 20, std_dev: float = 2):
         """Calculate Bollinger Bands"""
         if len(prices) < period:
-            return {'upper': [], 'middle': [], 'lower': [], 'width': []}
+            return {'upper': [], 'middle': [], 'lower': []}
         
-        df = pd.DataFrame({'price': prices})
+        sma = self.calculate_sma(prices, period)
         
-        middle = df['price'].rolling(window=period).mean()
-        std_dev = df['price'].rolling(window=period).std()
+        upper_band = []
+        lower_band = []
         
-        upper = middle + (std_dev * std)
-        lower = middle - (std_dev * std)
-        width = ((upper - lower) / middle) * 100
-        
-        return {
-            'upper': upper.fillna(0).tolist(),
-            'middle': middle.fillna(0).tolist(),
-            'lower': lower.fillna(0).tolist(),
-            'width': width.fillna(0).tolist()
-        }
-    
-    @staticmethod
-    def calculate_ema(prices: List[float], period: int) -> List[float]:
-        """Calculate Exponential Moving Average"""
-        if len(prices) < period:
-            return [prices[-1]] * len(prices) if prices else []
-        
-        df = pd.DataFrame({'price': prices})
-        ema = df['price'].ewm(span=period).mean()
-        
-        return ema.fillna(prices[0] if prices else 0).tolist()
-    
-    @staticmethod
-    def calculate_support_resistance(highs: List[float], lows: List[float], 
-                                   closes: List[float], window: int = 20) -> Dict:
-        """Calculate dynamic support and resistance levels"""
-        if len(closes) < window:
-            return {'support': 0, 'resistance': 0, 'pivot': 0}
-        
-        recent_highs = highs[-window:]
-        recent_lows = lows[-window:]
-        recent_closes = closes[-window:]
-        
-        # Calculate pivot points
-        pivot = (max(recent_highs) + min(recent_lows) + recent_closes[-1]) / 3
-        resistance = (2 * pivot) - min(recent_lows)
-        support = (2 * pivot) - max(recent_highs)
+        for i in range(len(sma)):
+            # Get the subset of prices for standard deviation calculation
+            price_subset = prices[i:i + period]
+            if len(price_subset) == period:
+                std = np.std(price_subset)
+                upper_band.append(sma[i] + (std * std_dev))
+                lower_band.append(sma[i] - (std * std_dev))
         
         return {
-            'support': support,
-            'resistance': resistance,
-            'pivot': pivot
+            'upper': upper_band,
+            'middle': sma,
+            'lower': lower_band
         }
-    
-    @staticmethod
-    def analyze_volume_profile(volumes: List[float], prices: List[float], 
-                              bins: int = 20) -> Dict:
-        """Analyze volume profile for key levels"""
-        if len(volumes) < bins or len(prices) != len(volumes):
-            return {'poc': 0, 'vah': 0, 'val': 0}  # Point of Control, Value Area High/Low
+
+    def detect_support_resistance(self, klines: List[Dict]) -> Dict:
+        """Detect support and resistance levels"""
+        if len(klines) < 20:
+            return {'support': [], 'resistance': []}
         
-        # Create price bins
-        price_range = max(prices) - min(prices)
-        bin_size = price_range / bins
-        
-        volume_at_price = {}
-        for i, price in enumerate(prices):
-            bin_key = int((price - min(prices)) / bin_size)
-            if bin_key not in volume_at_price:
-                volume_at_price[bin_key] = 0
-            volume_at_price[bin_key] += volumes[i]
-        
-        # Find Point of Control (highest volume)
-        poc_bin = max(volume_at_price.keys(), key=lambda k: volume_at_price[k])
-        poc_price = min(prices) + (poc_bin * bin_size)
-        
-        # Calculate Value Area (70% of volume)
-        total_volume = sum(volume_at_price.values())
-        value_area_volume = total_volume * 0.7
-        
-        # Sort bins by volume and find value area
-        sorted_bins = sorted(volume_at_price.keys(), 
-                           key=lambda k: volume_at_price[k], reverse=True)
-        
-        va_volume = 0
-        va_bins = []
-        for bin_key in sorted_bins:
-            va_volume += volume_at_price[bin_key]
-            va_bins.append(bin_key)
-            if va_volume >= value_area_volume:
-                break
-        
-        vah = min(prices) + (max(va_bins) * bin_size)  # Value Area High
-        val = min(prices) + (min(va_bins) * bin_size)  # Value Area Low
-        
-        return {
-            'poc': poc_price,
-            'vah': vah,
-            'val': val
-        }
-    
-    @classmethod
-    def comprehensive_analysis(cls, klines: List[Dict]) -> Dict:
-        """Perform comprehensive technical analysis on kline data"""
-        if not klines or len(klines) < 50:
-            return cls._empty_analysis()
-        
-        # Extract price data
-        opens = [k['open'] for k in klines]
         highs = [k['high'] for k in klines]
         lows = [k['low'] for k in klines]
-        closes = [k['close'] for k in klines]
-        volumes = [k['volume'] for k in klines]
         
-        try:
-            # Calculate all indicators
-            analysis = {
-                'rsi': {},
-                'macd': cls.calculate_macd(closes, Config.MACD_FAST, 
-                                         Config.MACD_SLOW, Config.MACD_SIGNAL),
-                'bollinger': cls.calculate_bollinger_bands(closes, Config.BB_PERIOD, Config.BB_STD),
-                'ema': {},
-                'support_resistance': cls.calculate_support_resistance(highs, lows, closes),
-                'volume_profile': cls.analyze_volume_profile(volumes, closes),
-                'price_action': cls._analyze_price_action(opens, highs, lows, closes),
-                'current_price': closes[-1],
-                'timestamp': klines[-1]['timestamp']
-            }
+        # Find local peaks and troughs
+        resistance_levels = []
+        support_levels = []
+        
+        for i in range(2, len(highs) - 2):
+            # Resistance (local high)
+            if highs[i] > highs[i-1] and highs[i] > highs[i+1] and highs[i] > highs[i-2] and highs[i] > highs[i+2]:
+                resistance_levels.append(highs[i])
             
-            # Calculate RSI for different periods
-            for period in Config.RSI_PERIODS:
-                analysis['rsi'][f'rsi_{period}'] = cls.calculate_rsi(closes, period)
-            
-            # Calculate EMA for different periods
-            for period in Config.EMA_PERIODS:
-                analysis['ema'][f'ema_{period}'] = cls.calculate_ema(closes, period)
-            
-            return analysis
-            
-        except Exception as e:
-            logger.error(f"Error in comprehensive analysis: {e}")
-            return cls._empty_analysis()
-    
-    @staticmethod
-    def _analyze_price_action(opens: List[float], highs: List[float], 
-                            lows: List[float], closes: List[float]) -> Dict:
-        """Analyze price action patterns"""
-        if len(closes) < 3:
-            return {'trend': 'neutral', 'momentum': 0, 'volatility': 0}
+            # Support (local low)
+            if lows[i] < lows[i-1] and lows[i] < lows[i+1] and lows[i] < lows[i-2] and lows[i] < lows[i+2]:
+                support_levels.append(lows[i])
         
-        # Calculate trend
-        short_trend = (closes[-1] - closes[-5]) / closes[-5] if len(closes) >= 5 else 0
-        long_trend = (closes[-1] - closes[-20]) / closes[-20] if len(closes) >= 20 else 0
-        
-        trend = 'bullish' if short_trend > 0.02 else 'bearish' if short_trend < -0.02 else 'neutral'
-        
-        # Calculate momentum
-        momentum = short_trend * 100
-        
-        # Calculate volatility (average true range)
-        atr_values = []
-        for i in range(1, min(14, len(closes))):
-            true_range = max(
-                highs[-i] - lows[-i],
-                abs(highs[-i] - closes[-i-1]),
-                abs(lows[-i] - closes[-i-1])
-            )
-            atr_values.append(true_range)
-        
-        volatility = np.mean(atr_values) / closes[-1] * 100 if atr_values else 0
+        # Filter and sort levels
+        resistance_levels = sorted(list(set(resistance_levels)), reverse=True)[:5]
+        support_levels = sorted(list(set(support_levels)))[-5:]
         
         return {
-            'trend': trend,
-            'momentum': momentum,
-            'volatility': volatility,
-            'short_trend': short_trend,
-            'long_trend': long_trend
+            'support': support_levels,
+            'resistance': resistance_levels
         }
-    
-    @staticmethod
-    def _empty_analysis() -> Dict:
-        """Return empty analysis structure"""
+
+    def analyze(self, klines: List[Dict]) -> Dict:
+        """Perform comprehensive technical analysis"""
+        if len(klines) < 30:
+            return {'error': 'Insufficient data for analysis'}
+        
+        # Extract prices
+        closes = [k['close'] for k in klines]
+        highs = [k['high'] for k in klines]
+        lows = [k['low'] for k in klines]
+        
+        # Calculate indicators
+        sma_20 = self.calculate_sma(closes, 20)
+        ema_12 = self.calculate_ema(closes, 12)
+        ema_26 = self.calculate_ema(closes, 26)
+        rsi = self.calculate_rsi(closes)
+        macd_data = self.calculate_macd(closes)
+        bb_data = self.calculate_bollinger_bands(closes)
+        sr_levels = self.detect_support_resistance(klines)
+        
+        current_price = closes[-1]
+        
+        # Analysis score (0-100)
+        score = 50  # Neutral starting point
+        signals = []
+        
+        # RSI Analysis
+        if rsi and len(rsi) > 0:
+            current_rsi = rsi[-1]
+            if current_rsi < 30:
+                score += 15
+                signals.append("RSI oversold (bullish)")
+            elif current_rsi > 70:
+                score -= 15
+                signals.append("RSI overbought (bearish)")
+        
+        # Moving Average Analysis
+        if sma_20 and len(sma_20) > 0:
+            if current_price > sma_20[-1]:
+                score += 10
+                signals.append("Price above SMA20 (bullish)")
+            else:
+                score -= 10
+                signals.append("Price below SMA20 (bearish)")
+        
+        # EMA Crossover
+        if len(ema_12) > 1 and len(ema_26) > 1:
+            if ema_12[-1] > ema_26[-1] and ema_12[-2] <= ema_26[-2]:
+                score += 20
+                signals.append("Golden cross (bullish)")
+            elif ema_12[-1] < ema_26[-1] and ema_12[-2] >= ema_26[-2]:
+                score -= 20
+                signals.append("Death cross (bearish)")
+        
+        # MACD Analysis
+        if macd_data['macd'] and macd_data['signal'] and len(macd_data['histogram']) > 1:
+            current_histogram = macd_data['histogram'][-1]
+            prev_histogram = macd_data['histogram'][-2]
+            
+            if current_histogram > 0 and prev_histogram <= 0:
+                score += 15
+                signals.append("MACD bullish crossover")
+            elif current_histogram < 0 and prev_histogram >= 0:
+                score -= 15
+                signals.append("MACD bearish crossover")
+        
+        # Bollinger Bands Analysis
+        if bb_data['upper'] and bb_data['lower'] and len(bb_data['upper']) > 0:
+            if current_price <= bb_data['lower'][-1]:
+                score += 10
+                signals.append("Price at lower Bollinger Band (bullish)")
+            elif current_price >= bb_data['upper'][-1]:
+                score -= 10
+                signals.append("Price at upper Bollinger Band (bearish)")
+        
+        # Constrain score to 0-100
+        score = max(0, min(100, score))
+        
         return {
-            'rsi': {f'rsi_{p}': [] for p in Config.RSI_PERIODS},
-            'macd': {'macd': [], 'signal': [], 'histogram': []},
-            'bollinger': {'upper': [], 'middle': [], 'lower': [], 'width': []},
-            'ema': {f'ema_{p}': [] for p in Config.EMA_PERIODS},
-            'support_resistance': {'support': 0, 'resistance': 0, 'pivot': 0},
-            'volume_profile': {'poc': 0, 'vah': 0, 'val': 0},
-            'price_action': {'trend': 'neutral', 'momentum': 0, 'volatility': 0},
-            'current_price': 0,
-            'timestamp': 0
+            'score': score,
+            'signals': signals,
+            'indicators': {
+                'rsi': rsi[-1] if rsi else None,
+                'sma_20': sma_20[-1] if sma_20 else None,
+                'macd': macd_data['macd'][-1] if macd_data['macd'] else None,
+                'signal': macd_data['signal'][-1] if macd_data['signal'] else None
+            },
+            'support_resistance': sr_levels,
+            'current_price': current_price
+        }
+
+    def get_trading_signals(self, klines: List[Dict]) -> Dict:
+        """Get trading signals based on analysis"""
+        analysis = self.analyze(klines)
+        
+        if 'error' in analysis:
+            return {'action': 'hold', 'strength': 0, 'reason': 'Insufficient data'}
+        
+        score = analysis['score']
+        
+        # Determine action based on score
+        if score >= 70:
+            action = 'buy'
+            strength = (score - 50) / 50  # 0.4 to 1.0
+        elif score <= 30:
+            action = 'sell' 
+            strength = (50 - score) / 50  # 0.4 to 1.0
+        else:
+            action = 'hold'
+            strength = 0.5
+        
+        return {
+            'action': action,
+            'strength': round(strength, 2),
+            'score': score,
+            'reason': f"Technical score: {score}/100",
+            'signals': analysis['signals']
         }
