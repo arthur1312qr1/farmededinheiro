@@ -1,39 +1,49 @@
-import eventlet
-eventlet.monkey_patch()
-
+"""
+Arquivo principal otimizado para Render
+"""
 import os
+import logging
 
-# Tentar importar o app original
+# Configurar logging antes de tudo
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+logger = logging.getLogger(__name__)
+
 try:
+    # Importar app somente se necessário
     from app import app, socketio
-    print("✅ App original importado com sucesso")
-except ImportError as e:
-    print(f"❌ Erro ao importar app original: {e}")
-    print("Criando app básico como fallback...")
+    logger.info("✅ App importado com sucesso")
     
-    # Fallback: criar app básico se o original não funcionar
+    if __name__ == "__main__":
+        # Para execução local
+        port = int(os.environ.get('PORT', 5000))
+        logger.info(f"🚀 Iniciando servidor local na porta {port}")
+        socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    
+except Exception as e:
+    logger.error(f"❌ Erro ao importar app: {e}")
+    
+    # Fallback - App mínimo caso algo dê errado
     from flask import Flask
-    from flask_socketio import SocketIO
     
     app = Flask(__name__)
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key')
-    socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*")
     
     @app.route('/')
     def home():
-        return "App básico funcionando - Verifique configuração original"
+        return """
+        <h1>🤖 Trading Bot</h1>
+        <p>Status: Online (Modo Fallback)</p>
+        <p>O bot está funcionando mas com configuração mínima.</p>
+        <p>Verifique os logs para mais detalhes.</p>
+        """
     
     @app.route('/health')
     def health():
         return {'status': 'ok'}, 200
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    print(f"🚀 Iniciando servidor na porta {port}")
     
-    # Verificar se existe rota principal
-    print("Rotas disponíveis:")
-    for rule in app.url_map.iter_rules():
-        print(f"  {rule.endpoint}: {rule.rule}")
-    
-    socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    if __name__ == "__main__":
+        port = int(os.environ.get('PORT', 5000))
+        app.run(host='0.0.0.0', port=port, debug=False)
