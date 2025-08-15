@@ -1,104 +1,105 @@
-"""
-Flask Application Factory for Farme de Dinheiro Trading Bot
-Production-ready configuration with SocketIO and trading functionality
-"""
-
 import os
+import sys
+import traceback
 import logging
-from flask import Flask
-from flask_socketio import SocketIO
+from datetime import datetime
+from flask import Flask, render_template, request, jsonify, session
+from flask_socketio import SocketIO, emit
 from flask_cors import CORS
+import eventlet
 
-# Configure logging
-logger = logging.getLogger(__name__)
-
-# Global SocketIO instance
-socketio = SocketIO(
-    cors_allowed_origins="*",
-    async_mode='threading',
-    logger=False,
-    engineio_logger=False
+# Configuração de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 
+logger = logging.getLogger(__name__)
+
 def create_app():
-    """Create and configure Flask application"""
+    """Cria e configura a aplicação Flask"""
     app = Flask(__name__)
     
-    # Configuration
-    app.config.update({
-        'SECRET_KEY': os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production'),
-        'DEBUG': os.environ.get('FLASK_DEBUG', 'False').lower() == 'true',
-        'TESTING': False,
-        
-        # Trading Bot Configuration
-        'PAPER_TRADING': os.environ.get('PAPER_TRADING', 'False').lower() == 'true',
-        'SYMBOL': os.environ.get('SYMBOL', 'ethusdt_UMCBL'),
-        'LEVERAGE': int(os.environ.get('LEVERAGE', '10')),
-        'BASE_CURRENCY': os.environ.get('BASE_CURRENCY', 'USDT'),
-        'TARGET_TRADES_PER_DAY': int(os.environ.get('TARGET_TRADES_PER_DAY', '200')),
-        
-        # API Keys
-        'BITGET_API_KEY': os.environ.get('BITGET_API_KEY', ''),
-        'BITGET_SECRET_KEY': os.environ.get('BITGET_SECRET_KEY', ''),
-        'BITGET_PASSPHRASE': os.environ.get('BITGET_PASSPHRASE', ''),
-        'GEMINI_API_KEY': os.environ.get('GEMINI_API_KEY', ''),
-    })
+    # Configurações
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
+    app.config['DEBUG'] = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
     
-    # Enable CORS for development
-    CORS(app)
+    # Configurar CORS
+    CORS(app, origins="*")
     
-    # Initialize SocketIO with app
-    socketio.init_app(app)
+    # Configurar SocketIO
+    socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
     
-    # Register routes
-    from server.routes import register_routes
-    register_routes(app, socketio)
+    # Rota principal
+    @app.route('/')
+    def index():
+        return render_template('index.html')
     
-    # Initialize trading bot
+    @app.route('/api/status')
+    def status():
+        return jsonify({
+            'status': 'online',
+            'timestamp': datetime.now().isoformat(),
+            'message': 'Trading Bot API está funcionando!'
+        })
+    
+    # Importar e registrar rotas (corrigido)
     try:
-        from server.trading_bot import TradingBot
-        from server.socketio_manager import SocketIOManager
-        
-        # Create trading bot instance
-        trading_bot = TradingBot(app.config)
-        socketio_manager = SocketIOManager(socketio, trading_bot)
-        
-        # Store instances in app context
-        app.trading_bot = trading_bot
-        app.socketio_manager = socketio_manager
-        
-        logger.info("✅ Trading bot inicializado com sucesso")
-        
-    except Exception as e:
-        logger.error(f"❌ Erro ao inicializar trading bot: {e}")
-        # Continue without trading bot for debugging
+        from routes import register_routes  # ✅ CORRETO
+        register_routes(app, socketio)
+        logger.info("Rotas registradas com sucesso")
+    except ImportError as e:
+        logger.warning(f"Não foi possível importar routes: {e}")
+        logger.info("Aplicação iniciará sem rotas adicionais")
     
-    # Health check endpoint
-    @app.route('/health')
-    def health_check():
-        return {
-            'status': 'healthy',
-            'trading_active': hasattr(app, 'trading_bot'),
-            'paper_trading': app.config.get('PAPER_TRADING', True)
-        }
+    # Event handlers do SocketIO
+    @socketio.on('connect')
+    def handle_connect():
+        logger.info('Cliente conectado via WebSocket')
+        emit('response', {'data': 'Conectado ao Trading Bot!'})
+    
+    @socketio.on('disconnect')
+    def handle_disconnect():
+        logger.info('Cliente desconectado')
+    
+    @socketio.on('ping')
+    def handle_ping():
+        emit('pong', {'timestamp': datetime.now().isoformat()})
     
     # Error handlers
     @app.errorhandler(404)
     def not_found(error):
-        return {'error': 'Endpoint não encontrado'}, 404
+        return jsonify({'error': 'Endpoint não encontrado'}), 404
     
     @app.errorhandler(500)
     def internal_error(error):
         logger.error(f"Erro interno: {error}")
-        return {'error': 'Erro interno do servidor'}, 500
+        return jsonify({'error': 'Erro interno do servidor'}), 500
     
-    logger.info("🔧 Flask app configurada com sucesso")
+    app.socketio = socketio
     return app
 
-# For Gunicorn compatibility
-app = create_app()
-
 if __name__ == '__main__':
-    # Development server
-    port = int(os.environ.get('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port, debug=True)
+    try:
+        app = create_app()
+        port = int(os.environ.get('PORT', 5000))
+        
+        logger.info(f"Iniciando Trading Bot na porta {port}")
+        logger.info("Aplicação configurada com sucesso")
+        
+        # Usar eventlet para melhor performance com SocketIO
+        app.socketio.run(
+            app,
+            host='0.0.0.0',
+            port=port,
+            debug=app.config['DEBUG']
+        )
+        
+    except Exception as e:
+        logger.error(f"Erro ao iniciar aplicação: {e}")
+        logger.error(traceback.format_exc())
+        sys.exit(1)
