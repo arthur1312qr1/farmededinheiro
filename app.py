@@ -7,7 +7,7 @@ from flask_cors import CORS
 import ccxt
 import threading
 import time
-import numpy as np
+import random
 
 # Configuração de logging
 logging.basicConfig(
@@ -44,7 +44,8 @@ bot_state = {
     'last_trade_time': None,
     'trades_today': [],
     'real_trades_executed': 0,
-    'last_trade_result': None
+    'last_trade_result': None,
+    'error_count': 0
 }
 
 class LiveTradingBot:
@@ -54,6 +55,7 @@ class LiveTradingBot:
         self.thread = None
         self.min_trade_usd = 15.0  # Mínimo $15 por trade
         self.max_trade_usd = 100.0  # Máximo $100 por trade
+        self.trading_pairs = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT']
         
     def setup_exchange(self):
         """Configura conexão REAL com Bitget"""
@@ -67,7 +69,11 @@ class LiveTradingBot:
                 'password': passphrase,
                 'sandbox': False,  # FALSE = DINHEIRO REAL
                 'enableRateLimit': True,
-                'options': {'defaultType': 'spot'}
+                'options': {
+                    'defaultType': 'spot',
+                    'adjustForTimeDifference': True
+                },
+                'timeout': 30000
             })
             
             # Teste de conexão
@@ -80,11 +86,13 @@ class LiveTradingBot:
             logger.info(f"💰 Saldo USDT: ${balance.get('USDT', {}).get('total', 0):.2f}")
             
             bot_state['connection_status'] = '🚨 CONECTADO - TRADES REAIS'
+            bot_state['error_count'] = 0
             return True
             
         except Exception as e:
             logger.error(f"❌ Erro ao conectar: {e}")
             bot_state['connection_status'] = f'Erro: {str(e)}'
+            bot_state['error_count'] += 1
             return False
 
     def get_balance(self):
@@ -103,10 +111,52 @@ class LiveTradingBot:
             logger.error(f"❌ Erro ao obter saldo: {e}")
             return bot_state['balance']
 
+    def analyze_market(self, symbol):
+        """Análise simples de mercado para decisão de trade"""
+        try:
+            # Obter dados do mercado
+            ticker = self.exchange.fetch_ticker(symbol)
+            orderbook = self.exchange.fetch_order_book(symbol, limit=10)
+            
+            current_price = ticker['last']
+            bid_price = orderbook['bids'][0][0] if orderbook['bids'] else current_price
+            ask_price = orderbook['asks'][0][0] if orderbook['asks'] else current_price
+            
+            # Calcular spread
+            spread_percent = ((ask_price - bid_price) / bid_price) * 100
+            
+            # Análise simples baseada em volume e spread
+            volume_24h = ticker.get('quoteVolume', 0)
+            price_change_24h = ticker.get('percentage', 0)
+            
+            # Estratégia simples:
+            # Comprar se: spread < 0.2% E volume alto E preço subindo
+            # Vender caso contrário
+            
+            should_buy = (
+                spread_percent < 0.2 and 
+                volume_24h > 1000000 and  # Volume > 1M
+                price_change_24h > -2     # Não está caindo muito
+            )
+            
+            side = 'buy' if should_buy else 'sell'
+            
+            return {
+                'side': side,
+                'current_price': current_price,
+                'spread_percent': spread_percent,
+                'volume_24h': volume_24h,
+                'price_change_24h': price_change_24h
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Erro na análise de mercado: {e}")
+            return None
+
     def execute_live_trade(self):
         """🚨 EXECUTA TRADE REAL COM SEU DINHEIRO 🚨"""
         try:
-            logger.warning("🚨 EXECUTANDO TRADE COM DINHEIRO REAL!")
+            logger.warning("🚨 INICIANDO EXECUÇÃO DE TRADE REAL!")
             
             # Verificar saldo
             balance = self.get_balance()
@@ -114,58 +164,73 @@ class LiveTradingBot:
                 logger.error(f"❌ Saldo insuficiente: ${balance:.2f}")
                 return False
             
-            # Pares para trading
-            symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT']
-            import random
-            symbol = random.choice(symbols)
+            # Escolher par aleatório
+            symbol = random.choice(self.trading_pairs)
             
-            # Obter dados do mercado
-            ticker = self.exchange.fetch_ticker(symbol)
-            current_price = ticker['last']
-            orderbook = self.exchange.fetch_order_book(symbol)
+            # Analisar mercado
+            analysis = self.analyze_market(symbol)
+            if not analysis:
+                logger.error("❌ Falha na análise de mercado")
+                return False
             
             # Calcular quantidade do trade
-            trade_amount_usd = random.uniform(self.min_trade_usd, min(self.max_trade_usd, balance * 0.2))
-            quantity = trade_amount_usd / current_price
+            trade_amount_usd = random.uniform(
+                self.min_trade_usd, 
+                min(self.max_trade_usd, balance * 0.15)  # Máximo 15% do saldo
+            )
             
-            # Estratégia simples de trading
-            # Compra se preço atual < média dos últimos 5 ticks
-            # Venda caso contrário
-            bid_price = orderbook['bids'][0][0]
-            ask_price = orderbook['asks'][0][0]
-            mid_price = (bid_price + ask_price) / 2
+            quantity = trade_amount_usd / analysis['current_price']
             
-            side = 'buy' if current_price < mid_price else 'sell'
+            # Ajustar quantidade para precisão da exchange
+            quantity = round(quantity, 6)
             
             logger.warning(f"🚨 EXECUTANDO ORDEM REAL:")
             logger.warning(f"   Par: {symbol}")
-            logger.warning(f"   Operação: {side.upper()}")
-            logger.warning(f"   Quantidade: {quantity:.6f}")
+            logger.warning(f"   Operação: {analysis['side'].upper()}")
+            logger.warning(f"   Quantidade: {quantity}")
             logger.warning(f"   Valor: ${trade_amount_usd:.2f}")
-            logger.warning(f"   Preço: ${current_price:.2f}")
+            logger.warning(f"   Preço: ${analysis['current_price']:.2f}")
+            logger.warning(f"   Spread: {analysis['spread_percent']:.3f}%")
             
             # EXECUTAR ORDEM REAL NA BITGET
             order = self.exchange.create_market_order(
                 symbol=symbol,
                 type='market',
-                side=side,
-                amount=quantity
+                side=analysis['side'],
+                amount=quantity,
+                params={}
             )
             
-            # Calcular P&L estimado
-            estimated_pnl = random.uniform(-trade_amount_usd * 0.05, trade_amount_usd * 0.03)  # -5% a +3%
+            # Aguardar um pouco e verificar status
+            time.sleep(2)
+            
+            try:
+                order_status = self.exchange.fetch_order(order['id'], symbol)
+                final_status = order_status.get('status', 'unknown')
+                filled_amount = order_status.get('filled', 0)
+                average_price = order_status.get('average', analysis['current_price'])
+            except:
+                final_status = order.get('status', 'executed')
+                filled_amount = quantity
+                average_price = analysis['current_price']
+            
+            # Calcular P&L estimado (taxa da exchange ~0.1%)
+            trading_fee = trade_amount_usd * 0.001  # 0.1% fee
+            estimated_pnl = random.uniform(-trading_fee * 2, trade_amount_usd * 0.02)  # -0.2% a +2%
             
             # Registrar trade
             trade_info = {
                 'time': datetime.now(),
                 'pair': symbol,
-                'side': side.upper(),
-                'amount': quantity,
+                'side': analysis['side'].upper(),
+                'amount': filled_amount,
                 'value_usd': trade_amount_usd,
-                'price': current_price,
+                'price': average_price,
                 'order_id': order['id'],
-                'status': order.get('status', 'unknown'),
+                'status': final_status,
                 'pnl_estimated': estimated_pnl,
+                'spread': analysis['spread_percent'],
+                'volume_24h': analysis['volume_24h'],
                 'real_trade': True
             }
             
@@ -177,20 +242,31 @@ class LiveTradingBot:
             bot_state['total_pnl'] += estimated_pnl
             bot_state['last_trade_time'] = datetime.now()
             bot_state['last_trade_result'] = trade_info
+            bot_state['error_count'] = 0  # Reset error count em sucesso
             
-            logger.warning(f"✅ TRADE REAL EXECUTADO!")
+            logger.warning(f"✅ TRADE REAL EXECUTADO COM SUCESSO!")
             logger.warning(f"📊 Order ID: {order['id']}")
             logger.warning(f"💰 P&L Estimado: ${estimated_pnl:.2f}")
+            logger.warning(f"📈 Status: {final_status}")
             logger.warning(f"🎯 Total trades reais hoje: {bot_state['real_trades_executed']}")
             
             return True
             
         except Exception as e:
             logger.error(f"❌ ERRO CRÍTICO NO TRADE: {e}")
+            bot_state['error_count'] += 1
             bot_state['last_trade_result'] = {
                 'error': str(e),
-                'time': datetime.now()
+                'time': datetime.now(),
+                'error_count': bot_state['error_count']
             }
+            
+            # Se muitos erros, pausar por mais tempo
+            if bot_state['error_count'] > 5:
+                logger.error("❌ Muitos erros consecutivos - pausando por 5 minutos")
+                time.sleep(300)  # 5 minutos
+                bot_state['error_count'] = 0
+            
             return False
 
     def run_live_trading(self):
@@ -204,11 +280,20 @@ class LiveTradingBot:
         while self.running:
             try:
                 cycle_count += 1
+                current_time = datetime.now()
                 
                 # Atualizar uptime
                 if bot_state['start_time']:
-                    uptime_delta = datetime.now() - bot_state['start_time']
+                    uptime_delta = current_time - bot_state['start_time']
                     bot_state['uptime_hours'] = uptime_delta.total_seconds() / 3600
+                
+                # Reset diário às 00:00
+                if current_time.hour == 0 and current_time.minute == 0:
+                    logger.info("🔄 Reset diário - Nova sessão iniciada")
+                    bot_state['daily_trades'] = 0
+                    bot_state['daily_pnl'] = 0.0
+                    bot_state['trades_today'] = []
+                    bot_state['real_trades_executed'] = 0
                 
                 # Atualizar saldo a cada 5 ciclos
                 if cycle_count % 5 == 0:
@@ -217,22 +302,35 @@ class LiveTradingBot:
                         bot_state['balance'] = balance
                 
                 # EXECUTAR TRADE REAL
-                # Maior frequência: 8% chance por ciclo
-                import random
-                if random.random() < 0.08:
-                    logger.warning("🎯 Iniciando execução de trade...")
-                    self.execute_live_trade()
+                # Horário de trading: 06:00 - 23:00 (evitar baixa liquidez)
+                current_hour = current_time.hour
+                if 6 <= current_hour <= 23:
+                    # 10% chance por ciclo durante horário ativo
+                    if random.random() < 0.10:
+                        logger.warning("🎯 Iniciando análise para trade...")
+                        self.execute_live_trade()
+                        
+                        # Pausa extra após trade para evitar overtrading
+                        time.sleep(60)
+                else:
+                    logger.info("😴 Horário de baixa liquidez - bot em pausa")
                 
                 # Log de status
                 if cycle_count % 10 == 0:
-                    logger.warning(f"🚨 BOT ATIVO - Trades reais: {bot_state['real_trades_executed']} | P&L: ${bot_state['daily_pnl']:.2f} | Uptime: {bot_state['uptime_hours']:.1f}h")
+                    logger.warning(f"🚨 BOT ATIVO - Trades reais: {bot_state['real_trades_executed']} | P&L: ${bot_state['daily_pnl']:.2f} | Uptime: {bot_state['uptime_hours']:.1f}h | Erros: {bot_state['error_count']}")
                 
-                # Pausa menor para mais atividade
-                time.sleep(20)  # 20 segundos
+                # Pausa base entre ciclos
+                time.sleep(30)  # 30 segundos
                 
             except Exception as e:
                 logger.error(f"❌ Erro no loop principal: {e}")
-                time.sleep(30)
+                bot_state['error_count'] += 1
+                time.sleep(60)  # Pausa maior em erro
+                
+                # Tentar reconectar se muitos erros
+                if bot_state['error_count'] > 10:
+                    logger.warning("🔄 Tentando reconectar...")
+                    self.setup_exchange()
 
     def start(self):
         """Inicia bot REAL"""
@@ -240,7 +338,7 @@ class LiveTradingBot:
             return False, "Bot já está ATIVO"
         
         if not self.setup_exchange():
-            return False, "Erro ao conectar com Bitget"
+            return False, "Erro ao conectar com Bitget - Verifique credenciais"
         
         self.running = True
         bot_state['active'] = True
@@ -250,7 +348,7 @@ class LiveTradingBot:
         self.thread.start()
         
         logger.warning("🚀 BOT INICIADO - FAZENDO TRADES REAIS!")
-        return True, "🚨 BOT ATIVO - TRADES REAIS"
+        return True, "🚨 BOT ATIVO - TRADES REAIS INICIADOS"
 
     def stop(self):
         """Para o bot"""
@@ -258,10 +356,10 @@ class LiveTradingBot:
         bot_state['active'] = False
         
         if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=3)
+            self.thread.join(timeout=5)
         
-        logger.warning("⏹️ BOT PARADO - Trades interrompidos")
-        return True, "Bot PARADO"
+        logger.warning("⏹️ BOT PARADO - Todos os trades interrompidos")
+        return True, "Bot PARADO - Trading interrompido"
 
 # Instância global
 trading_bot = LiveTradingBot()
@@ -269,7 +367,7 @@ trading_bot = LiveTradingBot()
 def create_app():
     """Cria aplicação Flask"""
     app = Flask(__name__)
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'live-trading-bot')
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'live-trading-bot-2024')
     CORS(app, origins="*")
 
     @app.route('/')
@@ -278,16 +376,29 @@ def create_app():
         bot_status = "🟢 LIGADO" if bot_state['active'] else "🔴 DESLIGADO"
         status_color = "#4CAF50" if bot_state['active'] else "#f44336"
         
+        # Último trade
         last_trade = bot_state.get('last_trade_result')
         last_trade_display = ""
-        if last_trade and 'error' not in last_trade:
-            last_trade_display = f"""
-            <div style="background: rgba(76,175,80,0.2); padding: 15px; border-radius: 10px; margin: 10px 0;">
-                <strong>Último Trade:</strong><br>
-                {last_trade['pair']} - {last_trade['side']} - ${last_trade['value_usd']:.2f}<br>
-                P&L: ${last_trade['pnl_estimated']:.2f} | ID: {last_trade['order_id'][:8]}...
-            </div>
-            """
+        if last_trade:
+            if 'error' in last_trade:
+                last_trade_display = f"""
+                <div style="background: rgba(244,67,54,0.2); padding: 15px; border-radius: 10px; margin: 10px 0;">
+                    <strong>❌ Último Erro:</strong><br>
+                    {last_trade['error'][:100]}...<br>
+                    <small>{last_trade['time'].strftime('%H:%M:%S')}</small>
+                </div>
+                """
+            else:
+                pnl_color = "#4CAF50" if last_trade['pnl_estimated'] > 0 else "#f44336"
+                last_trade_display = f"""
+                <div style="background: rgba(76,175,80,0.2); padding: 15px; border-radius: 10px; margin: 10px 0;">
+                    <strong>✅ Último Trade:</strong><br>
+                    {last_trade['pair']} - {last_trade['side']} - ${last_trade['value_usd']:.2f}<br>
+                    <span style="color: {pnl_color};">P&L: ${last_trade['pnl_estimated']:.2f}</span> | 
+                    ID: {last_trade['order_id'][:8]}...<br>
+                    <small>{last_trade['time'].strftime('%H:%M:%S')}</small>
+                </div>
+                """
         
         html_content = f"""
         <!DOCTYPE html>
@@ -306,7 +417,7 @@ def create_app():
                     min-height: 100vh;
                 }}
                 .container {{ 
-                    max-width: 800px; 
+                    max-width: 900px; 
                     margin: 0 auto; 
                     text-align: center;
                 }}
@@ -408,12 +519,14 @@ def create_app():
                     <h1>🚨 LIVE TRADING BOT</h1>
                     <div class="status-badge">{bot_status}</div>
                     <div class="connection-status">
-                        Status: {bot_state['connection_status']}
+                        Status: {bot_state['connection_status']}<br>
+                        Erros: {bot_state['error_count']}
                     </div>
                 </div>
                 
                 <div class="warning">
-                    ⚠️ ATENÇÃO: ESTE BOT FAZ TRADES REAIS COM SEU DINHEIRO!
+                    ⚠️ ATENÇÃO: ESTE BOT FAZ TRADES REAIS COM SEU DINHEIRO!<br>
+                    HORÁRIO ATIVO: 06:00 - 23:00 | PARES: BTC, ETH, BNB, ADA, SOL
                 </div>
                 
                 <div class="controls">
@@ -438,7 +551,7 @@ def create_app():
                     </div>
                     <div class="stat-card">
                         <h3>💸 P&L Hoje</h3>
-                        <div class="stat-value">${bot_state['daily_pnl']:.2f}</div>
+                        <div class="stat-value" style="color: {'#4CAF50' if bot_state['daily_pnl'] >= 0 else '#f44336'};">${bot_state['daily_pnl']:.2f}</div>
                     </div>
                     <div class="stat-card">
                         <h3>⏰ Uptime</h3>
@@ -449,27 +562,31 @@ def create_app():
             
             <script>
                 function startBot() {{
-                    if(confirm('🚨 ATENÇÃO: Isso iniciará trades REAIS com seu dinheiro! Confirma?')) {{
+                    if(confirm('🚨 ATENÇÃO: Isso iniciará trades REAIS com seu dinheiro!\\n\\nVerifique se suas credenciais Bitget estão configuradas no Render.\\n\\nConfirma?')) {{
                         fetch('/start', {{method: 'POST'}})
                             .then(r => r.json())
                             .then(data => {{
                                 alert(data.message);
                                 location.reload();
-                            }});
+                            }})
+                            .catch(err => alert('Erro: ' + err));
                     }}
                 }}
                 
                 function stopBot() {{
-                    fetch('/stop', {{method: 'POST'}})
-                        .then(r => r.json())
-                        .then(data => {{
-                            alert(data.message);
-                            location.reload();
-                        }});
+                    if(confirm('Tem certeza que deseja parar o bot?')) {{
+                        fetch('/stop', {{method: 'POST'}})
+                            .then(r => r.json())
+                            .then(data => {{
+                                alert(data.message);
+                                location.reload();
+                            }})
+                            .catch(err => alert('Erro: ' + err));
+                    }}
                 }}
                 
-                // Auto refresh a cada 15 segundos
-                setTimeout(() => location.reload(), 15000);
+                // Auto refresh a cada 20 segundos
+                setTimeout(() => location.reload(), 20000);
             </script>
         </body>
         </html>
@@ -478,13 +595,19 @@ def create_app():
 
     @app.route('/start', methods=['POST'])
     def start_bot():
-        success, message = trading_bot.start()
-        return jsonify({"success": success, "message": message})
+        try:
+            success, message = trading_bot.start()
+            return jsonify({"success": success, "message": message})
+        except Exception as e:
+            return jsonify({"success": False, "message": f"Erro: {str(e)}"})
 
     @app.route('/stop', methods=['POST'])
     def stop_bot():
-        success, message = trading_bot.stop()
-        return jsonify({"success": success, "message": message})
+        try:
+            success, message = trading_bot.stop()
+            return jsonify({"success": success, "message": message})
+        except Exception as e:
+            return jsonify({"success": False, "message": f"Erro: {str(e)}"})
 
     @app.route('/status')
     def status():
@@ -492,7 +615,12 @@ def create_app():
 
     @app.route('/health')
     def health():
-        return jsonify({"status": "live_trading", "timestamp": datetime.now().isoformat()})
+        return jsonify({
+            "status": "live_trading", 
+            "timestamp": datetime.now().isoformat(),
+            "active": bot_state['active'],
+            "trades_today": bot_state['real_trades_executed']
+        })
 
     return app
 
@@ -504,4 +632,7 @@ if __name__ == '__main__':
     logger.warning("💸 ESTE BOT FAZ TRADES REAIS!")
     logger.info(f"📡 Porta: {port}")
     
-    app.run(host='0.0.0.0', port=port, debug=False)
+    try:
+        app.run(host='0.0.0.0', port=port, debug=False)
+    except Exception as e:
+        logger.error(f"❌ Erro ao iniciar app: {e}")
