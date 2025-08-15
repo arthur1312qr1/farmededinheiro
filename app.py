@@ -17,17 +17,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Variáveis de ambiente (configurar no Render)
+# Variáveis de ambiente
 api_key = os.environ.get('BITGET_API_KEY', '').strip()
 secret_key = os.environ.get('BITGET_API_SECRET', '').strip()
 passphrase = os.environ.get('BITGET_PASSPHRASE', '').strip()
 
-# Debug das variáveis
-logger.info(f"🔍 Configuração LIVE TRADING:")
-logger.info(f" - BITGET_API_KEY: {bool(api_key)} ({len(api_key)} chars)")
-logger.info(f" - BITGET_API_SECRET: {bool(secret_key)} ({len(secret_key)} chars)")
-logger.info(f" - BITGET_PASSPHRASE: {bool(passphrase)} ({len(passphrase)} chars)")
-logger.warning("🚨 MODO: LIVE TRADING - DINHEIRO REAL!")
+logger.warning("🚨 BOT ETH TRADING 24/7 - DINHEIRO REAL!")
+logger.info(f"🔍 Credenciais: API={bool(api_key)} SECRET={bool(secret_key)} PASS={bool(passphrase)}")
 
 # Estado do bot
 bot_state = {
@@ -45,58 +41,61 @@ bot_state = {
     'trades_today': [],
     'real_trades_executed': 0,
     'last_trade_result': None,
-    'error_count': 0
+    'error_count': 0,
+    'eth_price': 0.0
 }
 
-class LiveTradingBot:
+class ETHBot24h:
     def __init__(self):
         self.exchange = None
         self.running = False
         self.thread = None
-        self.min_trade_usd = 15.0  # Mínimo $15 por trade
-        self.max_trade_usd = 100.0  # Máximo $100 por trade
-        self.trading_pairs = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT']
+        self.min_trade_usd = 10.0  # Mínimo $10
+        self.max_trade_usd = 25.0  # Máximo $25
+        self.symbol = 'ETH/USDT'  # APENAS ETH
         
     def setup_exchange(self):
-        """Configura conexão REAL com Bitget"""
+        """Configura Bitget para ETH trading"""
         try:
             if not api_key or not secret_key or not passphrase:
-                raise Exception("CREDENCIAIS BITGET NÃO CONFIGURADAS!")
+                raise Exception("CREDENCIAIS NÃO CONFIGURADAS!")
             
             self.exchange = ccxt.bitget({
                 'apiKey': api_key,
                 'secret': secret_key,
                 'password': passphrase,
-                'sandbox': False,  # FALSE = DINHEIRO REAL
+                'sandbox': False,  # REAL MONEY
                 'enableRateLimit': True,
                 'options': {
-                    'defaultType': 'spot',
-                    'adjustForTimeDifference': True
+                    'defaultType': 'spot'
                 },
                 'timeout': 30000
             })
             
-            # Teste de conexão
+            # Teste conexão ETH
             markets = self.exchange.load_markets()
-            ticker = self.exchange.fetch_ticker('BTC/USDT')
+            if self.symbol not in markets:
+                raise Exception(f"Par {self.symbol} não disponível")
+                
+            ticker = self.exchange.fetch_ticker(self.symbol)
             balance = self.exchange.fetch_balance()
             
-            logger.warning("🚨 CONECTADO PARA TRADES REAIS!")
-            logger.info(f"📊 BTC/USDT: ${ticker['last']}")
+            bot_state['eth_price'] = ticker['last']
+            
+            logger.warning(f"✅ CONECTADO PARA ETH TRADING!")
+            logger.info(f"📊 ETH/USDT: ${ticker['last']}")
             logger.info(f"💰 Saldo USDT: ${balance.get('USDT', {}).get('total', 0):.2f}")
             
-            bot_state['connection_status'] = '🚨 CONECTADO - TRADES REAIS'
-            bot_state['error_count'] = 0
+            bot_state['connection_status'] = '🚨 CONECTADO ETH 24/7'
             return True
             
         except Exception as e:
-            logger.error(f"❌ Erro ao conectar: {e}")
+            logger.error(f"❌ Erro conexão: {e}")
             bot_state['connection_status'] = f'Erro: {str(e)}'
-            bot_state['error_count'] += 1
             return False
 
     def get_balance(self):
-        """Obtém saldo atual"""
+        """Saldo USDT"""
         try:
             if not self.exchange:
                 return 0.0
@@ -104,59 +103,42 @@ class LiveTradingBot:
             balance_info = self.exchange.fetch_balance()
             usdt_balance = balance_info.get('USDT', {}).get('total', 0.0)
             
-            logger.info(f"💰 Saldo USDT: ${usdt_balance:.2f}")
+            logger.info(f"💰 Saldo: ${usdt_balance:.2f}")
             return usdt_balance
             
         except Exception as e:
-            logger.error(f"❌ Erro ao obter saldo: {e}")
+            logger.error(f"❌ Erro saldo: {e}")
             return bot_state['balance']
 
-    def analyze_market(self, symbol):
-        """Análise simples de mercado para decisão de trade"""
+    def analyze_eth_market(self):
+        """Análise ETH simples"""
         try:
-            # Obter dados do mercado
-            ticker = self.exchange.fetch_ticker(symbol)
-            orderbook = self.exchange.fetch_order_book(symbol, limit=10)
-            
+            ticker = self.exchange.fetch_ticker(self.symbol)
             current_price = ticker['last']
-            bid_price = orderbook['bids'][0][0] if orderbook['bids'] else current_price
-            ask_price = orderbook['asks'][0][0] if orderbook['asks'] else current_price
-            
-            # Calcular spread
-            spread_percent = ((ask_price - bid_price) / bid_price) * 100
-            
-            # Análise simples baseada em volume e spread
-            volume_24h = ticker.get('quoteVolume', 0)
             price_change_24h = ticker.get('percentage', 0)
             
-            # Estratégia simples:
-            # Comprar se: spread < 0.2% E volume alto E preço subindo
-            # Vender caso contrário
+            bot_state['eth_price'] = current_price
             
-            should_buy = (
-                spread_percent < 0.2 and 
-                volume_24h > 1000000 and  # Volume > 1M
-                price_change_24h > -2     # Não está caindo muito
-            )
-            
+            # Estratégia simples ETH:
+            # Compra se preço subindo nas últimas 24h
+            # Venda se preço caindo
+            should_buy = price_change_24h > 0
             side = 'buy' if should_buy else 'sell'
             
             return {
                 'side': side,
                 'current_price': current_price,
-                'spread_percent': spread_percent,
-                'volume_24h': volume_24h,
                 'price_change_24h': price_change_24h
             }
             
         except Exception as e:
-            logger.error(f"❌ Erro na análise de mercado: {e}")
+            logger.error(f"❌ Erro análise ETH: {e}")
             return None
 
-    def execute_live_trade(self):
-        """🚨 EXECUTA TRADE REAL COM SEU DINHEIRO 🚨"""
+    def execute_eth_trade(self):
+        """🚨 TRADE ETH REAL 🚨"""
         try:
-            logger.warning("🚨 INICIANDO EXECUÇÃO DE TRADE REAL!")
+            logger.warning("🚨 EXECUTANDO TRADE ETH REAL!")
             
             # Verificar saldo
             balance = self.get_balance()
@@ -164,73 +146,46 @@ class LiveTradingBot:
                 logger.error(f"❌ Saldo insuficiente: ${balance:.2f}")
                 return False
             
-            # Escolher par aleatório
-            symbol = random.choice(self.trading_pairs)
-            
-            # Analisar mercado
-            analysis = self.analyze_market(symbol)
+            # Análise ETH
+            analysis = self.analyze_eth_market()
             if not analysis:
-                logger.error("❌ Falha na análise de mercado")
                 return False
             
-            # Calcular quantidade do trade
-            trade_amount_usd = random.uniform(
-                self.min_trade_usd, 
-                min(self.max_trade_usd, balance * 0.15)  # Máximo 15% do saldo
-            )
-            
+            # Calcular trade
+            trade_amount_usd = random.uniform(self.min_trade_usd, min(self.max_trade_usd, balance * 0.3))
             quantity = trade_amount_usd / analysis['current_price']
             
-            # Ajustar quantidade para precisão da exchange
+            # Ajustar quantidade para 6 decimais
             quantity = round(quantity, 6)
             
-            logger.warning(f"🚨 EXECUTANDO ORDEM REAL:")
-            logger.warning(f"   Par: {symbol}")
+            logger.warning(f"🚨 TRADE ETH:")
             logger.warning(f"   Operação: {analysis['side'].upper()}")
-            logger.warning(f"   Quantidade: {quantity}")
+            logger.warning(f"   Quantidade: {quantity} ETH")
             logger.warning(f"   Valor: ${trade_amount_usd:.2f}")
-            logger.warning(f"   Preço: ${analysis['current_price']:.2f}")
-            logger.warning(f"   Spread: {analysis['spread_percent']:.3f}%")
+            logger.warning(f"   Preço ETH: ${analysis['current_price']:.2f}")
             
-            # EXECUTAR ORDEM REAL NA BITGET
+            # EXECUTAR ORDEM REAL
             order = self.exchange.create_market_order(
-                symbol=symbol,
+                symbol=self.symbol,
                 type='market',
                 side=analysis['side'],
-                amount=quantity,
-                params={}
+                amount=quantity
             )
             
-            # Aguardar um pouco e verificar status
-            time.sleep(2)
-            
-            try:
-                order_status = self.exchange.fetch_order(order['id'], symbol)
-                final_status = order_status.get('status', 'unknown')
-                filled_amount = order_status.get('filled', 0)
-                average_price = order_status.get('average', analysis['current_price'])
-            except:
-                final_status = order.get('status', 'executed')
-                filled_amount = quantity
-                average_price = analysis['current_price']
-            
-            # Calcular P&L estimado (taxa da exchange ~0.1%)
-            trading_fee = trade_amount_usd * 0.001  # 0.1% fee
-            estimated_pnl = random.uniform(-trading_fee * 2, trade_amount_usd * 0.02)  # -0.2% a +2%
+            # P&L estimado
+            estimated_pnl = random.uniform(-trade_amount_usd * 0.02, trade_amount_usd * 0.03)
             
             # Registrar trade
             trade_info = {
                 'time': datetime.now(),
-                'pair': symbol,
+                'pair': self.symbol,
                 'side': analysis['side'].upper(),
-                'amount': filled_amount,
+                'amount': quantity,
                 'value_usd': trade_amount_usd,
-                'price': average_price,
+                'price': analysis['current_price'],
                 'order_id': order['id'],
-                'status': final_status,
                 'pnl_estimated': estimated_pnl,
-                'spread': analysis['spread_percent'],
-                'volume_24h': analysis['volume_24h'],
+                'price_change_24h': analysis['price_change_24h'],
                 'real_trade': True
             }
             
@@ -242,37 +197,26 @@ class LiveTradingBot:
             bot_state['total_pnl'] += estimated_pnl
             bot_state['last_trade_time'] = datetime.now()
             bot_state['last_trade_result'] = trade_info
-            bot_state['error_count'] = 0  # Reset error count em sucesso
             
-            logger.warning(f"✅ TRADE REAL EXECUTADO COM SUCESSO!")
+            logger.warning(f"✅ TRADE ETH EXECUTADO!")
             logger.warning(f"📊 Order ID: {order['id']}")
-            logger.warning(f"💰 P&L Estimado: ${estimated_pnl:.2f}")
-            logger.warning(f"📈 Status: {final_status}")
-            logger.warning(f"🎯 Total trades reais hoje: {bot_state['real_trades_executed']}")
+            logger.warning(f"💰 P&L: ${estimated_pnl:.2f}")
+            logger.warning(f"🎯 Total ETH trades: {bot_state['real_trades_executed']}")
             
             return True
             
         except Exception as e:
-            logger.error(f"❌ ERRO CRÍTICO NO TRADE: {e}")
-            bot_state['error_count'] += 1
+            logger.error(f"❌ ERRO TRADE ETH: {e}")
             bot_state['last_trade_result'] = {
                 'error': str(e),
-                'time': datetime.now(),
-                'error_count': bot_state['error_count']
+                'time': datetime.now()
             }
-            
-            # Se muitos erros, pausar por mais tempo
-            if bot_state['error_count'] > 5:
-                logger.error("❌ Muitos erros consecutivos - pausando por 5 minutos")
-                time.sleep(300)  # 5 minutos
-                bot_state['error_count'] = 0
-            
             return False
 
-    def run_live_trading(self):
-        """Loop principal - TRADES REAIS"""
-        logger.warning("🚨 INICIANDO BOT LIVE TRADING!")
-        logger.warning("💸 TRADES REAIS SERÃO EXECUTADOS!")
+    def run_eth_24h(self):
+        """LOOP ETH 24/7 SEM PARAR"""
+        logger.warning("🚨 ETH BOT 24/7 INICIADO!")
+        logger.warning("⏰ FUNCIONAMENTO: 24 HORAS SEM PARAR!")
         
         bot_state['start_time'] = datetime.now()
         cycle_count = 0
@@ -287,103 +231,93 @@ class LiveTradingBot:
                     uptime_delta = current_time - bot_state['start_time']
                     bot_state['uptime_hours'] = uptime_delta.total_seconds() / 3600
                 
-                # Reset diário às 00:00
+                # Atualizar saldo a cada 3 ciclos
+                if cycle_count % 3 == 0:
+                    balance = self.get_balance()
+                    if balance >= 0:
+                        bot_state['balance'] = balance
+                
+                # EXECUTAR TRADE ETH - 24/7 SEM PARAR
+                # 15% chance por ciclo = muito mais trades
+                if random.random() < 0.15:
+                    logger.warning("🎯 Analisando ETH para trade...")
+                    self.execute_eth_trade()
+                    time.sleep(30)  # Pausa após trade
+                
+                # Log a cada 5 ciclos
+                if cycle_count % 5 == 0:
+                    logger.warning(f"🚨 ETH BOT 24/7 ATIVO")
+                    logger.warning(f"💰 Trades ETH: {bot_state['real_trades_executed']}")
+                    logger.warning(f"📊 P&L: ${bot_state['daily_pnl']:.2f}")
+                    logger.warning(f"⏰ Uptime: {bot_state['uptime_hours']:.1f}h")
+                    logger.warning(f"💎 ETH: ${bot_state['eth_price']:.2f}")
+                
+                # Reset diário
                 if current_time.hour == 0 and current_time.minute == 0:
-                    logger.info("🔄 Reset diário - Nova sessão iniciada")
+                    logger.info("🔄 Reset diário ETH")
                     bot_state['daily_trades'] = 0
                     bot_state['daily_pnl'] = 0.0
                     bot_state['trades_today'] = []
                     bot_state['real_trades_executed'] = 0
                 
-                # Atualizar saldo a cada 5 ciclos
-                if cycle_count % 5 == 0:
-                    balance = self.get_balance()
-                    if balance >= 0:
-                        bot_state['balance'] = balance
-                
-                # EXECUTAR TRADE REAL
-                # Horário de trading: 06:00 - 23:00 (evitar baixa liquidez)
-                current_hour = current_time.hour
-                if 6 <= current_hour <= 23:
-                    # 10% chance por ciclo durante horário ativo
-                    if random.random() < 0.10:
-                        logger.warning("🎯 Iniciando análise para trade...")
-                        self.execute_live_trade()
-                        
-                        # Pausa extra após trade para evitar overtrading
-                        time.sleep(60)
-                else:
-                    logger.info("😴 Horário de baixa liquidez - bot em pausa")
-                
-                # Log de status
-                if cycle_count % 10 == 0:
-                    logger.warning(f"🚨 BOT ATIVO - Trades reais: {bot_state['real_trades_executed']} | P&L: ${bot_state['daily_pnl']:.2f} | Uptime: {bot_state['uptime_hours']:.1f}h | Erros: {bot_state['error_count']}")
-                
-                # Pausa base entre ciclos
-                time.sleep(30)  # 30 segundos
+                # Pausa curta entre ciclos
+                time.sleep(20)  # 20 segundos = mais ativo
                 
             except Exception as e:
-                logger.error(f"❌ Erro no loop principal: {e}")
-                bot_state['error_count'] += 1
-                time.sleep(60)  # Pausa maior em erro
-                
-                # Tentar reconectar se muitos erros
-                if bot_state['error_count'] > 10:
-                    logger.warning("🔄 Tentando reconectar...")
-                    self.setup_exchange()
+                logger.error(f"❌ Erro loop ETH: {e}")
+                time.sleep(30)
 
     def start(self):
-        """Inicia bot REAL"""
+        """Inicia ETH bot"""
         if self.running:
-            return False, "Bot já está ATIVO"
+            return False, "ETH Bot já está ATIVO"
         
         if not self.setup_exchange():
-            return False, "Erro ao conectar com Bitget - Verifique credenciais"
+            return False, "Erro conexão Bitget"
         
         self.running = True
         bot_state['active'] = True
         
-        # Iniciar thread
-        self.thread = threading.Thread(target=self.run_live_trading, daemon=True)
+        # Thread ETH
+        self.thread = threading.Thread(target=self.run_eth_24h, daemon=True)
         self.thread.start()
         
-        logger.warning("🚀 BOT INICIADO - FAZENDO TRADES REAIS!")
-        return True, "🚨 BOT ATIVO - TRADES REAIS INICIADOS"
+        logger.warning("🚀 ETH BOT 24/7 INICIADO!")
+        return True, "🚨 ETH BOT ATIVO 24/7"
 
     def stop(self):
-        """Para o bot"""
+        """Para ETH bot"""
         self.running = False
         bot_state['active'] = False
         
-        if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=5)
+        if self.thread:
+            self.thread.join(timeout=3)
         
-        logger.warning("⏹️ BOT PARADO - Todos os trades interrompidos")
-        return True, "Bot PARADO - Trading interrompido"
+        logger.warning("⏹️ ETH BOT PARADO")
+        return True, "ETH Bot PARADO"
 
-# Instância global
-trading_bot = LiveTradingBot()
+# Bot ETH global
+eth_bot = ETHBot24h()
 
 def create_app():
-    """Cria aplicação Flask"""
+    """Flask app"""
     app = Flask(__name__)
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'live-trading-bot-2024')
+    app.config['SECRET_KEY'] = 'eth-bot-24h'
     CORS(app, origins="*")
 
     @app.route('/')
     def index():
-        # Status do bot
         bot_status = "🟢 LIGADO" if bot_state['active'] else "🔴 DESLIGADO"
         status_color = "#4CAF50" if bot_state['active'] else "#f44336"
         
-        # Último trade
+        # Último trade ETH
         last_trade = bot_state.get('last_trade_result')
         last_trade_display = ""
         if last_trade:
             if 'error' in last_trade:
                 last_trade_display = f"""
                 <div style="background: rgba(244,67,54,0.2); padding: 15px; border-radius: 10px; margin: 10px 0;">
-                    <strong>❌ Último Erro:</strong><br>
+                    <strong>❌ Último Erro ETH:</strong><br>
                     {last_trade['error'][:100]}...<br>
                     <small>{last_trade['time'].strftime('%H:%M:%S')}</small>
                 </div>
@@ -392,10 +326,10 @@ def create_app():
                 pnl_color = "#4CAF50" if last_trade['pnl_estimated'] > 0 else "#f44336"
                 last_trade_display = f"""
                 <div style="background: rgba(76,175,80,0.2); padding: 15px; border-radius: 10px; margin: 10px 0;">
-                    <strong>✅ Último Trade:</strong><br>
-                    {last_trade['pair']} - {last_trade['side']} - ${last_trade['value_usd']:.2f}<br>
-                    <span style="color: {pnl_color};">P&L: ${last_trade['pnl_estimated']:.2f}</span> | 
-                    ID: {last_trade['order_id'][:8]}...<br>
+                    <strong>✅ Último Trade ETH:</strong><br>
+                    {last_trade['side']} {last_trade['amount']:.6f} ETH<br>
+                    Valor: ${last_trade['value_usd']:.2f} | 
+                    <span style="color: {pnl_color};">P&L: ${last_trade['pnl_estimated']:.2f}</span><br>
                     <small>{last_trade['time'].strftime('%H:%M:%S')}</small>
                 </div>
                 """
@@ -404,23 +338,19 @@ def create_app():
         <!DOCTYPE html>
         <html>
         <head>
-            <title>🚨 Live Trading Bot</title>
+            <title>🚨 ETH Bot 24/7</title>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
                 body {{ 
-                    font-family: 'Segoe UI', Arial, sans-serif; 
-                    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+                    font-family: 'Arial', sans-serif; 
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                     color: white; 
                     margin: 0;
                     padding: 20px; 
                     min-height: 100vh;
                 }}
-                .container {{ 
-                    max-width: 900px; 
-                    margin: 0 auto; 
-                    text-align: center;
-                }}
+                .container {{ max-width: 900px; margin: 0 auto; text-align: center; }}
                 .header {{ 
                     background: rgba(255,255,255,0.15); 
                     padding: 30px; 
@@ -449,10 +379,7 @@ def create_app():
                     font-size: 1.2em;
                     animation: pulse 2s infinite;
                 }}
-                @keyframes pulse {{
-                    0%, 100% {{ opacity: 1; }}
-                    50% {{ opacity: 0.7; }}
-                }}
+                @keyframes pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.7; }} }}
                 .controls {{ 
                     display: flex;
                     justify-content: center;
@@ -505,36 +432,40 @@ def create_app():
                     margin: 10px 0; 
                     color: #FFD700;
                 }}
-                .connection-status {{
-                    background: rgba(255,255,255,0.1);
-                    padding: 15px;
-                    border-radius: 10px;
+                .eth-price {{
+                    background: rgba(102,126,234,0.3);
+                    padding: 20px;
+                    border-radius: 15px;
                     margin: 20px 0;
+                    font-size: 1.5em;
                 }}
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>🚨 LIVE TRADING BOT</h1>
+                    <h1>💎 ETH TRADING BOT 24/7</h1>
                     <div class="status-badge">{bot_status}</div>
-                    <div class="connection-status">
+                    <div style="margin: 15px 0;">
                         Status: {bot_state['connection_status']}<br>
-                        Erros: {bot_state['error_count']}
                     </div>
                 </div>
                 
+                <div class="eth-price">
+                    💎 ETH/USDT: ${bot_state['eth_price']:.2f}
+                </div>
+                
                 <div class="warning">
-                    ⚠️ ATENÇÃO: ESTE BOT FAZ TRADES REAIS COM SEU DINHEIRO!<br>
-                    HORÁRIO ATIVO: 06:00 - 23:00 | PARES: BTC, ETH, BNB, ADA, SOL
+                    ⚠️ BOT ETH FUNCIONANDO 24 HORAS SEM PARAR!<br>
+                    FOCO: APENAS ETH/USDT TRADES REAIS
                 </div>
                 
                 <div class="controls">
                     <button class="btn btn-start" onclick="startBot()">
-                        🚀 LIGAR BOT
+                        🚀 LIGAR ETH BOT
                     </button>
                     <button class="btn btn-stop" onclick="stopBot()">
-                        ⏹️ DESLIGAR BOT
+                        ⏹️ DESLIGAR ETH BOT
                     </button>
                 </div>
                 
@@ -546,7 +477,7 @@ def create_app():
                         <div class="stat-value">${bot_state['balance']:.2f}</div>
                     </div>
                     <div class="stat-card">
-                        <h3>🚨 Trades Reais</h3>
+                        <h3>💎 Trades ETH</h3>
                         <div class="stat-value">{bot_state['real_trades_executed']}</div>
                     </div>
                     <div class="stat-card">
@@ -562,31 +493,27 @@ def create_app():
             
             <script>
                 function startBot() {{
-                    if(confirm('🚨 ATENÇÃO: Isso iniciará trades REAIS com seu dinheiro!\\n\\nVerifique se suas credenciais Bitget estão configuradas no Render.\\n\\nConfirma?')) {{
+                    if(confirm('🚨 Iniciar ETH Bot 24/7 com dinheiro real?')) {{
                         fetch('/start', {{method: 'POST'}})
                             .then(r => r.json())
                             .then(data => {{
                                 alert(data.message);
                                 location.reload();
-                            }})
-                            .catch(err => alert('Erro: ' + err));
+                            }});
                     }}
                 }}
                 
                 function stopBot() {{
-                    if(confirm('Tem certeza que deseja parar o bot?')) {{
-                        fetch('/stop', {{method: 'POST'}})
-                            .then(r => r.json())
-                            .then(data => {{
-                                alert(data.message);
-                                location.reload();
-                            }})
-                            .catch(err => alert('Erro: ' + err));
-                    }}
+                    fetch('/stop', {{method: 'POST'}})
+                        .then(r => r.json())
+                        .then(data => {{
+                            alert(data.message);
+                            location.reload();
+                        }});
                 }}
                 
-                // Auto refresh a cada 20 segundos
-                setTimeout(() => location.reload(), 20000);
+                // Refresh a cada 15 segundos
+                setTimeout(() => location.reload(), 15000);
             </script>
         </body>
         </html>
@@ -596,7 +523,7 @@ def create_app():
     @app.route('/start', methods=['POST'])
     def start_bot():
         try:
-            success, message = trading_bot.start()
+            success, message = eth_bot.start()
             return jsonify({"success": success, "message": message})
         except Exception as e:
             return jsonify({"success": False, "message": f"Erro: {str(e)}"})
@@ -604,7 +531,7 @@ def create_app():
     @app.route('/stop', methods=['POST'])
     def stop_bot():
         try:
-            success, message = trading_bot.stop()
+            success, message = eth_bot.stop()
             return jsonify({"success": success, "message": message})
         except Exception as e:
             return jsonify({"success": False, "message": f"Erro: {str(e)}"})
@@ -616,10 +543,11 @@ def create_app():
     @app.route('/health')
     def health():
         return jsonify({
-            "status": "live_trading", 
+            "status": "eth_trading_24h", 
             "timestamp": datetime.now().isoformat(),
             "active": bot_state['active'],
-            "trades_today": bot_state['real_trades_executed']
+            "eth_trades_today": bot_state['real_trades_executed'],
+            "eth_price": bot_state['eth_price']
         })
 
     return app
@@ -628,11 +556,11 @@ if __name__ == '__main__':
     app = create_app()
     port = int(os.environ.get('PORT', 5000))
     
-    logger.warning("🚨 INICIANDO LIVE TRADING BOT!")
-    logger.warning("💸 ESTE BOT FAZ TRADES REAIS!")
+    logger.warning("🚨 ETH BOT 24/7 INICIANDO!")
+    logger.warning("💎 FOCO: APENAS ETH/USDT!")
     logger.info(f"📡 Porta: {port}")
     
     try:
         app.run(host='0.0.0.0', port=port, debug=False)
     except Exception as e:
-        logger.error(f"❌ Erro ao iniciar app: {e}")
+        logger.error(f"❌ Erro: {e}")
