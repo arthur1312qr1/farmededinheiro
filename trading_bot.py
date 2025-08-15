@@ -58,8 +58,8 @@ class TradingBot:
         self.base_currency = config.get('BASE_CURRENCY', 'USDT')
         
         # Risk management
-        self.stop_loss_pct = 0.02  # 2%
-        self.take_profit_pct = 0.015  # 1.5%
+        self.stop_loss_pct = 0.007  # 0.7%
+        self.take_profit_pct = 0.007  # 0.7%
         self.position_size_pct = 0.1  # 10% of balance per trade
         
         # Activity log
