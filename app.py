@@ -57,7 +57,8 @@ bot_state = {
     'last_trade_amount': 0.0,
     'mode': 'REAL MONEY 💰',
     'paper_trading': False,
-    'verified_real_trades': 0  # ✅ NOVO: TRADES VERIFICADOS PELA EXCHANGE
+    'verified_real_trades': 0,  # ✅ NOVO: TRADES VERIFICADOS PELA EXCHANGE
+    'last_error': None
 }
 
 class ETHBotRealMoney80Percent:
@@ -86,7 +87,7 @@ class ETHBotRealMoney80Percent:
                 'sandbox': False,  # ✅ FALSE = TRADING REAL
                 'enableRateLimit': True,
                 'options': {
-                    'defaultType': 'spot',
+                    'defaultType': 'spot',  # Spot trading
                     'createMarketBuyOrderRequiresPrice': False,
                     'adjustForTimeDifference': True
                 },
@@ -142,134 +143,175 @@ class ETHBotRealMoney80Percent:
             logger.error(f"❌ Erro buscar saldo real: {e}")
             return bot_state['balance']
 
-    def verify_real_trade_execution(self, order_id):
-        """🔍 VERIFICAR SE O TRADE FOI REALMENTE EXECUTADO NA EXCHANGE"""
+    def get_market_info(self):
+        """📊 BUSCAR INFORMAÇÕES DO MERCADO BITGET"""
         try:
-            logger.warning(f"🔍 VERIFICANDO EXECUÇÃO REAL DA ORDEM: {order_id}")
+            # Buscar informações do mercado ETH/USDT
+            market = self.exchange.market(self.symbol)
+            ticker = self.exchange.fetch_ticker(self.symbol)
             
-            # Buscar ordem na exchange
-            order = self.exchange.fetch_order(order_id, self.symbol)
+            logger.info(f"📊 Market Info - Min: {market.get('limits', {}).get('amount', {}).get('min', 'N/A')}")
+            logger.info(f"📊 Precision - Amount: {market.get('precision', {}).get('amount', 'N/A')}")
+            logger.info(f"📊 Current Price: ${ticker['last']:.2f}")
             
-            if order['status'] == 'closed' and order['filled'] > 0:
-                logger.warning(f"✅ TRADE REAL CONFIRMADO!")
-                logger.warning(f"💰 Valor Executado: ${order['cost']:.2f} USDT")
-                logger.warning(f"💎 ETH Comprado: {order['filled']:.6f}")
-                logger.warning(f"📊 Status: {order['status']}")
-                return True, order
-            else:
-                logger.warning(f"❌ TRADE NÃO EXECUTADO: Status={order['status']}")
-                return False, order
-                
+            return market, ticker
         except Exception as e:
-            logger.error(f"❌ ERRO VERIFICAR TRADE: {e}")
-            return False, None
+            logger.error(f"❌ Erro buscar market info: {e}")
+            return None, None
 
-    def execute_ONLY_real_trade_80_percent(self):
-        """🚨 EXECUTAR APENAS TRADE REAL - SEM SIMULAÇÕES 🚨"""
+    def execute_REAL_bitget_trade_fixed(self):
+        """🚨 EXECUTAR TRADE REAL BITGET - MÉTODO CORRIGIDO FINAL 🚨"""
         try:
-            logger.warning("🚨 INICIANDO TRADE REAL - SEM SIMULAÇÕES!")
+            logger.warning("🚨 INICIANDO TRADE REAL BITGET - MÉTODO CORRIGIDO!")
 
             # ✅ BUSCAR SALDO REAL ATUAL
             current_balance = self.get_real_balance()
             
             if current_balance < 5:  # Mínimo $5 para trade real
                 logger.warning(f"⚠️ SALDO INSUFICIENTE: ${current_balance:.2f} - ABORTANDO TRADE")
+                bot_state['last_error'] = f"Saldo insuficiente: ${current_balance:.2f}"
+                return False
+
+            # ✅ BUSCAR INFO DO MERCADO
+            market, ticker = self.get_market_info()
+            if not market or not ticker:
+                logger.warning("❌ ERRO BUSCAR INFORMAÇÕES DO MERCADO")
                 return False
 
             # ✅ CALCULAR 80% DO SALDO REAL
             trade_amount_usd = current_balance * self.percentage
-            
-            # ✅ PREÇO ETH ATUAL
-            ticker = self.exchange.fetch_ticker(self.symbol)
             current_price = ticker['last']
             bot_state['eth_price'] = current_price
 
-            # ✅ CALCULAR QUANTIDADE ETH
+            # ✅ CALCULAR QUANTIDADE ETH COM PRECISÃO BITGET
             eth_quantity = trade_amount_usd / current_price
-            eth_quantity = round(eth_quantity, 6)  # Precisão máxima
+            
+            # Usar precisão do mercado
+            amount_precision = market.get('precision', {}).get('amount', 6)
+            eth_quantity = round(eth_quantity, amount_precision)
 
             # Verificar quantidade mínima
-            if eth_quantity < 0.0001:
-                logger.warning(f"⚠️ QUANTIDADE MUITO PEQUENA: {eth_quantity:.6f} ETH - ABORTANDO")
+            min_amount = market.get('limits', {}).get('amount', {}).get('min', 0.0001)
+            if eth_quantity < min_amount:
+                logger.warning(f"⚠️ QUANTIDADE MUITO PEQUENA: {eth_quantity:.6f} < {min_amount}")
+                bot_state['last_error'] = f"Quantidade muito pequena: {eth_quantity:.6f}"
                 return False
 
-            logger.warning("🚨 DETALHES DO TRADE REAL:")
+            logger.warning("🚨 DETALHES DO TRADE REAL CORRIGIDO:")
             logger.warning(f"💰 Saldo Atual: ${current_balance:.2f} USDT")
             logger.warning(f"🎯 Valor Trade (80%): ${trade_amount_usd:.2f} USDT")
             logger.warning(f"💎 Preço ETH: ${current_price:.2f}")
             logger.warning(f"📊 ETH a Comprar: {eth_quantity:.6f}")
+            logger.warning(f"📋 Min Amount: {min_amount}")
+            logger.warning(f"📋 Precision: {amount_precision}")
             
-            # ✅ EXECUTAR ORDEM REAL
-            logger.warning("💰 EXECUTANDO ORDEM REAL NA BITGET!")
+            # ✅ EXECUTAR ORDEM REAL BITGET - MÉTODO CORRIGIDO
+            logger.warning("💰 EXECUTANDO ORDEM REAL BITGET - MÉTODO SIMPLES!")
             
-            order = self.exchange.create_market_buy_order(
-                symbol=self.symbol,
-                amount=eth_quantity,
-                params={'quoteOrderQty': trade_amount_usd}
-            )
-            
+            try:
+                # MÉTODO CORRIGIDO: Market buy simples sem parâmetros extras
+                order = self.exchange.create_market_buy_order(
+                    symbol=self.symbol,
+                    amount=eth_quantity  # Apenas quantidade ETH
+                )
+                
+                order_id = order.get('id')
+                logger.warning(f"✅ ORDEM CRIADA COM SUCESSO: {order_id}")
+                
+            except Exception as order_error:
+                logger.warning(f"⚠️ Tentativa 1 falhou: {order_error}")
+                
+                # MÉTODO ALTERNATIVO: Create order direto
+                try:
+                    order = self.exchange.create_order(
+                        symbol=self.symbol,
+                        type='market',
+                        side='buy',
+                        amount=eth_quantity,
+                        price=None
+                    )
+                    logger.warning(f"✅ MÉTODO ALTERNATIVO SUCESSO: {order.get('id')}")
+                    
+                except Exception as order_error2:
+                    logger.error(f"❌ AMBOS MÉTODOS FALHARAM: {order_error2}")
+                    bot_state['last_error'] = f"Falha na execução: {str(order_error2)[:100]}"
+                    return False
+
             order_id = order.get('id')
-            logger.warning(f"📝 ORDEM CRIADA: {order_id}")
             
-            # ✅ AGUARDAR E VERIFICAR EXECUÇÃO
-            time.sleep(3)  # Aguardar processamento
+            # ✅ AGUARDAR PROCESSAMENTO
+            time.sleep(3)
             
-            # ✅ VERIFICAR SE FOI REALMENTE EXECUTADO
-            trade_verified, verified_order = self.verify_real_trade_execution(order_id)
-            
-            if not trade_verified:
-                logger.error("❌ TRADE NÃO FOI EXECUTADO REALMENTE!")
+            # ✅ VERIFICAR EXECUÇÃO
+            try:
+                order_status = self.exchange.fetch_order(order_id, self.symbol)
+                logger.warning(f"📊 Status da Ordem: {order_status.get('status')}")
+                logger.warning(f"💰 Filled: {order_status.get('filled', 0):.6f} ETH")
+                logger.warning(f"💲 Cost: ${order_status.get('cost', 0):.2f} USDT")
+                
+                if order_status.get('status') == 'closed' and order_status.get('filled', 0) > 0:
+                    # ✅ TRADE EXECUTADO COM SUCESSO
+                    filled_amount = order_status.get('filled', 0)
+                    cost_usd = order_status.get('cost', 0)
+                    
+                    # ✅ BUSCAR NOVO SALDO
+                    time.sleep(2)
+                    new_balance = self.get_real_balance()
+                    actual_spent = current_balance - new_balance
+                    
+                    # ✅ REGISTRAR TRADE REAL VERIFICADO
+                    trade_info = {
+                        'time': datetime.now(),
+                        'pair': self.symbol,
+                        'side': 'BUY',
+                        'amount': filled_amount,
+                        'value_usd': cost_usd,
+                        'actual_spent': actual_spent,
+                        'price': current_price,
+                        'order_id': order_id,
+                        'balance_before': current_balance,
+                        'balance_after': new_balance,
+                        'verified': True,
+                        'real_trade': True,
+                        'exchange_status': order_status.get('status'),
+                        'method': 'bitget_market_buy_fixed'
+                    }
+
+                    # ✅ ATUALIZAR CONTADORES APENAS PARA TRADES REAIS
+                    bot_state['trades_today'].append(trade_info)
+                    bot_state['daily_trades'] += 1  # ✅ SÓ INCREMENTA SE REAL
+                    bot_state['real_trades_executed'] += 1  # ✅ SÓ INCREMENTA SE REAL
+                    bot_state['verified_real_trades'] += 1  # ✅ SÓ INCREMENTA SE VERIFICADO
+                    bot_state['total_trades'] += 1  # ✅ SÓ INCREMENTA SE REAL
+                    bot_state['last_trade_time'] = datetime.now()
+                    bot_state['last_trade_result'] = trade_info
+                    bot_state['last_trade_amount'] = actual_spent
+                    bot_state['error_count'] = 0
+                    bot_state['last_error'] = None
+
+                    logger.warning("✅ TRADE REAL BITGET EXECUTADO COM SUCESSO!")
+                    logger.warning(f"📊 Order ID: {order_id}")
+                    logger.warning(f"💰 Custo Real: ${cost_usd:.2f} USDT")
+                    logger.warning(f"💎 ETH Recebido: {filled_amount:.6f}")
+                    logger.warning(f"💰 Novo Saldo: ${new_balance:.2f} USDT")
+                    logger.warning(f"🎯 Total Trades REAIS: {bot_state['verified_real_trades']}")
+
+                    return True
+                    
+                else:
+                    logger.warning(f"❌ ORDEM NÃO EXECUTADA: Status={order_status.get('status')}")
+                    bot_state['last_error'] = f"Ordem não executada: {order_status.get('status')}"
+                    return False
+                    
+            except Exception as status_error:
+                logger.error(f"❌ ERRO VERIFICAR STATUS: {status_error}")
+                bot_state['last_error'] = f"Erro verificar status: {str(status_error)[:100]}"
                 return False
-
-            # ✅ BUSCAR NOVO SALDO APÓS TRADE
-            time.sleep(2)
-            new_balance = self.get_real_balance()
-            actual_spent = current_balance - new_balance
-            
-            if actual_spent <= 0:
-                logger.error("❌ SALDO NÃO MUDOU - TRADE NÃO EXECUTADO!")
-                return False
-
-            # ✅ REGISTRAR TRADE REAL VERIFICADO
-            trade_info = {
-                'time': datetime.now(),
-                'pair': self.symbol,
-                'side': 'BUY',
-                'amount': verified_order['filled'],
-                'value_usd': verified_order['cost'],
-                'actual_spent': actual_spent,
-                'price': current_price,
-                'order_id': order_id,
-                'balance_before': current_balance,
-                'balance_after': new_balance,
-                'verified': True,
-                'real_trade': True,
-                'exchange_status': verified_order['status']
-            }
-
-            # ✅ ATUALIZAR CONTADORES APENAS PARA TRADES REAIS
-            bot_state['trades_today'].append(trade_info)
-            bot_state['daily_trades'] += 1  # ✅ SÓ INCREMENTA SE REAL
-            bot_state['real_trades_executed'] += 1  # ✅ SÓ INCREMENTA SE REAL
-            bot_state['verified_real_trades'] += 1  # ✅ SÓ INCREMENTA SE VERIFICADO
-            bot_state['total_trades'] += 1  # ✅ SÓ INCREMENTA SE REAL
-            bot_state['last_trade_time'] = datetime.now()
-            bot_state['last_trade_result'] = trade_info
-            bot_state['last_trade_amount'] = actual_spent
-            bot_state['error_count'] = 0
-
-            logger.warning("✅ TRADE REAL VERIFICADO E CONTABILIZADO!")
-            logger.warning(f"📊 Order ID: {order_id}")
-            logger.warning(f"💰 Gasto Real: ${actual_spent:.2f} USDT")
-            logger.warning(f"💎 ETH Recebido: {verified_order['filled']:.6f}")
-            logger.warning(f"💰 Novo Saldo: ${new_balance:.2f} USDT")
-            logger.warning(f"🎯 Total Trades REAIS: {bot_state['verified_real_trades']}")
-
-            return True
 
         except Exception as e:
             logger.error(f"❌ ERRO CRÍTICO NO TRADE: {e}")
             bot_state['error_count'] += 1
+            bot_state['last_error'] = f"Erro crítico: {str(e)[:100]}"
             return False
 
     def update_eth_price(self):
@@ -318,10 +360,10 @@ class ETHBotRealMoney80Percent:
                 if cycle % 3 == 0:
                     self.get_real_balance()
 
-                # 🚨 EXECUTAR TRADE REAL - 20% DE CHANCE
-                if random.random() < 0.20:
-                    logger.warning("🎯 TENTANDO TRADE REAL 80%...")
-                    success = self.execute_ONLY_real_trade_80_percent()
+                # 🚨 EXECUTAR TRADE REAL - 25% DE CHANCE
+                if random.random() < 0.25:
+                    logger.warning("🎯 TENTANDO TRADE REAL BITGET CORRIGIDO...")
+                    success = self.execute_REAL_bitget_trade_fixed()
                     
                     if success:
                         logger.warning("✅ TRADE REAL EXECUTADO COM SUCESSO!")
@@ -336,6 +378,8 @@ class ETHBotRealMoney80Percent:
                     logger.warning(f"💎 ETH: ${bot_state['eth_price']:.2f}")
                     logger.warning(f"💰 Saldo: ${bot_state['balance']:.2f}")
                     logger.warning(f"🎯 Trades REAIS: {bot_state['verified_real_trades']}")
+                    if bot_state['last_error']:
+                        logger.warning(f"⚠️ Último Erro: {bot_state['last_error']}")
 
                 time.sleep(45)  # 45 segundos entre ciclos
 
@@ -361,8 +405,6 @@ class ETHBotRealMoney80Percent:
         self.thread.start()
 
         logger.warning("🚨 INICIANDO TRADING REAL!")
-        logger.warning("💰 ESTE BOT VAI USAR SEU DINHEIRO REAL!")
-        logger.warning("🚨 INICIANDO BOT DE TRADING REAL!")
         logger.warning("💰 ESTE BOT VAI USAR SEU DINHEIRO REAL!")
         logger.warning("🚀 BOT DE TRADING REAL INICIADO!")
 
@@ -394,23 +436,34 @@ def create_app():
             status_color = "#4CAF50" if bot_state['active'] else "#f44336"
             next_trade = bot_state['balance'] * 0.8
 
-            # Último trade REAL
+            # Último trade REAL ou erro
             last_trade = bot_state.get('last_trade_result')
+            last_error = bot_state.get('last_error')
             last_trade_display = ""
 
             if last_trade and last_trade.get('verified'):
                 actual_spent = last_trade.get('actual_spent', 0)
+                cost_usd = last_trade.get('value_usd', 0)
                 last_trade_display = f"""
                 <div style="background: rgba(76,175,80,0.3); padding: 15px; border-radius: 10px; margin: 10px 0;">
-                    <strong>✅ Último Trade REAL VERIFICADO:</strong><br>
-                    💰 Gasto Real: ${actual_spent:.2f} USDT<br>
+                    <strong>✅ Último Trade REAL EXECUTADO:</strong><br>
+                    💰 Custo: ${cost_usd:.2f} USDT<br>
                     💎 ETH: {last_trade.get('amount', 0):.6f}<br>
                     🆔 ID: {last_trade.get('order_id', 'N/A')}<br>
                     📊 Status: {last_trade.get('exchange_status', 'EXECUTADO')}<br>
+                    🔧 Método: {last_trade.get('method', 'bitget')}<br>
                     <small>{last_trade['time'].strftime('%H:%M:%S')}</small>
                 </div>
                 """
-            elif not last_trade:
+            elif last_error:
+                last_trade_display = f"""
+                <div style="background: rgba(255,152,0,0.3); padding: 15px; border-radius: 10px; margin: 10px 0;">
+                    <strong>⚠️ Último Erro de Execução:</strong><br>
+                    {last_error}<br>
+                    <small>Tentando novamente...</small>
+                </div>
+                """
+            else:
                 last_trade_display = """
                 <div style="background: rgba(255,193,7,0.3); padding: 15px; border-radius: 10px; margin: 10px 0;">
                     <strong>⏳ Nenhum Trade Real Executado Ainda</strong><br>
@@ -583,7 +636,7 @@ def create_app():
                     <div style="background: rgba(255,255,255,0.1); border-radius: 10px; padding: 15px; margin-top: 20px;">
                         <h4>🎯 Próximo Trade Real</h4>
                         <div>💰 Valor: ${next_trade:.2f} USDT (80% do saldo)</div>
-                        <div>📊 Método: APENAS TRADES REAIS VERIFICADOS</div>
+                        <div>📊 Método: BITGET MARKET BUY CORRIGIDO</div>
                         <div>⚠️ VALOR SERÁ GASTO DO SEU SALDO REAL!</div>
                     </div>
                 </div>
