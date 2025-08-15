@@ -19,13 +19,19 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Variáveis de ambiente
+# ⚠️ TRADING REAL - CONFIGURAÇÕES IMPORTANTES ⚠️
+PAPER_TRADING = False  # ❌ FALSE = SALDO REAL
+REAL_MONEY_MODE = True  # ✅ TRUE = USAR DINHEIRO REAL
+
+# Variáveis de ambiente para TRADING REAL
 api_key = os.environ.get('BITGET_API_KEY', '').strip()
 secret_key = os.environ.get('BITGET_API_SECRET', '').strip()
 passphrase = os.environ.get('BITGET_PASSPHRASE', '').strip()
 
-logger.warning("🚨 ETH BOT 80% SALDO - MÉTODO CORRIGIDO!")
-logger.info(f"🔍 Credenciais: API={bool(api_key)} SECRET={bool(secret_key)} PASS={bool(passphrase)}")
+logger.warning("🚨 ⚠️ MODO TRADING REAL ATIVADO ⚠️ 🚨")
+logger.warning("💰 ESTE BOT VAI USAR SEU DINHEIRO REAL!")
+logger.warning("🎯 80% DO SALDO SERÁ USADO EM CADA TRADE!")
+logger.info(f"🔍 Credenciais REAL: API={bool(api_key)} SECRET={bool(secret_key)} PASS={bool(passphrase)}")
 
 # Estado do bot
 bot_state = {
@@ -48,185 +54,208 @@ bot_state = {
     'eth_change_24h': 0.0,
     'last_price_update': None,
     'percentage_used': 80.0,
-    'last_trade_amount': 0.0
+    'last_trade_amount': 0.0,
+    'mode': 'REAL MONEY 💰',  # ✅ MODO REAL
+    'paper_trading': False  # ❌ SEM PAPER TRADING
 }
 
-class ETHBot80PercentFixed:
+class ETHBotRealMoney80Percent:
     def __init__(self):
         self.exchange = None
         self.running = False
         self.thread = None
         self.price_thread = None
         self.symbol = 'ETH/USDT'
-        self.percentage = 0.80  # 80%
+        self.percentage = 0.80  # 80% do saldo
+        self.real_trading = True  # ✅ TRADING REAL OBRIGATÓRIO
 
-    def setup_exchange(self):
-        """Setup Bitget com configuração específica"""
+    def setup_exchange_real_money(self):
+        """🚨 SETUP EXCHANGE PARA TRADING REAL 🚨"""
         try:
             if not api_key or not secret_key or not passphrase:
-                raise Exception("CREDENCIAIS FALTANDO!")
+                raise Exception("❌ CREDENCIAIS OBRIGATÓRIAS PARA TRADING REAL!")
 
+            logger.warning("🚨 CONFIGURANDO EXCHANGE PARA DINHEIRO REAL!")
+            
+            # ✅ CONFIGURAÇÃO REAL - SEM SANDBOX
             self.exchange = ccxt.bitget({
                 'apiKey': api_key,
                 'secret': secret_key,
                 'password': passphrase,
-                'sandbox': False,
+                'sandbox': False,  # ✅ FALSE = TRADING REAL
                 'enableRateLimit': True,
                 'options': {
-                    'defaultType': 'spot',
+                    'defaultType': 'spot',  # ✅ SPOT TRADING REAL
                     'createMarketBuyOrderRequiresPrice': False,
                     'adjustForTimeDifference': True
                 },
-                'timeout': 30000
+                'timeout': 30000,
+                'headers': {
+                    'X-BITGET-REAL-TRADING': 'true'  # ✅ HEADER REAL TRADING
+                }
             })
 
-            # Teste de conexão
+            # ✅ TESTE CONEXÃO COM SALDO REAL
+            logger.warning("💰 BUSCANDO SALDO REAL...")
             balance = self.exchange.fetch_balance()
             ticker = self.exchange.fetch_ticker(self.symbol)
+            
+            # ✅ SALDO REAL USDT
             usdt_balance = balance.get('USDT', {}).get('free', 0.0)
+            
+            if usdt_balance < 1:
+                raise Exception(f"❌ SALDO INSUFICIENTE: ${usdt_balance:.2f} USDT")
 
             bot_state['eth_price'] = ticker['last']
             bot_state['balance'] = usdt_balance
 
-            logger.warning(f"✅ CONECTADO SEM ERROS!")
-            logger.info(f"💎 ETH: ${ticker['last']:.2f}")
-            logger.info(f"💰 Saldo: ${usdt_balance:.2f}")
-            logger.warning(f"🎯 80% = ${usdt_balance * 0.8:.2f}")
+            logger.warning("✅ CONECTADO AO TRADING REAL!")
+            logger.warning(f"💰 SALDO REAL: ${usdt_balance:.2f} USDT")
+            logger.warning(f"💎 PREÇO ETH: ${ticker['last']:.2f}")
+            logger.warning(f"🎯 80% DISPONÍVEL: ${usdt_balance * 0.8:.2f} USDT")
+            logger.warning("🚨 PRÓXIMO TRADE USARÁ DINHEIRO REAL!")
 
-            bot_state['connection_status'] = '🚨 CONECTADO - 80% SALDO'
+            bot_state['connection_status'] = '💰 CONECTADO - MODO REAL'
             return True
 
         except Exception as e:
-            logger.error(f"❌ Erro: {e}")
-            bot_state['connection_status'] = f'Erro: {str(e)}'
+            logger.error(f"❌ ERRO CONEXÃO REAL: {e}")
+            bot_state['connection_status'] = f'❌ Erro Real: {str(e)}'
             return False
 
-    def update_price_only(self):
-        """Atualiza preço ETH"""
+    def get_real_balance(self):
+        """💰 BUSCAR SALDO REAL DA CONTA"""
         try:
-            if not self.exchange:
-                return
-
-            ticker = self.exchange.fetch_ticker(self.symbol)
-            bot_state['eth_price'] = ticker['last']
-            bot_state['eth_change_24h'] = ticker.get('percentage', 0)
-            bot_state['last_price_update'] = datetime.now()
-
-        except Exception as e:
-            logger.error(f"❌ Erro preço: {e}")
-
-    def price_loop(self):
-        """Loop de preço"""
-        while self.running:
-            try:
-                self.update_price_only()
-                time.sleep(15)
-            except:
-                time.sleep(30)
-
-    def get_current_balance(self):
-        """Saldo USDT atual"""
-        try:
+            logger.info("💰 Buscando saldo real...")
             balance = self.exchange.fetch_balance()
+            
+            # ✅ SALDO REAL
             usdt_free = balance.get('USDT', {}).get('free', 0.0)
+            usdt_used = balance.get('USDT', {}).get('used', 0.0)
+            usdt_total = balance.get('USDT', {}).get('total', 0.0)
+            
             bot_state['balance'] = usdt_free
+            
+            logger.info(f"💰 Saldo Livre: ${usdt_free:.2f}")
+            logger.info(f"🔒 Saldo Usado: ${usdt_used:.2f}")
+            logger.info(f"📊 Saldo Total: ${usdt_total:.2f}")
+            
             return usdt_free
+            
         except Exception as e:
-            logger.error(f"❌ Erro saldo: {e}")
+            logger.error(f"❌ Erro buscar saldo real: {e}")
             return bot_state['balance']
 
-    def execute_80_percent_corrected(self):
-        """🚨 TRADE 80% MÉTODO CORRIGIDO SEM ERROS 🚨"""
+    def execute_real_trade_80_percent(self):
+        """🚨 EXECUTAR TRADE REAL COM 80% DO SALDO 🚨"""
         try:
-            logger.warning("🚨 EXECUTANDO TRADE 80% - MÉTODO CORRIGIDO!")
+            logger.warning("🚨 INICIANDO TRADE REAL COM 80% DO SALDO!")
+            logger.warning("💰 ESTE TRADE VAI USAR SEU DINHEIRO REAL!")
 
-            # Saldo atual
-            current_balance = self.get_current_balance()
+            # ✅ BUSCAR SALDO REAL ATUAL
+            current_balance = self.get_real_balance()
+            
             if current_balance < 5:
-                logger.error(f"❌ Saldo baixo: ${current_balance:.2f}")
+                logger.error(f"❌ SALDO REAL INSUFICIENTE: ${current_balance:.2f}")
                 return False
 
-            # 80% do saldo em USDT
+            # ✅ CALCULAR 80% DO SALDO REAL
             trade_amount_usd = current_balance * self.percentage
+            
+            # ✅ PREÇO ETH ATUAL
+            ticker = self.exchange.fetch_ticker(self.symbol)
+            current_price = ticker['last']
+            bot_state['eth_price'] = current_price
 
-            # Preço ETH atual
-            current_price = bot_state['eth_price']
-            if current_price <= 0:
-                ticker = self.exchange.fetch_ticker(self.symbol)
-                current_price = ticker['last']
-                bot_state['eth_price'] = current_price
+            logger.warning("🚨 DETALHES DO TRADE REAL:")
+            logger.warning(f"💰 Saldo Real: ${current_balance:.2f} USDT")
+            logger.warning(f"🎯 Valor Trade (80%): ${trade_amount_usd:.2f} USDT")
+            logger.warning(f"💎 Preço ETH: ${current_price:.2f}")
+            logger.warning(f"📊 ETH a Comprar: ~{trade_amount_usd/current_price:.6f}")
+            logger.warning("⚠️ EXECUTANDO ORDEM REAL EM 3 SEGUNDOS...")
+            
+            time.sleep(3)  # Pausa antes do trade real
 
-            logger.warning(f"🚨 TRADE 80%:")
-            logger.warning(f" Saldo: ${current_balance:.2f}")
-            logger.warning(f" Usando: ${trade_amount_usd:.2f} (80%)")
-            logger.warning(f" ETH: ${current_price:.2f}")
-
-            # MÉTODO CORRIGIDO - usar create_order com parâmetros específicos
+            # ✅ EXECUTAR ORDEM REAL DE COMPRA
+            logger.warning("💰 EXECUTANDO COMPRA REAL!")
+            
+            # MÉTODO 1: quoteOrderQty (comprar por valor em USDT)
             order = self.exchange.create_order(
                 symbol=self.symbol,
                 type='market',
                 side='buy',
-                amount=None,
-                price=None,
+                amount=None,  # Não especificar quantidade
+                price=None,   # Não especificar preço
                 params={
-                    'quoteOrderQty': trade_amount_usd
+                    'quoteOrderQty': trade_amount_usd  # ✅ COMPRAR POR VALOR REAL
                 }
             )
 
-            # Calcular quantidade aproximada comprada
+            # ✅ CALCULAR QUANTIDADE COMPRADA
             quantity_bought = trade_amount_usd / current_price
 
-            # P&L estimado
-            trading_fee = trade_amount_usd * 0.001
-            estimated_pnl = random.uniform(-trading_fee * 2, trade_amount_usd * 0.015)
+            # ✅ BUSCAR SALDO APÓS O TRADE
+            new_balance = self.get_real_balance()
+            actual_spent = current_balance - new_balance
 
-            # Registrar
+            # ✅ REGISTRAR TRADE REAL
             trade_info = {
                 'time': datetime.now(),
                 'pair': self.symbol,
                 'side': 'BUY',
                 'amount': quantity_bought,
                 'value_usd': trade_amount_usd,
+                'actual_spent': actual_spent,
                 'price': current_price,
-                'order_id': order.get('id', 'success'),
-                'pnl_estimated': estimated_pnl,
+                'order_id': order.get('id', 'real_order'),
                 'percentage_used': 80.0,
                 'balance_before': current_balance,
-                'real_trade': True,
-                'method': 'quoteOrderQty'
+                'balance_after': new_balance,
+                'real_trade': True,  # ✅ CONFIRMAÇÃO DE TRADE REAL
+                'trading_mode': 'REAL_MONEY',
+                'method': 'quoteOrderQty_real'
             }
 
-            # Atualizar estado
+            # ✅ ATUALIZAR ESTADO COM TRADE REAL
             bot_state['trades_today'].append(trade_info)
             bot_state['daily_trades'] += 1
             bot_state['real_trades_executed'] += 1
-            bot_state['daily_pnl'] += estimated_pnl
-            bot_state['total_pnl'] += estimated_pnl
             bot_state['last_trade_time'] = datetime.now()
             bot_state['last_trade_result'] = trade_info
-            bot_state['last_trade_amount'] = trade_amount_usd
+            bot_state['last_trade_amount'] = actual_spent
             bot_state['error_count'] = 0
 
-            logger.warning(f"✅ TRADE 80% EXECUTADO SEM ERROS!")
-            logger.warning(f"📊 Order ID: {order.get('id', 'OK')}")
-            logger.warning(f"💰 Gasto: ${trade_amount_usd:.2f}")
-            logger.warning(f"💎 ETH comprado: ~{quantity_bought:.6f}")
-            logger.warning(f"📈 P&L: ${estimated_pnl:.2f}")
-            logger.warning(f"🎯 Total: {bot_state['real_trades_executed']}")
+            logger.warning("✅ TRADE REAL EXECUTADO COM SUCESSO!")
+            logger.warning(f"📊 Order ID: {order.get('id', 'SUCCESS')}")
+            logger.warning(f"💰 Valor Gasto Real: ${actual_spent:.2f} USDT")
+            logger.warning(f"💎 ETH Comprado: {quantity_bought:.6f}")
+            logger.warning(f"💰 Novo Saldo: ${new_balance:.2f} USDT")
+            logger.warning(f"🎯 Total Trades Reais: {bot_state['real_trades_executed']}")
+            logger.warning("🚨 TRADE REAL CONCLUÍDO!")
 
             return True
 
         except Exception as e:
-            logger.error(f"❌ ERRO TRADE: {e}")
+            logger.error(f"❌ ERRO NO TRADE REAL: {e}")
             bot_state['error_count'] += 1
 
-            # Tentar método alternativo se o primeiro falhar
+            # ✅ TENTAR MÉTODO ALTERNATIVO REAL
             try:
-                logger.warning("🔄 Tentando método alternativo...")
+                logger.warning("🔄 Tentando método alternativo REAL...")
+                
+                # Calcular quantidade exata
                 quantity = trade_amount_usd / current_price
                 quantity = round(quantity, 6)
 
-                order_alt = self.exchange.create_market_buy_order(self.symbol, quantity)
+                # Ordem alternativa real
+                order_alt = self.exchange.create_market_buy_order(
+                    self.symbol, 
+                    quantity
+                )
+
+                # Verificar saldo após trade alternativo
+                new_balance_alt = self.get_real_balance()
+                actual_spent_alt = current_balance - new_balance_alt
 
                 trade_info_alt = {
                     'time': datetime.now(),
@@ -234,35 +263,61 @@ class ETHBot80PercentFixed:
                     'side': 'BUY',
                     'amount': quantity,
                     'value_usd': trade_amount_usd,
+                    'actual_spent': actual_spent_alt,
                     'price': current_price,
-                    'order_id': order_alt.get('id', 'alt_success'),
-                    'pnl_estimated': random.uniform(-2, 5),
-                    'real_trade': True,
-                    'method': 'alternative'
+                    'order_id': order_alt.get('id', 'alt_real_order'),
+                    'real_trade': True,  # ✅ TRADE REAL
+                    'trading_mode': 'REAL_MONEY_ALT',
+                    'method': 'market_buy_real'
                 }
 
                 bot_state['last_trade_result'] = trade_info_alt
                 bot_state['real_trades_executed'] += 1
                 bot_state['error_count'] = 0
 
-                logger.warning("✅ MÉTODO ALTERNATIVO SUCESSO!")
+                logger.warning("✅ MÉTODO ALTERNATIVO REAL SUCESSO!")
+                logger.warning(f"💰 Gasto Real: ${actual_spent_alt:.2f}")
                 return True
 
             except Exception as e2:
-                logger.error(f"❌ Método alternativo falhou: {e2}")
+                logger.error(f"❌ MÉTODO ALTERNATIVO REAL FALHOU: {e2}")
                 bot_state['last_trade_result'] = {
-                    'error': f"Ambos métodos falharam: {str(e)[:100]}",
-                    'time': datetime.now()
+                    'error': f"Falha nos trades reais: {str(e)[:100]}",
+                    'time': datetime.now(),
+                    'real_trade': False
                 }
                 return False
 
-    def run_80_percent_loop(self):
-        """Loop principal"""
-        logger.warning("🚨 ETH BOT 80% COM CORREÇÃO DE ERROS!")
+    def update_eth_price(self):
+        """Atualizar preço ETH"""
+        try:
+            if not self.exchange:
+                return
+            ticker = self.exchange.fetch_ticker(self.symbol)
+            bot_state['eth_price'] = ticker['last']
+            bot_state['eth_change_24h'] = ticker.get('percentage', 0)
+            bot_state['last_price_update'] = datetime.now()
+        except Exception as e:
+            logger.error(f"❌ Erro atualizar preço: {e}")
+
+    def price_monitoring_loop(self):
+        """Loop de monitoramento de preços"""
+        while self.running:
+            try:
+                self.update_eth_price()
+                time.sleep(15)
+            except:
+                time.sleep(30)
+
+    def run_real_trading_loop(self):
+        """🚨 LOOP PRINCIPAL DE TRADING REAL 🚨"""
+        logger.warning("🚨 INICIANDO BOT DE TRADING REAL!")
+        logger.warning("💰 ESTE BOT VAI USAR SEU DINHEIRO REAL!")
+        
         bot_state['start_time'] = datetime.now()
 
-        # Thread preço
-        self.price_thread = threading.Thread(target=self.price_loop, daemon=True)
+        # Thread de monitoramento de preços
+        self.price_thread = threading.Thread(target=self.price_monitoring_loop, daemon=True)
         self.price_thread.start()
 
         cycle = 0
@@ -271,87 +326,103 @@ class ETHBot80PercentFixed:
             try:
                 cycle += 1
 
-                # Uptime
+                # ✅ ATUALIZAR UPTIME
                 if bot_state['start_time']:
                     delta = datetime.now() - bot_state['start_time']
                     bot_state['uptime_hours'] = delta.total_seconds() / 3600
 
-                # Saldo
+                # ✅ ATUALIZAR SALDO REAL A CADA 5 CICLOS
                 if cycle % 5 == 0:
-                    self.get_current_balance()
+                    self.get_real_balance()
 
-                # TRADE 80% - 35% chance
+                # 🚨 EXECUTAR TRADE REAL - 35% DE CHANCE
                 if random.random() < 0.35:
-                    logger.warning("🎯 Iniciando trade 80% corrigido...")
-                    success = self.execute_80_percent_corrected()
-                    # Pausa após trade
-                    time.sleep(90 if success else 45)
+                    logger.warning("🎯 INICIANDO TRADE REAL COM 80%...")
+                    success = self.execute_real_trade_80_percent()
+                    
+                    # Pausa após trade real
+                    if success:
+                        logger.warning("✅ Trade real concluído - pausa 90s")
+                        time.sleep(90)
+                    else:
+                        logger.warning("❌ Trade real falhou - pausa 45s")
+                        time.sleep(45)
 
-                # Log
+                # ✅ LOG DE STATUS A CADA 8 CICLOS
                 if cycle % 8 == 0:
-                    logger.warning(f"🚨 BOT 80% ATIVO (Corrigido)")
+                    logger.warning("🚨 BOT TRADING REAL ATIVO")
                     logger.warning(f"💎 ETH: ${bot_state['eth_price']:.2f}")
-                    logger.warning(f"💰 Saldo: ${bot_state['balance']:.2f}")
-                    logger.warning(f"🎯 Trades: {bot_state['real_trades_executed']}")
+                    logger.warning(f"💰 Saldo Real: ${bot_state['balance']:.2f}")
+                    logger.warning(f"🎯 Trades Reais: {bot_state['real_trades_executed']}")
                     logger.warning(f"📊 P&L: ${bot_state['daily_pnl']:.2f}")
                     logger.warning(f"❌ Erros: {bot_state['error_count']}")
 
-                # Reset diário
+                # ✅ RESET DIÁRIO
                 now = datetime.now()
                 if now.hour == 0 and now.minute == 0:
+                    logger.warning("🔄 Reset diário - limpando histórico")
                     bot_state['daily_trades'] = 0
                     bot_state['daily_pnl'] = 0.0
-                    bot_state['real_trades_executed'] = 0
                     bot_state['trades_today'] = []
 
                 time.sleep(20)
 
             except Exception as e:
-                logger.error(f"❌ Loop error: {e}")
+                logger.error(f"❌ Erro no loop real: {e}")
                 time.sleep(30)
 
-    def start(self):
+    def start_real_trading(self):
+        """🚨 INICIAR TRADING REAL 🚨"""
         if self.running:
-            return False, "Bot já ATIVO"
+            return False, "Bot já está em TRADING REAL"
 
-        if not self.setup_exchange():
-            return False, "Erro conexão"
+        logger.warning("🚨 VERIFICANDO CREDENCIAIS PARA TRADING REAL...")
+        
+        if not self.setup_exchange_real_money():
+            return False, "❌ Erro na configuração do trading real"
 
+        logger.warning("🚨 INICIANDO TRADING REAL!")
+        logger.warning("💰 ESTE BOT VAI USAR SEU DINHEIRO REAL!")
+        
         self.running = True
         bot_state['active'] = True
+        bot_state['mode'] = 'REAL MONEY 💰'
 
-        self.thread = threading.Thread(target=self.run_80_percent_loop, daemon=True)
+        self.thread = threading.Thread(target=self.run_real_trading_loop, daemon=True)
         self.thread.start()
 
-        logger.warning("🚀 ETH BOT 80% CORRIGIDO INICIADO!")
-        return True, "🚨 BOT 80% ATIVO (SEM ERROS)"
+        logger.warning("🚀 BOT DE TRADING REAL INICIADO!")
+        return True, "🚨 TRADING REAL ATIVO - USANDO DINHEIRO REAL!"
 
-    def stop(self):
+    def stop_real_trading(self):
+        """⏹️ PARAR TRADING REAL"""
+        logger.warning("⏹️ PARANDO TRADING REAL...")
+        
         self.running = False
         bot_state['active'] = False
 
         if self.thread:
-            self.thread.join(timeout=3)
+            self.thread.join(timeout=5)
 
-        logger.warning("⏹️ BOT 80% PARADO")
-        return True, "Bot PARADO"
+        logger.warning("⏹️ TRADING REAL PARADO")
+        return True, "⏹️ Trading Real PARADO"
 
-# Bot global
-eth_bot = ETHBot80PercentFixed()
+# ✅ INSTÂNCIA GLOBAL DO BOT REAL
+eth_real_bot = ETHBotRealMoney80Percent()
 
 def create_app():
     app = Flask(__name__)
-    app.config['SECRET_KEY'] = 'eth-80-fixed'
+    app.config['SECRET_KEY'] = 'eth-real-trading-80'
     CORS(app, origins="*")
 
     @app.route('/')
     def index():
         try:
-            bot_status = "🟢 LIGADO" if bot_state['active'] else "🔴 DESLIGADO"
+            bot_status = "🟢 TRADING REAL ATIVO" if bot_state['active'] else "🔴 PARADO"
             status_color = "#4CAF50" if bot_state['active'] else "#f44336"
             next_trade = bot_state['balance'] * 0.8
 
-            # Último trade
+            # ✅ ÚLTIMO TRADE REAL
             last_trade = bot_state.get('last_trade_result')
             last_trade_display = ""
 
@@ -365,25 +436,27 @@ def create_app():
                     </div>
                     """
                 else:
-                    method = last_trade.get('method', 'standard')
+                    method = last_trade.get('method', 'real')
+                    actual_spent = last_trade.get('actual_spent', last_trade.get('value_usd', 0))
                     last_trade_display = f"""
                     <div style="background: rgba(76,175,80,0.2); padding: 15px; border-radius: 10px; margin: 10px 0;">
-                        <strong>✅ Último Trade 80% (Método: {method}):</strong><br>
-                        Valor: ${last_trade.get('value_usd', 0):.2f}<br>
-                        ETH: {last_trade.get('amount', 0):.6f}<br>
-                        P&L: ${last_trade.get('pnl_estimated', 0):.2f}<br>
+                        <strong>✅ Último Trade REAL (80%):</strong><br>
+                        💰 Gasto Real: ${actual_spent:.2f} USDT<br>
+                        💎 ETH: {last_trade.get('amount', 0):.6f}<br>
+                        📊 Método: {method}<br>
+                        🆔 Order: {last_trade.get('order_id', 'N/A')}<br>
                         <small>{last_trade['time'].strftime('%H:%M:%S')}</small>
                     </div>
                     """
 
-            # HTML com design igual à imagem
+            # ✅ HTML INTERFACE REAL TRADING
             html = f"""
             <!DOCTYPE html>
             <html lang="pt-BR">
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>ETH BOT 80% - SEM ERROS</title>
+                <title>🚨 ETH BOT REAL 80% - DINHEIRO REAL</title>
                 <style>
                     body {{
                         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -460,9 +533,22 @@ def create_app():
                         margin: 20px 0;
                         animation: pulse 2s infinite;
                     }}
+                    .real-warning {{
+                        background: linear-gradient(45deg, #FF0000, #CC0000);
+                        border-radius: 15px;
+                        padding: 20px;
+                        margin: 20px 0;
+                        animation: blink 1.5s infinite;
+                        border: 3px solid #FFD700;
+                    }}
                     @keyframes pulse {{
                         0% {{ opacity: 1; }}
                         50% {{ opacity: 0.7; }}
+                        100% {{ opacity: 1; }}
+                    }}
+                    @keyframes blink {{
+                        0% {{ opacity: 1; }}
+                        50% {{ opacity: 0.8; }}
                         100% {{ opacity: 1; }}
                     }}
                 </style>
@@ -470,7 +556,7 @@ def create_app():
             <body>
                 <div class="container">
                     <div class="header">
-                        <h1>💎 ETH BOT 80% - SEM ERROS</h1>
+                        <h1>🚨 ETH BOT REAL 80% - DINHEIRO REAL 💰</h1>
                         <div style="color: {status_color}; font-size: 1.2em; font-weight: bold;">
                             {bot_status}
                         </div>
@@ -479,13 +565,15 @@ def create_app():
                         </div>
                     </div>
 
-                    <div class="alert-box">
-                        <strong>🚨 BOT CORRIGIDO - SEM ERROS!</strong><br>
-                        USA 80% DO SALDO | SEM CHANCE CICLO
+                    <div class="real-warning">
+                        <strong>⚠️ AVISO: TRADING REAL ATIVO! ⚠️</strong><br>
+                        🚨 BOT CORRIGIDO - SEM ERROS!<br>
+                        💰 USA 80% DO SALDO REAL | SEM CHANCE CICLO<br>
+                        <strong>ESTE BOT VAI USAR SEU DINHEIRO REAL!</strong>
                     </div>
 
                     <div class="status-box">
-                        <h3>ETH/USDT: ${bot_state['eth_price']:.2f}</h3>
+                        <h3>💎 ETH/USDT: ${bot_state['eth_price']:.2f}</h3>
                         <div style="color: {'#4CAF50' if bot_state['eth_change_24h'] >= 0 else '#f44336'}">
                             ({bot_state['eth_change_24h']:+.2f}% 24h)
                         </div>
@@ -494,15 +582,15 @@ def create_app():
                     <div class="metrics">
                         <div class="metric">
                             <div class="metric-value">${bot_state['balance']:.2f}</div>
-                            <div class="metric-label">💰 Saldo</div>
+                            <div class="metric-label">💰 Saldo Real</div>
                         </div>
                         <div class="metric">
                             <div class="metric-value">{bot_state['daily_trades']}</div>
-                            <div class="metric-label">📊 Trades</div>
+                            <div class="metric-label">📊 Trades Reais</div>
                         </div>
                         <div class="metric">
                             <div class="metric-value">${bot_state['daily_pnl']:.2f}</div>
-                            <div class="metric-label">📈 P&L</div>
+                            <div class="metric-label">📈 P&L Real</div>
                         </div>
                         <div class="metric">
                             <div class="metric-value">{bot_state['uptime_hours']:.1f}h</div>
@@ -513,15 +601,16 @@ def create_app():
                     {last_trade_display}
 
                     <div style="margin: 30px 0;">
-                        <button class="button" onclick="toggleBot()">
-                            {'🔴 DESLIGAR BOT' if bot_state['active'] else '🟢 LIGAR BOT'}
+                        <button class="button {'stop' if bot_state['active'] else ''}" onclick="toggleBot()">
+                            {'🔴 PARAR TRADING REAL' if bot_state['active'] else '🟢 INICIAR TRADING REAL'}
                         </button>
                     </div>
 
                     <div style="background: rgba(255,255,255,0.1); border-radius: 10px; padding: 15px; margin-top: 20px;">
-                        <h4>🎯 Próximo Trade</h4>
-                        <div>Valor: ${next_trade:.2f} (80% do saldo)</div>
-                        <div>Método: quoteOrderQty corrigido</div>
+                        <h4>🎯 Próximo Trade Real</h4>
+                        <div>💰 Valor: ${next_trade:.2f} USDT (80% do saldo real)</div>
+                        <div>📊 Método: quoteOrderQty (trading real)</div>
+                        <div>⚠️ ESTE VALOR SERÁ GASTO DO SEU SALDO REAL!</div>
                     </div>
                 </div>
 
@@ -529,6 +618,11 @@ def create_app():
                     function toggleBot() {{
                         const action = {str(bot_state['active']).lower()};
                         const endpoint = action ? '/stop' : '/start';
+                        
+                        if (!action) {{
+                            const confirm = window.confirm('⚠️ ATENÇÃO!\\n\\nVocê está prestes a iniciar o TRADING REAL!\\n\\nEste bot vai usar seu DINHEIRO REAL para fazer trades!\\n\\nTem certeza que deseja continuar?');
+                            if (!confirm) return;
+                        }}
                         
                         fetch(endpoint, {{ method: 'POST' }})
                             .then(response => response.json())
@@ -545,6 +639,13 @@ def create_app():
                     setInterval(() => {{
                         location.reload();
                     }}, 30000);
+
+                    // Aviso inicial
+                    if ({str(not bot_state['active']).lower()}) {{
+                        setTimeout(() => {{
+                            alert('🚨 TRADING REAL CONFIGURADO!\\n\\n💰 Este bot vai usar seu DINHEIRO REAL!\\n🎯 Cada trade usará 80% do saldo!\\n⚠️ Certifique-se das credenciais!');
+                        }}, 2000);
+                    }}
                 </script>
             </body>
             </html>
@@ -556,41 +657,42 @@ def create_app():
             return f"<h1>Erro: {e}</h1>", 500
 
     @app.route('/start', methods=['POST'])
-    def start_bot():
+    def start_real_bot():
         try:
-            success, message = eth_bot.start()
+            logger.warning("🚨 RECEBIDO COMANDO PARA INICIAR TRADING REAL!")
+            success, message = eth_real_bot.start_real_trading()
             return jsonify({
                 'success': success,
                 'message': message,
-                'status': bot_state
+                'status': bot_state,
+                'mode': 'REAL_MONEY'
             })
         except Exception as e:
-            logger.error(f"❌ Erro start: {e}")
+            logger.error(f"❌ Erro start real: {e}")
             return jsonify({'success': False, 'message': f'Erro: {e}'})
 
     @app.route('/stop', methods=['POST'])
-    def stop_bot():
+    def stop_real_bot():
         try:
-            success, message = eth_bot.stop()
+            logger.warning("⏹️ RECEBIDO COMANDO PARA PARAR TRADING REAL!")
+            success, message = eth_real_bot.stop_real_trading()
             return jsonify({
                 'success': success,
                 'message': message,
                 'status': bot_state
             })
         except Exception as e:
-            logger.error(f"❌ Erro stop: {e}")
+            logger.error(f"❌ Erro stop real: {e}")
             return jsonify({'success': False, 'message': f'Erro: {e}'})
 
     @app.route('/status')
     def get_status():
         try:
-            # Converter datetime para string para JSON
             status_copy = bot_state.copy()
             for key, value in status_copy.items():
                 if isinstance(value, datetime):
                     status_copy[key] = value.isoformat()
                 elif key == 'trades_today':
-                    # Converter trades para formato JSON
                     trades = []
                     for trade in value:
                         trade_copy = trade.copy()
@@ -606,22 +708,19 @@ def create_app():
 
     @app.route('/health')
     def health():
-        return jsonify({'status': 'OK', 'bot_active': bot_state['active']})
+        return jsonify({
+            'status': 'OK', 
+            'bot_active': bot_state['active'],
+            'trading_mode': 'REAL_MONEY',
+            'real_trading': True
+        })
 
     return app
 
-# Ponto de entrada principal
-if __name__ == '__main__':
-    try:
-        logger.info("🚀 App importado para Gunicorn")
-        from app import eth_bot
-        logger.info(f"🔧 App importado com sucesso")
-    except Exception as e:
-        logger.error(f"❌ Erro importação: {e}")
-
-# Instância da aplicação para Gunicorn
+# ✅ INSTÂNCIA DA APLICAÇÃO REAL
 app = create_app()
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
+    logger.warning("🚨 INICIANDO SERVIDOR TRADING REAL!")
     app.run(host='0.0.0.0', port=port, debug=False)
