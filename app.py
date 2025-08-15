@@ -44,7 +44,9 @@ bot_state = {
     'error_count': 0,
     'eth_price': 0.0,
     'eth_change_24h': 0.0,
-    'last_price_update': None
+    'last_price_update': None,
+    'min_trade_usd': 5.0,  # ADICIONADO AQUI
+    'max_trade_usd': 15.0   # ADICIONADO AQUI
 }
 
 class ETHBotRealTime:
@@ -53,9 +55,13 @@ class ETHBotRealTime:
         self.running = False
         self.thread = None
         self.price_thread = None
-        self.min_trade_usd = 5.0   # Menor valor para mais trades
-        self.max_trade_usd = 15.0  # Máximo reduzido
+        self.min_trade_usd = 5.0
+        self.max_trade_usd = 15.0
         self.symbol = 'ETH/USDT'
+        
+        # Sincronizar com bot_state
+        bot_state['min_trade_usd'] = self.min_trade_usd
+        bot_state['max_trade_usd'] = self.max_trade_usd
         
     def setup_exchange(self):
         """Configura Bitget ETH"""
