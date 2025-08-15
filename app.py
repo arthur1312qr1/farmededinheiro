@@ -102,7 +102,7 @@ class ETHBotFutures80Percent:
             # ✅ DEFINIR ALAVANCAGEM
             logger.warning(f"🚨 DEFININDO ALAVANCAGEM {self.leverage}x!")
             try:
-                self.exchange.set_leverage(self.leverage, self.symbol)
+                self.exchange.set_leverage(self.leverage, self.symbol, params={'marginCoin': 'USDT'})
                 logger.warning(f"✅ ALAVANCAGEM {self.leverage}x DEFINIDA!")
             except Exception as lev_error:
                 logger.warning(f"⚠️ Erro definir alavancagem: {lev_error}")
@@ -175,17 +175,6 @@ class ETHBotFutures80Percent:
             # ✅ CALCULAR 80% DO SALDO REAL
             margin_amount = current_balance * self.percentage
 
-            # 🚨 CORREÇÃO: VERIFICAR SE MARGEM ATENDE AO MÍNIMO DA BITGET (1 USDT)
-            BITGET_MIN_MARGIN = 1.0  # Mínimo exigido pela Bitget
-            if margin_amount < BITGET_MIN_MARGIN:
-                logger.warning(f"❌ TRADE CANCELADO: MARGEM ABAIXO DO MÍNIMO")
-                logger.warning(f"💰 Saldo atual: ${current_balance:.2f} USDT")
-                logger.warning(f"🎯 Margem calculada (80%): ${margin_amount:.2f} USDT")
-                logger.warning(f"⚠️ MÍNIMO EXIGIDO PELA BITGET: ${BITGET_MIN_MARGIN:.2f} USDT")
-                logger.warning(f"💡 NECESSÁRIO SALDO MÍNIMO: ${BITGET_MIN_MARGIN / 0.8:.2f} USDT para margem de 80%")
-                bot_state['last_error'] = f"Margem ${margin_amount:.2f} USDT abaixo do mínimo {BITGET_MIN_MARGIN:.2f} USDT"
-                return False
-
             # 🚨 CALCULAR VALOR COM ALAVANCAGEM
             trade_value_with_leverage = margin_amount * self.leverage
 
@@ -208,20 +197,23 @@ class ETHBotFutures80Percent:
             logger.warning("🚨 DETALHES DO TRADE FUTURES:")
             logger.warning(f"💰 Saldo Atual: ${current_balance:.2f} USDT")
             logger.warning(f"🎯 Margem (80%): ${margin_amount:.2f} USDT")
-            logger.warning(f"✅ MARGEM APROVADA: ≥ ${BITGET_MIN_MARGIN:.2f} USDT")
             logger.warning(f"🚨 Alavancagem: {self.leverage}x")
             logger.warning(f"💥 Valor Total: ${trade_value_with_leverage:.2f} USDT")
             logger.warning(f"💎 Preço ETH: ${current_price:.2f}")
             logger.warning(f"📊 ETH a Comprar: {eth_quantity:.4f}")
 
-            # ✅ EXECUTAR ORDEM FUTURES
+            # ✅ EXECUTAR ORDEM FUTURES - CORREÇÃO APLICADA
             logger.warning("💰 EXECUTANDO ORDEM FUTURES!")
 
             try:
-                # MÉTODO 1: Market order futures
+                # MÉTODO 1: Market order futures com parâmetros específicos Bitget
                 order = self.exchange.create_market_buy_order(
                     symbol=self.symbol,
-                    amount=eth_quantity
+                    amount=eth_quantity,
+                    params={
+                        'type': 'swap',
+                        'marginCoin': 'USDT'
+                    }
                 )
 
                 order_id = order.get('id')
@@ -230,14 +222,17 @@ class ETHBotFutures80Percent:
             except Exception as order_error:
                 logger.warning(f"⚠️ Método 1 falhou: {order_error}")
 
-                # MÉTODO 2: Create order futures
+                # MÉTODO 2: Create order futures com correção
                 try:
                     order = self.exchange.create_order(
                         symbol=self.symbol,
                         type='market',
                         side='buy',
                         amount=eth_quantity,
-                        params={'type': 'swap'}
+                        params={
+                            'type': 'swap',
+                            'marginCoin': 'USDT'
+                        }
                     )
                     logger.warning(f"✅ MÉTODO 2 SUCESSO: {order.get('id')}")
 
