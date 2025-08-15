@@ -183,14 +183,20 @@ class ETHBotRealMoney80Percent:
             logger.warning(f"💎 Preço ETH: ${current_price:.2f}")
             logger.warning(f"📊 ETH a Comprar: {eth_quantity:.4f}")
             
-            # ✅ EXECUTAR ORDEM REAL BITGET - MÉTODO MAIS SIMPLES
+            # ✅ EXECUTAR ORDEM REAL BITGET - MÉTODO CORRIGIDO FINAL
             logger.warning("💰 EXECUTANDO ORDEM REAL BITGET!")
             
             try:
-                # MÉTODO 1: Market buy simples
-                order = self.exchange.create_market_buy_order(
+                # MÉTODO CORRIGIDO: Usar quoteOrderQty corretamente
+                order = self.exchange.create_order(
                     symbol=self.symbol,
-                    amount=eth_quantity
+                    type='market',
+                    side='buy',
+                    amount=None,  # Não usar amount quando usar quoteOrderQty
+                    price=None,
+                    params={
+                        'quoteOrderQty': trade_amount_usd  # Comprar por valor em USDT
+                    }
                 )
                 
                 order_id = order.get('id')
@@ -199,20 +205,29 @@ class ETHBotRealMoney80Percent:
             except Exception as order_error:
                 logger.warning(f"⚠️ Método 1 falhou: {order_error}")
                 
-                # MÉTODO 2: Create order básico
+                # MÉTODO ALTERNATIVO: Market buy por valor
                 try:
-                    order = self.exchange.create_order(
+                    order = self.exchange.create_market_buy_order_with_cost(
                         symbol=self.symbol,
-                        type='market',
-                        side='buy',
-                        amount=eth_quantity
+                        cost=trade_amount_usd
                     )
-                    logger.warning(f"✅ MÉTODO 2 SUCESSO: {order.get('id')}")
+                    logger.warning(f"✅ MÉTODO ALTERNATIVO SUCESSO: {order.get('id')}")
                     
                 except Exception as order_error2:
-                    logger.error(f"❌ AMBOS MÉTODOS FALHARAM: {order_error2}")
-                    bot_state['last_error'] = f"Falha na execução: {str(order_error2)[:100]}"
-                    return False
+                    logger.warning(f"⚠️ Método 2 falhou: {order_error2}")
+                    
+                    # MÉTODO 3: Market buy simples
+                    try:
+                        order = self.exchange.create_market_buy_order(
+                            symbol=self.symbol,
+                            amount=eth_quantity
+                        )
+                        logger.warning(f"✅ MÉTODO 3 SUCESSO: {order.get('id')}")
+                        
+                    except Exception as order_error3:
+                        logger.error(f"❌ TODOS OS MÉTODOS FALHARAM: {order_error3}")
+                        bot_state['last_error'] = f"Falha na execução: {str(order_error3)[:100]}"
+                        return False
 
             order_id = order.get('id')
             
