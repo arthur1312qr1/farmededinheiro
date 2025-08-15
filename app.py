@@ -14,11 +14,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Verificar se as variáveis estão configuradas
-api_key = os.environ.get('BITGET_API_KEY', '')
-secret_key = os.environ.get('BITGET_SECRET_KEY', '')
-passphrase = os.environ.get('BITGET_PASSPHRASE', '')
+# Verificar se as variáveis estão configuradas com debug detalhado
+api_key = os.environ.get('BITGET_API_KEY', '').strip()
+secret_key = os.environ.get('BITGET_SECRET_KEY', '').strip()
+passphrase = os.environ.get('BITGET_PASSPHRASE', '').strip()
 paper_trading = os.environ.get('PAPER_TRADING', 'true').lower() == 'true'
+
+# Debug das variáveis (sem mostrar valores reais por segurança)
+logger.info(f"🔍 Debug variáveis:")
+logger.info(f"  - API_KEY presente: {bool(api_key)} (tamanho: {len(api_key)})")
+logger.info(f"  - SECRET_KEY presente: {bool(secret_key)} (tamanho: {len(secret_key)})")
+logger.info(f"  - PASSPHRASE presente: {bool(passphrase)} (tamanho: {len(passphrase)})")
+logger.info(f"  - PAPER_TRADING: {paper_trading}")
 
 # Estado do bot
 bot_state = {
@@ -27,59 +34,109 @@ bot_state = {
     'daily_trades': 0,
     'daily_pnl': 0.0,
     'win_rate': 0.0,
-    'last_update': datetime.now()
+    'last_update': datetime.now(),
+    'connection_status': 'Não testado'
 }
 
-# Configurar exchange Bitget
 def get_bitget_exchange():
     """Configura e retorna instância da exchange Bitget"""
     try:
-        if not (api_key and secret_key and passphrase):
-            logger.warning("Credenciais Bitget não configuradas - usando modo demo")
-            return None
+        if not api_key or not secret_key or not passphrase:
+            logger.warning(f"❌ Credenciais incompletas - API:{bool(api_key)} SECRET:{bool(secret_key)} PASS:{bool(passphrase)}")
+            return None, "Credenciais incompletas"
             
-        exchange = ccxt.bitget({
+        # Configuração específica da Bitget
+        exchange_config = {
             'apiKey': api_key,
             'secret': secret_key,
-            'password': passphrase,  # Bitget usa passphrase
-            'sandbox': paper_trading,  # True para paper trading, False para real
+            'password': passphrase,
+            'sandbox': paper_trading,  # True para sandbox, False para live
             'enableRateLimit': True,
-        })
+            'options': {
+                'defaultType': 'spot',  # Usar spot trading como padrão
+            }
+        }
         
-        logger.info(f"✅ Bitget configurado - Sandbox: {paper_trading}")
-        return exchange
+        logger.info(f"🔧 Configurando Bitget - Sandbox: {paper_trading}")
         
+        exchange = ccxt.bitget(exchange_config)
+        
+        # Teste básico de conectividade
+        try:
+            # Testar se consegue acessar informações básicas
+            markets = exchange.load_markets()
+            logger.info(f"✅ Bitget conectado com sucesso! Markets: {len(markets)}")
+            return exchange, "Conectado"
+            
+        except ccxt.AuthenticationError as auth_err:
+            logger.error(f"❌ Erro de autenticação Bitget: {auth_err}")
+            return None, f"Erro autenticação: {str(auth_err)}"
+        except ccxt.NetworkError as net_err:
+            logger.error(f"❌ Erro de rede Bitget: {net_err}")
+            return None, f"Erro rede: {str(net_err)}"
+        except Exception as test_err:
+            logger.error(f"❌ Erro ao testar Bitget: {test_err}")
+            return None, f"Erro teste: {str(test_err)}"
+            
     except Exception as e:
         logger.error(f"❌ Erro ao configurar Bitget: {e}")
-        return None
+        return None, f"Erro config: {str(e)}"
 
 def get_real_balance():
     """Obtém saldo real da conta Bitget"""
     try:
-        exchange = get_bitget_exchange()
+        exchange, status = get_bitget_exchange()
+        
         if not exchange:
-            # Se não conseguir conectar, retornar saldo demo
-            return 10000.0, "Demo - Configure APIs"
+            logger.warning(f"⚠️ Não foi possível conectar: {status}")
+            bot_state['connection_status'] = status
+            return 0.0, f"Erro: {status}"
         
         # Buscar saldo da conta
-        balance = exchange.fetch_balance()
+        logger.info("📊 Consultando saldo na Bitget...")
+        balance_info = exchange.fetch_balance()
         
-        # Pegar saldo USDT (principal moeda para trading)
-        usdt_balance = balance.get('USDT', {}).get('free', 0.0)
-        total_balance = balance.get('USDT', {}).get('total', 0.0)
+        # Verificar saldo USDT
+        usdt_balance = balance_info.get('USDT', {})
+        total_balance = usdt_balance.get('total', 0.0)
+        free_balance = usdt_balance.get('free', 0.0)
+        used_balance = usdt_balance.get('used', 0.0)
         
-        logger.info(f"💰 Saldo real obtido: ${total_balance:.2f} USDT")
-        return total_balance, "Real"
+        logger.info(f"💰 Saldo USDT - Total: {total_balance}, Livre: {free_balance}, Usado: {used_balance}")
+        
+        # Se não tem USDT, verificar outros saldos
+        if total_balance == 0:
+            logger.info("🔍 USDT zerado, verificando outras moedas...")
+            non_zero_balances = {}
+            for currency, balance_data in balance_info.items():
+                if isinstance(balance_data, dict) and balance_data.get('total', 0) > 0:
+                    non_zero_balances[currency] = balance_data.get('total', 0)
+            
+            if non_zero_balances:
+                logger.info(f"💵 Saldos encontrados: {non_zero_balances}")
+                # Usar o maior saldo encontrado
+                max_currency = max(non_zero_balances, key=non_zero_balances.get)
+                total_balance = non_zero_balances[max_currency]
+                logger.info(f"💰 Usando saldo {max_currency}: {total_balance}")
+                
+        bot_state['connection_status'] = 'Conectado - Saldo obtido'
+        return total_balance, "Bitget Real"
         
     except ccxt.AuthenticationError as e:
-        logger.error(f"❌ Erro de autenticação Bitget: {e}")
-        return 0.0, "Erro Auth"
+        error_msg = f"Autenticação: {str(e)}"
+        logger.error(f"❌ Erro de autenticação: {e}")
+        bot_state['connection_status'] = error_msg
+        return 0.0, error_msg
     except ccxt.NetworkError as e:
-        logger.error(f"❌ Erro de rede Bitget: {e}")
-        return 0.0, "Erro Rede"
+        error_msg = f"Rede: {str(e)}"
+        logger.error(f"❌ Erro de rede: {e}")
+        bot_state['connection_status'] = error_msg
+        return 0.0, error_msg
     except Exception as e:
-        logger.error(f"❌ Erro ao obter saldo: {e}")
-        return 0.0, "Erro"
+        error_msg = f"Geral: {str(e)}"
+        logger.error(f"❌ Erro geral ao obter saldo: {e}")
+        bot_state['connection_status'] = error_msg
+        return 0.0, error_msg
 
 def create_app():
     """Cria aplicação Flask com painel de controle"""
@@ -98,7 +155,10 @@ def create_app():
         current_time = datetime.now().strftime('%H:%M:%S')
         
         # Obter saldo real na inicialização
-        real_balance, balance_source = get_real_balance()
+        try:
+            real_balance, balance_source = get_real_balance()
+        except:
+            real_balance, balance_source = 0.0, "Erro na inicialização"
         
         html_content = f"""
         <!DOCTYPE html>
@@ -138,7 +198,7 @@ def create_app():
                 
                 .balance-source {{
                     font-size: 0.8em; opacity: 0.8; margin-top: 5px;
-                    color: {'#4CAF50' if balance_source == 'Real' else '#FFA500'};
+                    color: {'#4CAF50' if 'Real' in balance_source else '#FF9800' if 'Erro' in balance_source else '#FFA500'};
                 }}
                 
                 .btn {{ 
@@ -162,7 +222,7 @@ def create_app():
                 
                 .log-container {{ 
                     background: rgba(0,0,0,0.6); padding: 15px; border-radius: 10px;
-                    height: 180px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 13px;
+                    height: 200px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px;
                     border: 1px solid rgba(255,255,255,0.3);
                 }}
                 
@@ -184,6 +244,11 @@ def create_app():
                     border: 1px solid {'#FFA500' if paper_trading else '#FF0000'};
                     text-align: center; font-weight: bold;
                 }}
+                
+                .debug-info {{
+                    background: rgba(0,0,0,0.4); padding: 10px; border-radius: 5px;
+                    font-size: 0.8em; margin: 10px 0; font-family: monospace;
+                }}
             </style>
         </head>
         <body>
@@ -193,11 +258,15 @@ def create_app():
                     <div class="subtitle">Farmede Dinheiro - Sistema Ativo</div>
                     
                     <div class="config-status">
-                        {'✅ APIs Configuradas - Conectado à Bitget' if apis_configured else '⚠️ Configure as APIs no Render para trading real'}
+                        {'✅ APIs Configuradas - Conectando à Bitget' if apis_configured else '⚠️ Configure as APIs no Render para trading real'}
                     </div>
                     
                     <div class="mode-indicator">
-                        {'📄 MODO PAPER TRADING (Simulação Segura)' if paper_trading else '💰 MODO REAL - Trading com Dinheiro Real'}
+                        {'📄 MODO SANDBOX (Paper Trading)' if paper_trading else '💰 MODO LIVE - Trading Real'}
+                    </div>
+                    
+                    <div class="debug-info">
+                        🔍 Debug: API_KEY({len(api_key)}), SECRET({len(secret_key)}), PASS({len(passphrase)}) | Status: {bot_state['connection_status']}
                     </div>
                 </div>
                 
@@ -210,21 +279,22 @@ def create_app():
                             <button class="btn" onclick="toggleBot()" id="toggle-btn">▶️ INICIAR</button>
                         </div>
                         <div style="font-size: 0.95em; opacity: 0.9;">
-                            <div>📊 Exchange: Bitget</div>
-                            <div>📈 Símbolo: ETH/USDT</div>
-                            <div>⚡ Estratégia: Scalping</div>
+                            <div>🏦 Exchange: Bitget</div>
+                            <div>📊 Par: ETH/USDT</div>
+                            <div>📈 Tipo: Spot Trading</div>
                         </div>
+                        <button class="btn btn-primary" onclick="testConnection()" style="font-size: 0.9em; padding: 10px;">🔧 Testar Conexão</button>
                     </div>
                     
                     <!-- Saldo Real -->
                     <div class="card status-card">
-                        <h3>💰 Saldo Real</h3>
+                        <h3>💰 Saldo da Conta</h3>
                         <div class="balance-display" id="balance-amount">${real_balance:.2f}</div>
                         <div class="balance-source" id="balance-source">Fonte: {balance_source}</div>
-                        <button class="btn btn-primary" onclick="updateBalance()">🔄 Atualizar</button>
+                        <button class="btn btn-primary" onclick="updateBalance()">🔄 Atualizar Saldo</button>
                         <div style="margin-top: 15px; font-size: 0.9em; opacity: 0.8;">
-                            <div>💵 Moeda: USDT</div>
-                            <div id="balance-time">Última atualização: {current_time}</div>
+                            <div>💵 Moeda Base: USDT</div>
+                            <div id="balance-time">Última consulta: {current_time}</div>
                         </div>
                     </div>
                     
@@ -253,15 +323,17 @@ def create_app():
                         </div>
                     </div>
                     
-                    <!-- Log Ao Vivo -->
+                    <!-- Log Detalhado -->
                     <div class="card" style="grid-column: 1 / -1;">
-                        <h3>📝 Log de Atividades</h3>
+                        <h3>📝 Log de Sistema</h3>
                         <div id="activity-log" class="log-container">
-                            <div>{current_time} - 🟢 Sistema online e funcionando</div>
-                            <div>{current_time} - 🏦 Conectado à Bitget Exchange</div>
-                            <div>{current_time} - ⚙️ Modo: {'Paper Trading' if paper_trading else 'Trading Real'}</div>
-                            <div>{current_time} - 💰 Saldo obtido: ${real_balance:.2f} ({balance_source})</div>
-                            <div>{current_time} - 📡 Pronto para iniciar operações</div>
+                            <div>{current_time} - 🟢 Sistema iniciado</div>
+                            <div>{current_time} - 🔧 Debug: API_KEY presente: {bool(api_key)}</div>
+                            <div>{current_time} - 🔧 Debug: SECRET_KEY presente: {bool(secret_key)}</div>
+                            <div>{current_time} - 🔧 Debug: PASSPHRASE presente: {bool(passphrase)}</div>
+                            <div>{current_time} - ⚙️ Modo: {'Sandbox (Paper)' if paper_trading else 'Live (Real)'}</div>
+                            <div>{current_time} - 💰 Saldo inicial: ${real_balance:.2f} ({balance_source})</div>
+                            <div>{current_time} - 📡 Status conexão: {bot_state['connection_status']}</div>
                         </div>
                     </div>
                 </div>
@@ -283,11 +355,35 @@ def create_app():
                         'trade': '💱',
                         'profit': '💰',
                         'info': '📡',
-                        'balance': '💰'
+                        'balance': '💰',
+                        'debug': '🔧'
                     }};
                     const icon = icons[type] || '📡';
                     log.innerHTML += '<div>' + time + ' - ' + icon + ' ' + message + '</div>';
                     log.scrollTop = log.scrollHeight;
+                }}
+                
+                function testConnection() {{
+                    addLog('Testando conexão com Bitget...', 'debug');
+                    
+                    fetch('/api/test_bitget')
+                    .then(response => response.json())
+                    .then(data => {{
+                        if (data.success) {{
+                            addLog('✅ Conexão OK! Saldo: $' + data.balance + ' Markets: ' + data.markets_count, 'success');
+                            if (data.eth_price) {{
+                                addLog('📊 Preço ETH/USDT: $' + data.eth_price, 'info');
+                            }}
+                        }} else {{
+                            addLog('❌ Erro conexão: ' + data.message, 'error');
+                            if (data.error) {{
+                                addLog('Detalhes: ' + data.error, 'error');
+                            }}
+                        }}
+                    }})
+                    .catch(error => {{
+                        addLog('❌ Erro ao testar: ' + error, 'error');
+                    }});
                 }}
                 
                 function toggleBot() {{
@@ -299,7 +395,7 @@ def create_app():
                 }}
                 
                 function startBot() {{
-                    addLog('Iniciando conexão com Bitget...', 'info');
+                    addLog('Iniciando sistema de trading...', 'info');
                     
                     fetch('/api/bot/start', {{method: 'POST'}})
                     .then(response => response.json())
@@ -308,20 +404,20 @@ def create_app():
                             botRunning = true;
                             startTime = new Date();
                             updateBotDisplay(true);
-                            addLog('Bot conectado e ativo na Bitget!', 'success');
+                            addLog('Bot ativo! ' + data.message, 'success');
                             startUpdates();
                             simulateActivity();
                         }} else {{
-                            addLog('Erro ao conectar: ' + data.message, 'error');
+                            addLog('Erro ao iniciar: ' + data.message, 'error');
                         }}
                     }})
                     .catch(error => {{
-                        addLog('Erro de conexão com servidor', 'error');
+                        addLog('Erro de conexão', 'error');
                     }});
                 }}
                 
                 function stopBot() {{
-                    addLog('Desconectando da Bitget...', 'warning');
+                    addLog('Parando bot...', 'warning');
                     
                     fetch('/api/bot/stop', {{method: 'POST'}})
                     .then(response => response.json())
@@ -329,7 +425,7 @@ def create_app():
                         botRunning = false;
                         startTime = null;
                         updateBotDisplay(false);
-                        addLog('Bot desconectado com sucesso', 'warning');
+                        addLog('Bot parado: ' + data.message, 'warning');
                         stopUpdates();
                     }});
                 }}
@@ -352,7 +448,7 @@ def create_app():
                 }}
                 
                 function updateBalance() {{
-                    addLog('Consultando saldo real na Bitget...', 'info');
+                    addLog('Consultando saldo na Bitget...', 'info');
                     
                     fetch('/api/balance')
                     .then(response => response.json())
@@ -360,10 +456,11 @@ def create_app():
                         if (data.success) {{
                             document.getElementById('balance-amount').textContent = '$' + data.balance.toFixed(2);
                             document.getElementById('balance-source').textContent = 'Fonte: ' + data.source;
-                            document.getElementById('balance-time').textContent = 'Última atualização: ' + new Date().toLocaleTimeString();
-                            addLog('Saldo atualizado: $' + data.balance.toFixed(2) + ' (' + data.source + ')', 'balance');
+                            document.getElementById('balance-time').textContent = 'Última consulta: ' + new Date().toLocaleTimeString();
+                            addLog('Saldo obtido: $' + data.balance.toFixed(2) + ' (' + data.source + ')', 'balance');
                         }} else {{
                             addLog('Erro ao obter saldo: ' + data.error, 'error');
+                            document.getElementById('balance-source').textContent = 'Fonte: ' + data.source;
                         }}
                     }})
                     .catch(error => {{
@@ -401,7 +498,7 @@ def create_app():
                     updateInterval = setInterval(() => {{
                         updateBalance();
                         updateStats();
-                    }}, 30000); // A cada 30 segundos para não sobrecarregar API
+                    }}, 60000); // A cada 1 minuto
                     
                     runtimeInterval = setInterval(updateRuntime, 1000);
                 }}
@@ -416,11 +513,10 @@ def create_app():
                     if (!botRunning) return;
                     
                     const activities = [
-                        'Analisando mercado ETH/USDT na Bitget...',
-                        'Verificando oportunidades de scalping...',
-                        'Consultando orderbook em tempo real...',
-                        'Calculando níveis de suporte e resistência...',
-                        'Monitorando spread e liquidez...',
+                        'Analisando orderbook ETH/USDT...',
+                        'Calculando indicadores técnicos...',
+                        'Verificando spreads na Bitget...',
+                        'Monitorando volume de negociação...',
                         'Aguardando sinal de entrada...'
                     ];
                     
@@ -428,22 +524,21 @@ def create_app():
                     addLog(randomActivity, 'info');
                     
                     setTimeout(() => {{
-                        if (botRunning && Math.random() > 0.8) {{
-                            const profit = (Math.random() - 0.5) * 15;
-                            const type = profit > 0 ? 'profit' : 'warning';
-                            const sign = profit > 0 ? '+' : '';
-                            addLog('Operação simulada: ' + sign + '$' + profit.toFixed(2), type);
-                        }}
                         simulateActivity();
-                    }}, Math.random() * 15000 + 10000); // 10-25 segundos
+                    }}, Math.random() * 20000 + 15000); // 15-35 segundos
                 }}
                 
-                // Inicialização - buscar saldo real
+                // Inicialização
                 updateBalance();
                 updateStats();
                 
-                // Auto-atualização do saldo a cada 2 minutos
-                setInterval(updateBalance, 120000);
+                // Teste automático de conexão
+                setTimeout(() => {{
+                    testConnection();
+                }}, 2000);
+                
+                // Auto-atualização do saldo
+                setInterval(updateBalance, 300000); // A cada 5 minutos
             </script>
         </body>
         </html>
@@ -459,20 +554,16 @@ def create_app():
             if bot_state['active']:
                 return jsonify({'success': False, 'message': 'Bot já está ativo'})
             
-            # Testar conexão com Bitget antes de iniciar
-            exchange = get_bitget_exchange()
-            if exchange:
-                try:
-                    # Teste simples de conectividade
-                    exchange.fetch_ticker('ETH/USDT')
-                    logger.info("🤖 Bot conectado à Bitget com sucesso!")
-                except Exception as e:
-                    logger.warning(f"⚠️ Erro ao testar Bitget: {e}")
+            # Testar conexão antes de iniciar
+            exchange, status = get_bitget_exchange()
             
             bot_state['active'] = True
             bot_state['last_update'] = datetime.now()
             
-            return jsonify({'success': True, 'message': 'Bot conectado à Bitget'})
+            message = f"Bot iniciado - {status}"
+            logger.info(f"🤖 {message}")
+            
+            return jsonify({'success': True, 'message': message})
             
         except Exception as e:
             logger.error(f"Erro ao iniciar bot: {e}")
@@ -482,8 +573,8 @@ def create_app():
     def stop_bot():
         try:
             bot_state['active'] = False
-            logger.info("⏹️ Bot desconectado da Bitget!")
-            return jsonify({'success': True, 'message': 'Bot parado'})
+            logger.info("⏹️ Bot parado!")
+            return jsonify({'success': True, 'message': 'Bot parado com sucesso'})
         except Exception as e:
             return jsonify({'success': False, 'message': str(e)})
     
@@ -492,12 +583,13 @@ def create_app():
         return jsonify({
             'active': bot_state['active'],
             'paper_trading': paper_trading,
-            'apis_configured': bool(api_key and secret_key and passphrase)
+            'apis_configured': bool(api_key and secret_key and passphrase),
+            'connection_status': bot_state['connection_status']
         })
     
     @app.route('/api/balance')
     def get_balance():
-        """Obtém saldo real da Bitget"""
+        """Obtém saldo real da Bitget com debug detalhado"""
         try:
             balance, source = get_real_balance()
             
@@ -506,7 +598,8 @@ def create_app():
                 'balance': balance,
                 'source': source,
                 'currency': 'USDT',
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now().isoformat(),
+                'connection_status': bot_state['connection_status']
             })
             
         except Exception as e:
@@ -514,7 +607,7 @@ def create_app():
             return jsonify({
                 'success': False, 
                 'balance': 0, 
-                'source': 'Erro',
+                'source': f'Erro: {str(e)}',
                 'error': str(e)
             })
     
@@ -524,7 +617,6 @@ def create_app():
             import random
             
             if bot_state['active']:
-                # Simular incremento ocasional de trades
                 if random.random() > 0.95:  # 5% chance
                     bot_state['daily_trades'] += 1
                     pnl_change = random.uniform(-25, 50)
@@ -541,56 +633,92 @@ def create_app():
         except Exception as e:
             return jsonify({'success': False, 'error': str(e)})
     
-    # APIs de teste
+    @app.route('/api/test_bitget')
+    def test_bitget():
+        """Endpoint para debug completo da conexão Bitget"""
+        try:
+            logger.info("🧪 Iniciando teste detalhado da Bitget...")
+            
+            # Verificar variáveis
+            debug_info = {
+                'api_key_length': len(api_key),
+                'secret_key_length': len(secret_key),
+                'passphrase_length': len(passphrase),
+                'paper_trading': paper_trading,
+                'all_vars_present': bool(api_key and secret_key and passphrase)
+            }
+            
+            logger.info(f"🔍 Debug info: {debug_info}")
+            
+            if not (api_key and secret_key and passphrase):
+                return jsonify({
+                    'success': False,
+                    'message': 'Variáveis de ambiente não configuradas',
+                    'debug': debug_info
+                })
+            
+            # Tentar conectar
+            exchange, status = get_bitget_exchange()
+            
+            if not exchange:
+                return jsonify({
+                    'success': False,
+                    'message': f'Falha na conexão: {status}',
+                    'debug': debug_info
+                })
+            
+            # Testes adicionais
+            try:
+                markets = exchange.load_markets()
+                balance = exchange.fetch_balance()
+                eth_ticker = exchange.fetch_ticker('ETH/USDT')
+                
+                # Verificar saldos
+                non_zero_balances = {}
+                for currency, balance_data in balance.items():
+                    if isinstance(balance_data, dict) and balance_data.get('total', 0) > 0:
+                        non_zero_balances[currency] = balance_data.get('total', 0)
+                
+                usdt_balance = balance.get('USDT', {}).get('total', 0)
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Conexão Bitget estabelecida com sucesso!',
+                    'balance': usdt_balance,
+                    'markets_count': len(markets),
+                    'eth_price': eth_ticker['last'],
+                    'non_zero_balances': non_zero_balances,
+                    'debug': debug_info,
+                    'status': status
+                })
+                
+            except Exception as test_error:
+                return jsonify({
+                    'success': False,
+                    'message': f'Erro nos testes: {str(test_error)}',
+                    'error': str(test_error),
+                    'debug': debug_info
+                })
+                
+        except Exception as e:
+            logger.error(f"❌ Erro no teste Bitget: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e),
+                'message': 'Erro geral no teste'
+            })
+    
     @app.route('/api/status')
     def status():
         return jsonify({
             'status': 'online',
             'timestamp': datetime.now().isoformat(),
-            'message': 'Trading Bot conectado à Bitget!',
-            'version': '2.1.0',
+            'message': 'Trading Bot - Debug Mode',
+            'version': '2.2.0',
             'apis_configured': bool(api_key and secret_key and passphrase),
-            'paper_trading': paper_trading
+            'paper_trading': paper_trading,
+            'connection_status': bot_state['connection_status']
         })
-    
-    @app.route('/api/test')
-    def test():
-        return jsonify({
-            'success': True,
-            'message': 'Sistema funcionando com Bitget real!',
-            'timestamp': datetime.now().isoformat()
-        })
-    
-    @app.route('/api/test_bitget')
-    def test_bitget():
-        """Endpoint para testar conexão com Bitget"""
-        try:
-            balance, source = get_real_balance()
-            exchange = get_bitget_exchange()
-            
-            if exchange:
-                markets = exchange.load_markets()
-                eth_ticker = exchange.fetch_ticker('ETH/USDT')
-                
-                return jsonify({
-                    'success': True,
-                    'balance': balance,
-                    'source': source,
-                    'markets_count': len(markets),
-                    'eth_price': eth_ticker['last'],
-                    'message': 'Conexão Bitget OK!'
-                })
-            else:
-                return jsonify({
-                    'success': False,
-                    'message': 'Não foi possível conectar à Bitget'
-                })
-                
-        except Exception as e:
-            return jsonify({
-                'success': False,
-                'error': str(e)
-            })
     
     return app
 
@@ -603,8 +731,12 @@ if __name__ == '__main__':
     logger.info(f"📄 Paper Trading: {paper_trading}")
     logger.info(f"🔑 APIs Configuradas: {bool(api_key and secret_key and passphrase)}")
     
-    # Testar conexão Bitget na inicialização
-    balance, source = get_real_balance()
-    logger.info(f"💰 Saldo inicial: ${balance:.2f} ({source})")
+    # Teste inicial da conexão
+    try:
+        logger.info("🧪 Testando conexão inicial...")
+        balance, source = get_real_balance()
+        logger.info(f"💰 Resultado teste: ${balance:.2f} ({source})")
+    except Exception as e:
+        logger.error(f"❌ Erro no teste inicial: {e}")
     
     app.run(host='0.0.0.0', port=port, debug=False)
