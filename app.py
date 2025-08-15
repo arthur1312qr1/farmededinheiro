@@ -46,7 +46,9 @@ def create_app():
         # Verificar se APIs estão configuradas
         apis_configured = bool(api_key and secret_key and passphrase)
         
-        return f"""
+        current_time = datetime.now().strftime('%H:%M:%S')
+        
+        html_content = f"""
         <!DOCTYPE html>
         <html lang="pt-BR">
         <head>
@@ -197,10 +199,10 @@ def create_app():
                     <div class="card" style="grid-column: 1 / -1;">
                         <h3>📝 Log de Atividades</h3>
                         <div id="activity-log" class="log-container">
-                            <div>{datetime.now().strftime('%H:%M:%S')} - 🟢 Sistema online e funcionando</div>
-                            <div>{datetime.now().strftime('%H:%M:%S')} - ⚙️ Modo: {'Paper Trading (Seguro)' if paper_trading else 'Trading Real'}</div>
-                            <div>{datetime.now().strftime('%H:%M:%S')} - {'✅ APIs configuradas' if apis_configured else '⚠️ Configure APIs para trading real'}</div>
-                            <div>{datetime.now().strftime('%H:%M:%S')} - 📡 Pronto para iniciar operações</div>
+                            <div>{current_time} - 🟢 Sistema online e funcionando</div>
+                            <div>{current_time} - ⚙️ Modo: {'Paper Trading (Seguro)' if paper_trading else 'Trading Real'}</div>
+                            <div>{current_time} - {'✅ APIs configuradas' if apis_configured else '⚠️ Configure APIs para trading real'}</div>
+                            <div>{current_time} - 📡 Pronto para iniciar operações</div>
                         </div>
                     </div>
                 </div>
@@ -212,7 +214,7 @@ def create_app():
                 let updateInterval = null;
                 let runtimeInterval = null;
                 
-                function addLog(message, type = 'info') {{
+                function addLog(message, type) {{
                     const log = document.getElementById('activity-log');
                     const time = new Date().toLocaleTimeString();
                     const icons = {{
@@ -331,7 +333,7 @@ def create_app():
                     updateInterval = setInterval(() => {{
                         updateBalance();
                         updateStats();
-                    }}, 15000); // A cada 15 segundos
+                    }}, 15000);
                     
                     runtimeInterval = setInterval(updateRuntime, 1000);
                 }}
@@ -360,10 +362,11 @@ def create_app():
                         if (botRunning && Math.random() > 0.7) {{
                             const profit = (Math.random() - 0.5) * 20;
                             const type = profit > 0 ? 'profit' : 'warning';
-                            addLog(`Trade simulado: ${profit > 0 ? '+' : ''}$\{profit.toFixed(2)\}`, type);
+                            const sign = profit > 0 ? '+' : '';
+                            addLog('Trade simulado: ' + sign + '$' + profit.toFixed(2), type);
                         }}
                         simulateActivity();
-                    }}, Math.random() * 20000 + 10000); // 10-30 segundos
+                    }}, Math.random() * 20000 + 10000);
                 }}
                 
                 // Inicialização
@@ -386,6 +389,8 @@ def create_app():
         </body>
         </html>
         """
+        
+        return html_content
     
     # === APIs DO BOT ===
     
@@ -398,10 +403,6 @@ def create_app():
             bot_state['active'] = True
             bot_state['last_update'] = datetime.now()
             
-            # Aqui você pode integrar com seu trading_bot.py real
-            # Exemplo: bot_instance = TradingBot(config)
-            # bot_instance.start()
-            
             logger.info("🤖 Trading bot iniciado!")
             return jsonify({'success': True, 'message': 'Bot iniciado com sucesso'})
             
@@ -413,9 +414,6 @@ def create_app():
     def stop_bot():
         try:
             bot_state['active'] = False
-            # Aqui você pararia o bot real
-            # bot_instance.stop()
-            
             logger.info("⏹️ Trading bot parado!")
             return jsonify({'success': True, 'message': 'Bot parado'})
         except Exception as e:
@@ -432,13 +430,8 @@ def create_app():
     @app.route('/api/balance')
     def get_balance():
         try:
-            # Se as APIs estão configuradas, pegar saldo real
+            # Se as APIs estão configuradas, simular saldo mais realista
             if api_key and secret_key and passphrase:
-                # Aqui usaria sua BitgetAPI real
-                # api = BitgetAPI(api_key, secret_key, passphrase, paper_trading)
-                # balance = api.get_account_balance()
-                
-                # Por enquanto, simular para não causar erro
                 balance = 15847.32 if paper_trading else 2543.89
             else:
                 balance = 10000.0  # Saldo demo
@@ -458,16 +451,15 @@ def create_app():
     @app.route('/api/stats')
     def get_stats():
         try:
-            # Simular algumas estatísticas ou pegar do bot real
             import random
             
             if bot_state['active']:
-                # Simular incremento de trades
-                bot_state['daily_trades'] += random.choice([0, 0, 0, 1])  # Ocasionalmente incrementa
-                if random.random() > 0.8:  # 20% chance
+                # Simular incremento de trades ocasionalmente
+                if random.random() > 0.9:  # 10% chance
+                    bot_state['daily_trades'] += 1
                     pnl_change = random.uniform(-50, 100)
                     bot_state['daily_pnl'] += pnl_change
-                    bot_state['win_rate'] = max(0, min(100, bot_state['win_rate'] + random.uniform(-2, 3)))
+                    bot_state['win_rate'] = max(0, min(100, bot_state['win_rate'] + random.uniform(-1, 2)))
             
             return jsonify({
                 'success': True,
