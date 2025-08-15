@@ -175,44 +175,51 @@ class ETHBotFutures80Percent:
             # ✅ CALCULAR 80% DO SALDO REAL
             margin_amount = current_balance * self.percentage
 
-            # 🚨 CALCULAR VALOR COM ALAVANCAGEM
-            trade_value_with_leverage = margin_amount * self.leverage
+            # 🚨 CORREÇÃO: VERIFICAR SE MARGEM ATENDE AO MÍNIMO DA BITGET
+            if margin_amount < 1.25:  # Mínimo 1.25 USDT para garantir ordem de 1 USDT
+                logger.warning(f"❌ TRADE CANCELADO: MARGEM INSUFICIENTE")
+                logger.warning(f"💰 Saldo atual: ${current_balance:.2f} USDT")
+                logger.warning(f"🎯 Margem calculada (80%): ${margin_amount:.2f} USDT")
+                logger.warning(f"⚠️ NECESSÁRIO MARGEM MÍNIMA: $1.25 USDT")
+                logger.warning(f"💡 NECESSÁRIO SALDO MÍNIMO: $1.56 USDT")
+                bot_state['last_error'] = f"Margem insuficiente: ${margin_amount:.2f} USDT"
+                return False
+
+            # ✅ USAR VALOR FIXO DE 1 USDT PARA A ORDEM (CORREÇÃO PRINCIPAL)
+            order_value_usdt = 1.0  # Valor fixo de 1 USDT para atender mínimo da Bitget
 
             # ✅ PREÇO ETH ATUAL
             ticker = self.exchange.fetch_ticker(self.symbol)
             current_price = ticker['last']
             bot_state['eth_price'] = current_price
 
-            # ✅ CALCULAR QUANTIDADE ETH COM ALAVANCAGEM
-            eth_quantity = trade_value_with_leverage / current_price
-            eth_quantity = round(eth_quantity, 4)
-
-            # Verificar quantidade mínima
-            min_amount = 0.001  # Mínimo para futures
-            if eth_quantity < min_amount:
-                logger.warning(f"⚠️ QUANTIDADE MUITO PEQUENA: {eth_quantity:.6f} < {min_amount}")
-                bot_state['last_error'] = f"Quantidade muito pequena: {eth_quantity:.6f}"
-                return False
+            # ✅ CALCULAR QUANTIDADE ETH BASEADA NO VALOR FIXO
+            eth_quantity = order_value_usdt / current_price
+            eth_quantity = round(eth_quantity, 6)
 
             logger.warning("🚨 DETALHES DO TRADE FUTURES:")
             logger.warning(f"💰 Saldo Atual: ${current_balance:.2f} USDT")
             logger.warning(f"🎯 Margem (80%): ${margin_amount:.2f} USDT")
+            logger.warning(f"💲 Valor da Ordem: ${order_value_usdt:.2f} USDT")
             logger.warning(f"🚨 Alavancagem: {self.leverage}x")
-            logger.warning(f"💥 Valor Total: ${trade_value_with_leverage:.2f} USDT")
             logger.warning(f"💎 Preço ETH: ${current_price:.2f}")
-            logger.warning(f"📊 ETH a Comprar: {eth_quantity:.4f}")
+            logger.warning(f"📊 ETH a Comprar: {eth_quantity:.6f}")
 
             # ✅ EXECUTAR ORDEM FUTURES - CORREÇÃO APLICADA
             logger.warning("💰 EXECUTANDO ORDEM FUTURES!")
 
             try:
-                # MÉTODO 1: Market order futures com parâmetros específicos Bitget
-                order = self.exchange.create_market_buy_order(
+                # MÉTODO CORRIGIDO: Usar quoteOrderQty em vez de amount
+                order = self.exchange.create_order(
                     symbol=self.symbol,
-                    amount=eth_quantity,
+                    type='market',
+                    side='buy',
+                    amount=None,  # Não usar amount
+                    price=None,
                     params={
                         'type': 'swap',
-                        'marginCoin': 'USDT'
+                        'marginCoin': 'USDT',
+                        'quoteOrderQty': order_value_usdt  # CORREÇÃO: usar valor em USDT
                     }
                 )
 
@@ -222,12 +229,10 @@ class ETHBotFutures80Percent:
             except Exception as order_error:
                 logger.warning(f"⚠️ Método 1 falhou: {order_error}")
 
-                # MÉTODO 2: Create order futures com correção
+                # MÉTODO 2: Fallback com amount pequeno
                 try:
-                    order = self.exchange.create_order(
+                    order = self.exchange.create_market_buy_order(
                         symbol=self.symbol,
-                        type='market',
-                        side='buy',
                         amount=eth_quantity,
                         params={
                             'type': 'swap',
@@ -251,7 +256,7 @@ class ETHBotFutures80Percent:
                 order_status = self.exchange.fetch_order(order_id, self.symbol)
 
                 logger.warning(f"📊 Status: {order_status.get('status')}")
-                logger.warning(f"💰 Filled: {order_status.get('filled', 0):.4f} ETH")
+                logger.warning(f"💰 Filled: {order_status.get('filled', 0):.6f} ETH")
                 logger.warning(f"💲 Cost: ${order_status.get('cost', 0):.2f} USDT")
 
                 if order_status.get('status') == 'closed' and order_status.get('filled', 0) > 0:
@@ -301,7 +306,7 @@ class ETHBotFutures80Percent:
                     logger.warning(f"📊 Order ID: {order_id}")
                     logger.warning(f"💰 Margem Usada: ${margin_used:.2f} USDT")
                     logger.warning(f"💥 Exposição Total: ${cost_usd:.2f} USDT")
-                    logger.warning(f"💎 ETH: {filled_amount:.4f}")
+                    logger.warning(f"💎 ETH: {filled_amount:.6f}")
                     logger.warning(f"🎯 Alavancagem: {self.leverage}x")
                     logger.warning(f"💰 Novo Saldo: ${new_balance:.2f} USDT")
                     logger.warning(f"🎯 Total Trades: {bot_state['verified_real_trades']}")
@@ -495,7 +500,7 @@ def index():
                 <div class="danger">
                     <h3>⚠️ AVISO IMPORTANTE - TRADING REAL ⚠️</h3>
                     <p>🚨 Este bot está configurado para TRADING REAL com ALAVANCAGEM {LEVERAGE}x</p>
-                    <p>💰 O bot usará 80% do seu saldo real da Bitget</p>
+                    <p>💰 O bot usará ordens de $1 USDT por trade</p>
                     <p>⚠️ RISCO DE LIQUIDAÇÃO MUITO ALTO!</p>
                 </div>
 
@@ -512,8 +517,7 @@ def index():
                     <div class="card">
                         <h2>💰 Saldo & Trading</h2>
                         <p>Saldo: <span class="metric">${bot_state['balance']:.2f} USDT</span></p>
-                        <p>80% Disponível: <span class="metric">${bot_state['balance'] * 0.8:.2f} USDT</span></p>
-                        <p>Poder Compra: <span class="metric">${bot_state['balance'] * 0.8 * bot_state['leverage']:.2f} USDT</span></p>
+                        <p>Valor por Trade: <span class="metric">$1.00 USDT</span></p>
                         <p>Preço ETH: <span class="metric">${bot_state['eth_price']:.2f}</span></p>
                     </div>
 
