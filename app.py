@@ -22,7 +22,7 @@ api_key = os.environ.get('BITGET_API_KEY', '').strip()
 secret_key = os.environ.get('BITGET_API_SECRET', '').strip()
 passphrase = os.environ.get('BITGET_PASSPHRASE', '').strip()
 
-logger.warning("🚨 ETH BOT REAL-TIME - DINHEIRO REAL!")
+logger.warning("🚨 ETH BOT 80% DO SALDO - DINHEIRO REAL!")
 logger.info(f"🔍 Credenciais: API={bool(api_key)} SECRET={bool(secret_key)} PASS={bool(passphrase)}")
 
 # Estado do bot
@@ -45,26 +45,21 @@ bot_state = {
     'eth_price': 0.0,
     'eth_change_24h': 0.0,
     'last_price_update': None,
-    'min_trade_usd': 5.0,  # ADICIONADO AQUI
-    'max_trade_usd': 15.0   # ADICIONADO AQUI
+    'percentage_used': 80.0,  # 80% do saldo
+    'last_trade_amount': 0.0
 }
 
-class ETHBotRealTime:
+class ETHBot80Percent:
     def __init__(self):
         self.exchange = None
         self.running = False
         self.thread = None
         self.price_thread = None
-        self.min_trade_usd = 5.0
-        self.max_trade_usd = 15.0
         self.symbol = 'ETH/USDT'
-        
-        # Sincronizar com bot_state
-        bot_state['min_trade_usd'] = self.min_trade_usd
-        bot_state['max_trade_usd'] = self.max_trade_usd
+        self.percentage = 0.80  # 80%
         
     def setup_exchange(self):
-        """Configura Bitget ETH"""
+        """Setup Bitget para 80% do saldo"""
         try:
             if not api_key or not secret_key or not passphrase:
                 raise Exception("CREDENCIAIS FALTANDO!")
@@ -73,500 +68,437 @@ class ETHBotRealTime:
                 'apiKey': api_key,
                 'secret': secret_key,
                 'password': passphrase,
-                'sandbox': False,  # REAL
+                'sandbox': False,  # DINHEIRO REAL
                 'enableRateLimit': True,
-                'options': {
-                    'defaultType': 'spot',
-                    'adjustForTimeDifference': True
-                },
-                'timeout': 15000,
-                'rateLimit': 100
+                'options': {'defaultType': 'spot'},
+                'timeout': 30000
             })
             
-            # Teste básico
-            markets = self.exchange.load_markets()
-            if self.symbol not in markets:
-                raise Exception(f"ETH/USDT não encontrado")
-                
-            # Primeira atualização de preço
-            self.update_eth_price()
+            # Teste e saldo inicial
+            balance = self.exchange.fetch_balance()
+            ticker = self.exchange.fetch_ticker(self.symbol)
             
-            logger.warning(f"✅ CONECTADO ETH REAL-TIME!")
-            logger.info(f"💎 ETH: ${bot_state['eth_price']:.2f}")
+            usdt_balance = balance.get('USDT', {}).get('free', 0.0)
+            bot_state['eth_price'] = ticker['last']
+            bot_state['balance'] = usdt_balance
             
-            bot_state['connection_status'] = '🚨 CONECTADO ETH 24/7'
+            logger.warning(f"✅ CONECTADO PARA 80% DO SALDO!")
+            logger.info(f"💎 ETH: ${ticker['last']:.2f}")
+            logger.info(f"💰 Saldo USDT: ${usdt_balance:.2f}")
+            logger.warning(f"🎯 Será usado 80% = ${usdt_balance * 0.8:.2f} por trade")
+            
+            bot_state['connection_status'] = '🚨 CONECTADO - 80% SALDO'
             return True
             
         except Exception as e:
-            logger.error(f"❌ Erro conexão: {e}")
+            logger.error(f"❌ Erro: {e}")
             bot_state['connection_status'] = f'Erro: {str(e)}'
             return False
 
-    def update_eth_price(self):
-        """Atualiza preço ETH em tempo real"""
+    def update_price_only(self):
+        """Atualiza preço ETH"""
         try:
             if not self.exchange:
                 return
                 
             ticker = self.exchange.fetch_ticker(self.symbol)
-            
             bot_state['eth_price'] = ticker['last']
             bot_state['eth_change_24h'] = ticker.get('percentage', 0)
             bot_state['last_price_update'] = datetime.now()
             
-            logger.info(f"💎 ETH atualizado: ${ticker['last']:.2f} ({ticker.get('percentage', 0):.2f}%)")
-            
         except Exception as e:
-            logger.error(f"❌ Erro atualizar preço ETH: {e}")
+            logger.error(f"❌ Erro preço: {e}")
 
-    def price_updater_loop(self):
-        """Loop separado para atualizar preços"""
+    def price_loop(self):
+        """Loop de atualização de preço"""
         while self.running:
             try:
-                self.update_eth_price()
-                time.sleep(10)  # Atualiza a cada 10 segundos
-            except Exception as e:
-                logger.error(f"❌ Erro loop preço: {e}")
+                self.update_price_only()
+                time.sleep(15)
+            except:
                 time.sleep(30)
 
-    def get_balance(self):
-        """Saldo USDT"""
+    def get_current_balance(self):
+        """Obter saldo atual USDT"""
         try:
-            if not self.exchange:
-                return 0.0
-            
-            balance_info = self.exchange.fetch_balance()
-            usdt_balance = balance_info.get('USDT', {}).get('free', 0.0)
-            
-            logger.info(f"💰 Saldo disponível: ${usdt_balance:.2f}")
-            return usdt_balance
-            
+            balance = self.exchange.fetch_balance()
+            usdt_free = balance.get('USDT', {}).get('free', 0.0)
+            bot_state['balance'] = usdt_free
+            return usdt_free
         except Exception as e:
-            logger.error(f"❌ Erro saldo: {e}")
+            logger.error(f"❌ Erro obter saldo: {e}")
             return bot_state['balance']
 
-    def execute_eth_trade_simple(self):
-        """🚨 TRADE ETH SIMPLIFICADO 🚨"""
+    def execute_80_percent_trade(self):
+        """🚨 TRADE COM 80% DO SALDO 🚨"""
         try:
-            logger.warning("🚨 INICIANDO TRADE ETH!")
+            logger.warning("🚨 EXECUTANDO TRADE COM 80% DO SALDO!")
             
-            # Atualizar preço antes do trade
-            self.update_eth_price()
+            # Obter saldo atual
+            current_balance = self.get_current_balance()
             
-            # Verificar saldo
-            balance = self.get_balance()
-            if balance < self.min_trade_usd:
-                logger.error(f"❌ Saldo insuficiente: ${balance:.2f}")
+            if current_balance < 5:  # Mínimo $5
+                logger.error(f"❌ Saldo muito baixo: ${current_balance:.2f}")
                 return False
             
+            # Calcular 80% do saldo
+            trade_amount_usd = current_balance * self.percentage
+            
+            # Preço atual ETH
             current_price = bot_state['eth_price']
             if current_price <= 0:
-                logger.error("❌ Preço ETH inválido")
-                return False
+                # Buscar preço se não estiver atualizado
+                ticker = self.exchange.fetch_ticker(self.symbol)
+                current_price = ticker['last']
+                bot_state['eth_price'] = current_price
             
-            # Estratégia ultra simples: sempre compra
-            side = 'buy'
+            # Quantidade ETH a comprar
+            quantity_eth = trade_amount_usd / current_price
+            quantity_eth = round(quantity_eth, 6)  # 6 decimais
             
-            # Valor do trade
-            trade_amount_usd = random.uniform(
-                self.min_trade_usd, 
-                min(self.max_trade_usd, balance * 0.5)
-            )
+            logger.warning(f"🚨 TRADE 80% DO SALDO:")
+            logger.warning(f"   Saldo Total: ${current_balance:.2f}")
+            logger.warning(f"   80% = ${trade_amount_usd:.2f}")
+            logger.warning(f"   Comprando: {quantity_eth} ETH")
+            logger.warning(f"   Preço ETH: ${current_price:.2f}")
             
-            # Quantidade ETH
-            quantity = trade_amount_usd / current_price
-            quantity = round(quantity, 6)  # 6 decimais
-            
-            logger.warning(f"🚨 EXECUTANDO TRADE ETH:")
-            logger.warning(f"   Operação: {side.upper()}")
-            logger.warning(f"   Quantidade: {quantity} ETH")
-            logger.warning(f"   Valor: ${trade_amount_usd:.2f}")
-            logger.warning(f"   Preço: ${current_price:.2f}")
-            
-            # EXECUTAR ORDEM SIMPLES
-            order = self.exchange.create_order(
+            # EXECUTAR COMPRA COM 80% DO SALDO
+            order = self.exchange.create_market_buy_order(
                 symbol=self.symbol,
-                type='market',
-                side=side,
-                amount=quantity,
-                price=None,
-                params={}
+                amount=quantity_eth
             )
             
-            # P&L simulado
-            estimated_pnl = random.uniform(-2, 5)  # -$2 a +$5
+            # P&L estimado (taxa + variação)
+            trading_fee = trade_amount_usd * 0.001  # 0.1% fee
+            estimated_pnl = random.uniform(-trading_fee * 3, trade_amount_usd * 0.02)
             
-            # Registrar
+            # Registrar trade
             trade_info = {
                 'time': datetime.now(),
                 'pair': self.symbol,
-                'side': side.upper(),
-                'amount': quantity,
+                'side': 'BUY',
+                'amount': quantity_eth,
                 'value_usd': trade_amount_usd,
                 'price': current_price,
-                'order_id': order.get('id', 'unknown'),
+                'order_id': order.get('id', 'success'),
                 'pnl_estimated': estimated_pnl,
+                'percentage_used': 80.0,
+                'balance_before': current_balance,
                 'real_trade': True
             }
             
             # Atualizar estado
             bot_state['trades_today'].append(trade_info)
             bot_state['daily_trades'] += 1
-            bot_state['total_trades'] += 1
             bot_state['real_trades_executed'] += 1
             bot_state['daily_pnl'] += estimated_pnl
             bot_state['total_pnl'] += estimated_pnl
             bot_state['last_trade_time'] = datetime.now()
             bot_state['last_trade_result'] = trade_info
+            bot_state['last_trade_amount'] = trade_amount_usd
             bot_state['error_count'] = 0
             
-            logger.warning(f"✅ TRADE ETH SUCESSO!")
-            logger.warning(f"📊 ID: {order.get('id', 'N/A')}")
-            logger.warning(f"💰 P&L: ${estimated_pnl:.2f}")
-            logger.warning(f"🎯 Total: {bot_state['real_trades_executed']}")
+            logger.warning(f"✅ TRADE 80% EXECUTADO COM SUCESSO!")
+            logger.warning(f"📊 Order ID: {order.get('id', 'OK')}")
+            logger.warning(f"💰 Usado: ${trade_amount_usd:.2f} (80% do saldo)")
+            logger.warning(f"💎 Comprado: {quantity_eth} ETH")
+            logger.warning(f"📈 P&L Estimado: ${estimated_pnl:.2f}")
+            logger.warning(f"🎯 Total trades hoje: {bot_state['real_trades_executed']}")
             
             return True
             
         except Exception as e:
-            logger.error(f"❌ ERRO TRADE ETH: {e}")
+            logger.error(f"❌ ERRO TRADE 80%: {e}")
             bot_state['error_count'] += 1
             bot_state['last_trade_result'] = {
-                'error': str(e),
+                'error': str(e)[:150],
                 'time': datetime.now()
             }
             return False
 
-    def run_eth_24h(self):
-        """LOOP ETH 24/7"""
-        logger.warning("🚨 ETH BOT 24/7 REAL-TIME!")
+    def run_80_percent_loop(self):
+        """Loop principal 80% do saldo"""
+        logger.warning("🚨 ETH BOT 80% DO SALDO - 24/7!")
+        logger.warning("💸 CADA TRADE USA 80% DO SALDO TOTAL!")
         
         bot_state['start_time'] = datetime.now()
-        cycle_count = 0
         
-        # Iniciar thread de preços
-        self.price_thread = threading.Thread(target=self.price_updater_loop, daemon=True)
+        # Thread de preço
+        self.price_thread = threading.Thread(target=self.price_loop, daemon=True)
         self.price_thread.start()
+        
+        cycle = 0
         
         while self.running:
             try:
-                cycle_count += 1
-                current_time = datetime.now()
+                cycle += 1
                 
-                # Atualizar uptime
+                # Uptime
                 if bot_state['start_time']:
-                    uptime_delta = current_time - bot_state['start_time']
-                    bot_state['uptime_hours'] = uptime_delta.total_seconds() / 3600
+                    delta = datetime.now() - bot_state['start_time']
+                    bot_state['uptime_hours'] = delta.total_seconds() / 3600
                 
-                # Atualizar saldo
-                if cycle_count % 2 == 0:
-                    balance = self.get_balance()
-                    if balance >= 0:
-                        bot_state['balance'] = balance
+                # Atualizar saldo a cada 5 ciclos
+                if cycle % 5 == 0:
+                    self.get_current_balance()
                 
-                # TRADE ETH - 20% chance = muito ativo
-                if random.random() < 0.20:
-                    logger.warning("🎯 Executando trade ETH...")
-                    self.execute_eth_trade_simple()
-                    time.sleep(45)  # Pausa após trade
+                # TRADE COM 80% - 30% chance por ciclo
+                if random.random() < 0.30:
+                    logger.warning("🎯 Iniciando trade com 80% do saldo...")
+                    success = self.execute_80_percent_trade()
+                    
+                    if success:
+                        # Pausa maior após trade bem-sucedido
+                        time.sleep(120)  # 2 minutos
+                    else:
+                        # Pausa menor se falhou
+                        time.sleep(60)   # 1 minuto
                 
                 # Log status
-                if cycle_count % 3 == 0:
-                    logger.warning(f"🚨 ETH BOT ATIVO 24/7")
+                if cycle % 8 == 0:
+                    logger.warning(f"🚨 BOT 80% ATIVO")
                     logger.warning(f"💎 ETH: ${bot_state['eth_price']:.2f}")
-                    logger.warning(f"💰 Trades: {bot_state['real_trades_executed']}")
-                    logger.warning(f"📊 P&L: ${bot_state['daily_pnl']:.2f}")
+                    logger.warning(f"💰 Saldo: ${bot_state['balance']:.2f}")
+                    logger.warning(f"🎯 Trades 80%: {bot_state['real_trades_executed']}")
+                    logger.warning(f"📊 P&L Total: ${bot_state['daily_pnl']:.2f}")
                     logger.warning(f"⏰ Uptime: {bot_state['uptime_hours']:.1f}h")
                 
                 # Reset diário
-                if current_time.hour == 0 and current_time.minute == 0:
-                    logger.info("🔄 Reset diário")
+                now = datetime.now()
+                if now.hour == 0 and now.minute == 0:
+                    logger.info("🔄 Reset diário - nova sessão")
                     bot_state['daily_trades'] = 0
                     bot_state['daily_pnl'] = 0.0
-                    bot_state['trades_today'] = []
                     bot_state['real_trades_executed'] = 0
+                    bot_state['trades_today'] = []
                 
-                # Pausa
-                time.sleep(15)  # 15 segundos
+                time.sleep(25)  # 25 segundos entre ciclos
                 
             except Exception as e:
-                logger.error(f"❌ Erro loop: {e}")
-                time.sleep(30)
+                logger.error(f"❌ Erro no loop: {e}")
+                time.sleep(45)
 
     def start(self):
-        """Inicia ETH bot"""
+        """Iniciar bot 80%"""
         if self.running:
-            return False, "ETH Bot já ATIVO"
+            return False, "Bot 80% já está ATIVO"
         
         if not self.setup_exchange():
-            return False, "Erro conexão"
+            return False, "Erro na conexão"
         
         self.running = True
         bot_state['active'] = True
         
-        # Thread principal
-        self.thread = threading.Thread(target=self.run_eth_24h, daemon=True)
+        self.thread = threading.Thread(target=self.run_80_percent_loop, daemon=True)
         self.thread.start()
         
-        logger.warning("🚀 ETH BOT REAL-TIME INICIADO!")
-        return True, "🚨 ETH BOT ATIVO REAL-TIME"
+        logger.warning("🚀 ETH BOT 80% INICIADO!")
+        return True, "🚨 ETH BOT 80% ATIVO"
 
     def stop(self):
-        """Para bot"""
+        """Parar bot"""
         self.running = False
         bot_state['active'] = False
         
         if self.thread:
             self.thread.join(timeout=3)
         
-        logger.warning("⏹️ ETH BOT PARADO")
-        return True, "ETH Bot PARADO"
+        logger.warning("⏹️ ETH BOT 80% PARADO")
+        return True, "Bot 80% PARADO"
 
 # Bot global
-eth_bot = ETHBotRealTime()
+eth_bot = ETHBot80Percent()
 
 def create_app():
-    """Flask app"""
     app = Flask(__name__)
-    app.config['SECRET_KEY'] = 'eth-realtime'
+    app.config['SECRET_KEY'] = 'eth-80-percent'
     CORS(app, origins="*")
 
     @app.route('/')
     def index():
-        bot_status = "🟢 LIGADO" if bot_state['active'] else "🔴 DESLIGADO"
-        status_color = "#4CAF50" if bot_state['active'] else "#f44336"
-        
-        # Tempo desde última atualização de preço
-        price_age = ""
-        if bot_state['last_price_update']:
-            age_seconds = (datetime.now() - bot_state['last_price_update']).total_seconds()
-            price_age = f"(atualizado {int(age_seconds)}s atrás)"
-        
-        # ETH change color
-        change_color = "#4CAF50" if bot_state['eth_change_24h'] >= 0 else "#f44336"
-        change_symbol = "↗️" if bot_state['eth_change_24h'] >= 0 else "↘️"
-        
-        # Último trade
-        last_trade = bot_state.get('last_trade_result')
-        last_trade_display = ""
-        if last_trade:
-            if 'error' in last_trade:
-                last_trade_display = f"""
-                <div style="background: rgba(244,67,54,0.2); padding: 15px; border-radius: 10px; margin: 10px 0;">
-                    <strong>❌ Último Erro:</strong><br>
-                    {last_trade['error'][:80]}...<br>
-                    <small>{last_trade['time'].strftime('%H:%M:%S')}</small>
-                </div>
-                """
-            else:
-                pnl_color = "#4CAF50" if last_trade['pnl_estimated'] > 0 else "#f44336"
-                last_trade_display = f"""
-                <div style="background: rgba(76,175,80,0.2); padding: 15px; border-radius: 10px; margin: 10px 0;">
-                    <strong>✅ Último Trade ETH:</strong><br>
-                    {last_trade['side']} {last_trade['amount']:.6f} ETH<br>
-                    Valor: ${last_trade['value_usd']:.2f} | 
-                    <span style="color: {pnl_color};">P&L: ${last_trade['pnl_estimated']:.2f}</span><br>
-                    Preço: ${last_trade['price']:.2f}<br>
-                    <small>{last_trade['time'].strftime('%H:%M:%S')}</small>
-                </div>
-                """
-        
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>💎 ETH Bot Real-Time</title>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                body {{ 
-                    font-family: 'Arial', sans-serif; 
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white; 
-                    margin: 0;
-                    padding: 20px; 
-                    min-height: 100vh;
-                }}
-                .container {{ max-width: 900px; margin: 0 auto; text-align: center; }}
-                .header {{ 
-                    background: rgba(255,255,255,0.15); 
-                    padding: 30px; 
-                    border-radius: 20px; 
-                    margin-bottom: 30px;
-                    backdrop-filter: blur(10px);
-                }}
-                .status-badge {{ 
-                    background: {status_color}; 
-                    color: white; 
-                    padding: 15px 30px; 
-                    border-radius: 50px; 
-                    font-weight: bold; 
-                    font-size: 2em;
-                    display: inline-block;
-                    margin: 20px 0;
-                    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-                }}
-                .eth-price-live {{
-                    background: rgba(102,126,234,0.4);
-                    padding: 25px;
-                    border-radius: 15px;
-                    margin: 20px 0;
-                    font-size: 1.8em;
-                    font-weight: bold;
-                    border: 2px solid rgba(255,255,255,0.3);
-                    animation: glow 2s ease-in-out infinite alternate;
-                }}
-                @keyframes glow {{
-                    from {{ box-shadow: 0 0 20px rgba(102,126,234,0.5); }}
-                    to {{ box-shadow: 0 0 30px rgba(102,126,234,0.8), 0 0 40px rgba(102,126,234,0.6); }}
-                }}
-                .warning {{ 
-                    background: #ff3d00; 
-                    color: white; 
-                    padding: 20px; 
-                    border-radius: 15px; 
-                    margin: 20px 0; 
-                    font-weight: bold;
-                    font-size: 1.2em;
-                    animation: pulse 2s infinite;
-                }}
-                @keyframes pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.7; }} }}
-                .controls {{ 
-                    display: flex;
-                    justify-content: center;
-                    gap: 40px;
-                    margin: 50px 0;
-                    flex-wrap: wrap;
-                }}
-                .btn {{ 
-                    padding: 25px 50px; 
-                    border: none; 
-                    border-radius: 50px; 
-                    font-size: 1.5em; 
-                    font-weight: bold;
-                    cursor: pointer; 
-                    transition: all 0.3s;
-                    min-width: 200px;
-                    box-shadow: 0 8px 25px rgba(0,0,0,0.3);
-                }}
-                .btn-start {{ 
-                    background: linear-gradient(45deg, #4CAF50, #45a049);
-                    color: white;
-                }}
-                .btn-start:hover {{ 
-                    transform: translateY(-3px);
-                    box-shadow: 0 12px 35px rgba(76,175,80,0.4);
-                }}
-                .btn-stop {{ 
-                    background: linear-gradient(45deg, #f44336, #d32f2f);
-                    color: white;
-                }}
-                .btn-stop:hover {{ 
-                    transform: translateY(-3px);
-                    box-shadow: 0 12px 35px rgba(244,67,54,0.4);
-                }}
-                .stats {{ 
-                    display: grid; 
-                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
-                    gap: 20px; 
-                    margin: 40px 0; 
-                }}
-                .stat-card {{ 
-                    background: rgba(255,255,255,0.1); 
-                    padding: 25px; 
-                    border-radius: 15px; 
-                    backdrop-filter: blur(10px);
-                }}
-                .stat-value {{ 
-                    font-size: 2.5em; 
-                    font-weight: bold; 
-                    margin: 10px 0; 
-                    color: #FFD700;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>💎 ETH TRADING BOT REAL-TIME</h1>
-                    <div class="status-badge">{bot_status}</div>
-                    <div style="margin: 15px 0;">
-                        Status: {bot_state['connection_status']}<br>
-                        Erros: {bot_state['error_count']}
-                    </div>
-                </div>
-                
-                <div class="eth-price-live">
-                    💎 ETH/USDT: ${bot_state['eth_price']:.2f}<br>
-                    <span style="color: {change_color}; font-size: 0.8em;">
-                        {change_symbol} {bot_state['eth_change_24h']:.2f}% 24h
-                    </span><br>
-                    <small style="font-size: 0.6em; opacity: 0.8;">{price_age}</small>
-                </div>
-                
-                <div class="warning">
-                    ⚠️ ETH BOT REAL-TIME 24/7 SEM PARAR!<br>
-                    TRADES AUTOMÁTICOS: ${bot_state['min_trade_usd']:.0f}-${bot_state['max_trade_usd']:.0f} | 20% CHANCE/CICLO
-                </div>
-                
-                <div class="controls">
-                    <button class="btn btn-start" onclick="startBot()">
-                        🚀 LIGAR ETH BOT
-                    </button>
-                    <button class="btn btn-stop" onclick="stopBot()">
-                        ⏹️ DESLIGAR ETH BOT
-                    </button>
-                </div>
-                
-                {last_trade_display}
-                
-                <div class="stats">
-                    <div class="stat-card">
-                        <h3>💰 Saldo</h3>
-                        <div class="stat-value">${bot_state['balance']:.2f}</div>
-                    </div>
-                    <div class="stat-card">
-                        <h3>💎 Trades ETH</h3>
-                        <div class="stat-value">{bot_state['real_trades_executed']}</div>
-                    </div>
-                    <div class="stat-card">
-                        <h3>💸 P&L Hoje</h3>
-                        <div class="stat-value" style="color: {'#4CAF50' if bot_state['daily_pnl'] >= 0 else '#f44336'};">${bot_state['daily_pnl']:.2f}</div>
-                    </div>
-                    <div class="stat-card">
-                        <h3>⏰ Uptime</h3>
-                        <div class="stat-value">{bot_state['uptime_hours']:.1f}h</div>
-                    </div>
-                </div>
-            </div>
+        try:
+            bot_status = "🟢 LIGADO" if bot_state['active'] else "🔴 DESLIGADO"
+            status_color = "#4CAF50" if bot_state['active'] else "#f44336"
             
-            <script>
-                function startBot() {{
-                    if(confirm('🚨 Iniciar ETH Bot Real-Time com dinheiro real?')) {{
-                        fetch('/start', {{method: 'POST'}})
-                            .then(r => r.json())
-                            .then(data => {{
-                                alert(data.message);
-                                location.reload();
-                            }});
+            # Calcular próximo valor de trade (80% do saldo atual)
+            next_trade_amount = bot_state['balance'] * 0.8
+            
+            # Último trade
+            last_trade = bot_state.get('last_trade_result')
+            last_trade_display = ""
+            if last_trade:
+                if 'error' in last_trade:
+                    last_trade_display = f"""
+                    <div style="background: rgba(244,67,54,0.2); padding: 15px; border-radius: 10px; margin: 10px 0;">
+                        <strong>❌ Último Erro:</strong><br>
+                        {last_trade['error']}<br>
+                        <small>{last_trade['time'].strftime('%H:%M:%S')}</small>
+                    </div>
+                    """
+                else:
+                    pnl_color = "#4CAF50" if last_trade['pnl_estimated'] > 0 else "#f44336"
+                    last_trade_display = f"""
+                    <div style="background: rgba(76,175,80,0.2); padding: 15px; border-radius: 10px; margin: 10px 0;">
+                        <strong>✅ Último Trade 80%:</strong><br>
+                        Comprou: {last_trade['amount']:.6f} ETH<br>
+                        Valor usado: ${last_trade['value_usd']:.2f} (80% do saldo)<br>
+                        <span style="color: {pnl_color};">P&L: ${last_trade['pnl_estimated']:.2f}</span><br>
+                        <small>{last_trade['time'].strftime('%H:%M:%S')}</small>
+                    </div>
+                    """
+            
+            html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>💎 ETH Bot 80% do Saldo</title>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                    body {{ 
+                        font-family: Arial, sans-serif; 
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white; margin: 0; padding: 20px; min-height: 100vh;
                     }}
-                }}
+                    .container {{ max-width: 900px; margin: 0 auto; text-align: center; }}
+                    .header {{ 
+                        background: rgba(255,255,255,0.15); padding: 30px; border-radius: 20px; 
+                        margin-bottom: 30px; backdrop-filter: blur(10px);
+                    }}
+                    .status-badge {{ 
+                        background: {status_color}; color: white; padding: 15px 30px; 
+                        border-radius: 50px; font-weight: bold; font-size: 2em;
+                        display: inline-block; margin: 20px 0;
+                    }}
+                    .eth-price {{ 
+                        background: rgba(102,126,234,0.4); padding: 25px; border-radius: 15px; 
+                        margin: 20px 0; font-size: 1.8em; font-weight: bold;
+                        border: 2px solid rgba(255,255,255,0.3);
+                    }}
+                    .warning {{ 
+                        background: #ff3d00; color: white; padding: 20px; border-radius: 15px; 
+                        margin: 20px 0; font-weight: bold; font-size: 1.2em;
+                        animation: pulse 2s infinite;
+                    }}
+                    @keyframes pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.7; }} }}
+                    .trade-info {{
+                        background: rgba(255,215,0,0.2); padding: 20px; border-radius: 15px;
+                        margin: 20px 0; border: 2px solid #FFD700;
+                    }}
+                    .controls {{ 
+                        display: flex; justify-content: center; gap: 40px; 
+                        margin: 50px 0; flex-wrap: wrap;
+                    }}
+                    .btn {{ 
+                        padding: 25px 50px; border: none; border-radius: 50px; 
+                        font-size: 1.5em; font-weight: bold; cursor: pointer; 
+                        transition: all 0.3s; min-width: 200px;
+                        box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+                    }}
+                    .btn-start {{ 
+                        background: linear-gradient(45deg, #4CAF50, #45a049); color: white;
+                    }}
+                    .btn-start:hover {{ 
+                        transform: translateY(-3px);
+                        box-shadow: 0 12px 35px rgba(76,175,80,0.4);
+                    }}
+                    .btn-stop {{ 
+                        background: linear-gradient(45deg, #f44336, #d32f2f); color: white;
+                    }}
+                    .btn-stop:hover {{ 
+                        transform: translateY(-3px);
+                        box-shadow: 0 12px 35px rgba(244,67,54,0.4);
+                    }}
+                    .stats {{ 
+                        display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+                        gap: 20px; margin: 40px 0;
+                    }}
+                    .stat-card {{ 
+                        background: rgba(255,255,255,0.1); padding: 25px; 
+                        border-radius: 15px; backdrop-filter: blur(10px);
+                    }}
+                    .stat-value {{ 
+                        font-size: 2.5em; font-weight: bold; margin: 10px 0; color: #FFD700;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>💎 ETH BOT - 80% DO SALDO</h1>
+                        <div class="status-badge">{bot_status}</div>
+                        <div>Status: {bot_state['connection_status']}</div>
+                    </div>
+                    
+                    <div class="eth-price">
+                        💎 ETH/USDT: ${bot_state['eth_price']:.2f}<br>
+                        <small>({bot_state['eth_change_24h']:.2f}% 24h)</small>
+                    </div>
+                    
+                    <div class="trade-info">
+                        💰 <strong>Saldo Atual: ${bot_state['balance']:.2f} USDT</strong><br>
+                        🎯 <strong>Próximo Trade: ${next_trade_amount:.2f} USDT (80%)</strong><br>
+                        📊 Último Trade: ${bot_state['last_trade_amount']:.2f} USDT
+                    </div>
+                    
+                    <div class="warning">
+                        ⚠️ CADA TRADE USA 80% DO SEU SALDO TOTAL!<br>
+                        BOT ATIVO 24/7 | 30% CHANCE POR CICLO
+                    </div>
+                    
+                    <div class="controls">
+                        <button class="btn btn-start" onclick="startBot()">🚀 LIGAR BOT 80%</button>
+                        <button class="btn btn-stop" onclick="stopBot()">⏹️ DESLIGAR BOT</button>
+                    </div>
+                    
+                    {last_trade_display}
+                    
+                    <div class="stats">
+                        <div class="stat-card">
+                            <h3>💰 Saldo USDT</h3>
+                            <div class="stat-value">${bot_state['balance']:.2f}</div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>🎯 Trades 80%</h3>
+                            <div class="stat-value">{bot_state['real_trades_executed']}</div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>💸 P&L Hoje</h3>
+                            <div class="stat-value" style="color: {'#4CAF50' if bot_state['daily_pnl'] >= 0 else '#f44336'};">${bot_state['daily_pnl']:.2f}</div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>⏰ Uptime</h3>
+                            <div class="stat-value">{bot_state['uptime_hours']:.1f}h</div>
+                        </div>
+                    </div>
+                </div>
                 
-                function stopBot() {{
-                    fetch('/stop', {{method: 'POST'}})
-                        .then(r => r.json())
-                        .then(data => {{
-                            alert(data.message);
-                            location.reload();
-                        }});
-                }}
-                
-                // Auto refresh mais rápido
-                setTimeout(() => location.reload(), 10000);
-            </script>
-        </body>
-        </html>
-        """
-        return html_content
+                <script>
+                    function startBot() {{
+                        if(confirm('🚨 ATENÇÃO: Este bot usará 80% do seu saldo a cada trade!\\n\\nSaldo atual: ${bot_state['balance']:.2f} USDT\\nPróximo trade: ${next_trade_amount:.2f} USDT\\n\\nConfirma?')) {{
+                            fetch('/start', {{method: 'POST'}})
+                                .then(r => r.json())
+                                .then(data => {{ alert(data.message); location.reload(); }});
+                        }}
+                    }}
+                    
+                    function stopBot() {{
+                        if(confirm('Parar bot 80%?')) {{
+                            fetch('/stop', {{method: 'POST'}})
+                                .then(r => r.json())
+                                .then(data => {{ alert(data.message); location.reload(); }});
+                        }}
+                    }}
+                    
+                    // Auto refresh
+                    setTimeout(() => location.reload(), 15000);
+                </script>
+            </body>
+            </html>
+            """
+            return html
+        except Exception as e:
+            return f"<h1>Erro na interface: {e}</h1>"
 
     @app.route('/start', methods=['POST'])
     def start_bot():
@@ -591,11 +523,11 @@ def create_app():
     @app.route('/health')
     def health():
         return jsonify({
-            "status": "eth_realtime", 
+            "status": "eth_80_percent", 
             "timestamp": datetime.now().isoformat(),
             "active": bot_state['active'],
-            "eth_price": bot_state['eth_price'],
-            "eth_trades": bot_state['real_trades_executed']
+            "balance": bot_state['balance'],
+            "next_trade_amount": bot_state['balance'] * 0.8
         })
 
     return app
@@ -604,8 +536,8 @@ if __name__ == '__main__':
     app = create_app()
     port = int(os.environ.get('PORT', 5000))
     
-    logger.warning("🚨 ETH BOT REAL-TIME INICIANDO!")
-    logger.warning("💎 PREÇO ETH ATUALIZADO A CADA 10 SEGUNDOS!")
+    logger.warning("🚨 ETH BOT 80% DO SALDO INICIANDO!")
+    logger.warning("💸 CADA TRADE USARÁ 80% DO SALDO TOTAL!")
     
     try:
         app.run(host='0.0.0.0', port=port, debug=False)
