@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # ⚠️ TRADING REAL FUTURES - CONFIGURAÇÕES IMPORTANTES ⚠️
 PAPER_TRADING = False  # ❌ FALSE = SALDO REAL
 REAL_MONEY_MODE = True  # ✅ TRUE = USAR DINHEIRO REAL
-LEVERAGE = 5  # 🚨 ALAVANCAGEM 5x - CUIDADO!
+LEVERAGE = 10  # 🚨 ALAVANCAGEM 10x - CUIDADO!
 
 # Variáveis de ambiente para TRADING REAL
 api_key = os.environ.get('BITGET_API_KEY', '').strip()
