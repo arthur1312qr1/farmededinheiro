@@ -26,13 +26,24 @@ def init_bot():
         secret_key = os.getenv('BITGET_SECRET_KEY')
         passphrase = os.getenv('BITGET_PASSPHRASE')
         
-        # FAIL HARD if no credentials - NO SIMULATION ALLOWED
-        if not all([api_key, secret_key, passphrase]):
-            logging.error("❌ ERRO CRÍTICO: Credenciais não encontradas no ambiente")
-            logging.error("❌ Configure BITGET_API_KEY, BITGET_SECRET_KEY, BITGET_PASSPHRASE")
-            return None
+        # Debug: Log se as variáveis estão sendo carregadas
+        logging.info(f"🔍 Verificando credenciais:")
+        logging.info(f"   API_KEY: {'✅ OK' if api_key else '❌ VAZIO'}")
+        logging.info(f"   SECRET_KEY: {'✅ OK' if secret_key else '❌ VAZIO'}")
+        logging.info(f"   PASSPHRASE: {'✅ OK' if passphrase else '❌ VAZIO'}")
         
-        logging.info("✅ Credenciais encontradas - MODO PRODUÇÃO")
+        # FAIL HARD if no credentials - NO FALLBACK TO TEST MODE
+        if not all([api_key, secret_key, passphrase]):
+            logging.error("❌ ERRO CRÍTICO: Credenciais obrigatórias não encontradas")
+            logging.error("❌ Variáveis necessárias: BITGET_API_KEY, BITGET_SECRET_KEY, BITGET_PASSPHRASE")
+            raise Exception("Credenciais não configuradas no ambiente")
+        
+        # Validate that credentials are not test values
+        if api_key == "test_key" or secret_key == "test_secret" or passphrase == "test_pass":
+            logging.error("❌ ERRO: Credenciais de teste detectadas - configure credenciais reais")
+            raise Exception("Credenciais de teste não são permitidas")
+        
+        logging.info("✅ Credenciais reais encontradas - INICIANDO MODO PRODUÇÃO")
         
         # Initialize Bitget API - PRODUCTION MODE ONLY
         bitget_api = BitgetAPI(
@@ -57,7 +68,7 @@ def init_bot():
         return trading_bot
         
     except Exception as e:
-        logging.error(f"❌ Erro ao inicializar bot: {e}")
+        logging.error(f"❌ Falha na inicialização: {e}")
         return None
 
 # Initialize bot globally
@@ -74,7 +85,7 @@ def get_status():
     try:
         if not bot:
             return jsonify({
-                'error': 'Bot não inicializado - verifique credenciais', 
+                'error': 'Bot não inicializado - verifique credenciais no Render.com', 
                 'status': 'error',
                 'is_running': False,
                 'is_paused': False,
@@ -95,14 +106,14 @@ def start_bot():
     try:
         if not bot:
             return jsonify({
-                'error': 'Bot não inicializado - verifique credenciais',
+                'error': 'Bot não inicializado - configure credenciais no Render.com',
                 'success': False
             }), 500
         
         bot.start()
         logging.info("🟢 Bot INICIADO - Trading Real Ativo")
         return jsonify({
-            'message': 'Bot iniciado - Trading Real',
+            'message': 'Bot iniciado - Trading Real Ativo',
             'status': 'running',
             'success': True
         })
@@ -143,7 +154,6 @@ def pause_bot():
                 'success': False
             }), 500
         
-        # Call real pause method if exists
         if hasattr(bot, 'pause'):
             bot.pause()
             logging.info("⏸️ Bot PAUSADO")
@@ -172,7 +182,7 @@ def emergency_stop():
                 'success': False
             }), 500
         
-        bot.stop()  # Force stop
+        bot.stop()
         logging.warning("🚨 PARADA DE EMERGÊNCIA ATIVADA")
         return jsonify({
             'message': 'Parada de emergência executada',
@@ -248,7 +258,10 @@ if __name__ == '__main__':
         logging.info("💰 TRADING REAL ATIVO")
     else:
         logging.error("❌ FALHA CRÍTICA: Bot não pôde ser inicializado")
-        logging.error("❌ Verifique as credenciais no ambiente")
+        logging.error("❌ Configure as variáveis no Render.com:")
+        logging.error("❌   BITGET_API_KEY")
+        logging.error("❌   BITGET_SECRET_KEY") 
+        logging.error("❌   BITGET_PASSPHRASE")
     
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
