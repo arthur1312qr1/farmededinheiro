@@ -14,17 +14,12 @@ class TradingBot:
                  paper_trading: bool = False):
         """
         Initialize Trading Bot
-        
-        Args:
-            bitget_api: BitgetAPI instance
-            symbol: Trading symbol
-            leverage: Leverage multiplier
-            balance_percentage: Percentage of balance to use (now 100%)
-            daily_target: Number of trades per day
-            scalping_interval: Seconds between trades
-            paper_trading: If True, simulate trades
         """
-        self.bitget_api = bitget_api
+        # CORREÇÃO: Verificar se é uma instância válida
+        if not isinstance(bitget_api, BitgetAPI):
+            raise TypeError(f"bitget_api deve ser uma instância de BitgetAPI, recebido: {type(bitget_api)}")
+        
+        self.bitget_api = bitget_api  # ← Agora é uma instância válida
         self.symbol = symbol
         self.leverage = leverage
         self.balance_percentage = balance_percentage
