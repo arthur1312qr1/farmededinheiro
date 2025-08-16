@@ -92,37 +92,26 @@ def ultra_fast_price_monitoring():
                 logging.error(f"❌ Erro no monitoramento: {e}")
             time.sleep(0.02)
 
-# Função para corrigir cálculo de quantidade ETH
-def calculate_eth_amount(usdt_amount, eth_price):
-    """Calcula quantidade ETH com precisão correta para Bitget"""
+def calculate_100_percent_exact(usdt_balance, eth_price):
+    """
+    Calcula 100% EXATO do saldo dividido pelo preço atual
+    JAMAIS modifica ou reduz o valor - usa EXATAMENTE 100%
+    """
     try:
-        # Calcular quantidade bruta
-        raw_amount = usdt_amount / eth_price
+        # DIVISÃO EXATA: 100% do saldo ÷ preço ETH atual
+        eth_quantity = usdt_balance / eth_price
         
-        # Arredondar para 2 casas decimais (precisão da Bitget)
-        eth_amount = round(raw_amount, 2)
+        logging.warning(f"💎 CÁLCULO 100% EXATO:")
+        logging.warning(f"   💰 USDT (100% COMPLETO): {usdt_balance}")
+        logging.warning(f"   💎 Preço ETH ATUAL: {eth_price}")
+        logging.warning(f"   🧮 Cálculo: {usdt_balance} ÷ {eth_price}")
+        logging.warning(f"   📊 Resultado EXATO: {eth_quantity}")
         
-        # Verificar se está dentro dos limites da Bitget
-        # Máximo: 0.06 ETH (conforme mencionado)
-        if eth_amount > 0.06:
-            eth_amount = 0.06
-            logging.warning(f"⚠️ Quantidade limitada ao máximo: 0.06 ETH")
-        
-        # Se quantidade calculada for muito pequena, usar valor mínimo operacional
-        if eth_amount < 0.01:
-            eth_amount = 0.01
-            logging.warning(f"⚠️ Quantidade ajustada para mínimo operacional: 0.01 ETH")
-        
-        logging.warning(f"💎 Cálculo ETH:")
-        logging.warning(f"   💰 USDT: ${usdt_amount:.2f}")
-        logging.warning(f"   💎 Preço: ${eth_price:.2f}")
-        logging.warning(f"   📊 Quantidade: {eth_amount:.2f} ETH")
-        
-        return eth_amount
+        return eth_quantity
         
     except Exception as e:
-        logging.error(f"❌ Erro no cálculo ETH: {e}")
-        return 0.01  # Fallback seguro
+        logging.error(f"❌ Erro no cálculo 100%: {e}")
+        return None
 
 # Initialize APIs and Bot
 def init_bot():
@@ -139,7 +128,7 @@ def init_bot():
         if not all([api_key, secret_key, passphrase]):
             raise Exception("Credenciais não configuradas")
         
-        logging.info("✅ MODO PRODUÇÃO - 100% DO SALDO COM PRECISÃO CORRETA")
+        logging.info("✅ MODO PRODUÇÃO - 100% ABSOLUTO DO SALDO")
         
         # Initialize Bitget API
         bitget_api = BitgetAPI(
@@ -149,37 +138,39 @@ def init_bot():
             sandbox=False
         )
         
-        # Patch do método place_order para usar cálculo correto
+        # Patch do método place_order para usar 100% ABSOLUTO
         original_place_order = bitget_api.place_order
         
         def patched_place_order(symbol, side, size, price=None, leverage=10):
             try:
-                logging.warning(f"🔧 ORDEM CORRIGIDA:")
+                logging.warning(f"🔧 ORDEM COM 100% ABSOLUTO DO SALDO:")
                 
-                # Obter saldo atual
+                # Obter saldo ATUAL e COMPLETO (sempre buscar valor atualizado)
                 current_balance = bitget_api.get_account_balance()
                 
-                # Obter preço atual se não fornecido
+                # Obter preço ATUAL do ETH (sempre buscar valor atualizado)
                 if price is None:
                     market_data = bitget_api.get_market_data(symbol)
                     current_price = float(market_data['price'])
                 else:
                     current_price = float(price)
                 
-                # Usar 100% do saldo
-                usdt_amount = current_balance * 0.99  # 99% para taxas
+                # CALCULAR 100% ABSOLUTO - SEM REDUÇÃO
+                eth_quantity = calculate_100_percent_exact(current_balance, current_price)
                 
-                # Calcular quantidade ETH com precisão correta
-                eth_quantity = calculate_eth_amount(usdt_amount, current_price)
+                if eth_quantity is None:
+                    return {'success': False, 'error': 'Erro no cálculo 100%'}
                 
-                logging.warning(f"💰 Usando 100% do saldo: ${usdt_amount:.2f} USDT")
-                logging.warning(f"💎 Quantidade corrigida: {eth_quantity:.2f} ETH")
+                logging.warning(f"🚀 ENVIANDO PARA BITGET:")
+                logging.warning(f"   💰 Saldo Atual: {current_balance}")
+                logging.warning(f"   💎 Preço Atual: {current_price}")
+                logging.warning(f"   📊 Quantidade ETH: {eth_quantity}")
                 
-                # Chamar método original com quantidade corrigida
+                # Chamar método original com quantidade 100% EXATA
                 return original_place_order(symbol, side, eth_quantity, current_price, leverage)
                 
             except Exception as e:
-                logging.error(f"❌ Erro na ordem corrigida: {e}")
+                logging.error(f"❌ Erro na ordem 100%: {e}")
                 return {'success': False, 'error': str(e)}
         
         # Aplicar patch
@@ -190,13 +181,13 @@ def init_bot():
             bitget_api=bitget_api,
             symbol='ethusdt_UMCBL',
             leverage=10,
-            balance_percentage=100.0,  # 100% DO SALDO
+            balance_percentage=100.0,  # 100% ABSOLUTO
             daily_target=200,
             scalping_interval=2,
             paper_trading=False
         )
         
-        logging.info("🚀 Bot inicializado - 100% DO SALDO COM PRECISÃO CORRIGIDA")
+        logging.info("🚀 Bot inicializado - 100% ABSOLUTO DO SALDO")
         return trading_bot
         
     except Exception as e:
@@ -253,9 +244,9 @@ def start_bot():
             monitor_thread.start()
             logging.warning("🎯 Monitoramento ultra-rápido iniciado")
         
-        logging.warning("🟢 Bot iniciado - 100% DO SALDO COM PRECISÃO CORRIGIDA")
+        logging.warning("🟢 Bot iniciado - 100% ABSOLUTO + REINVESTIMENTO TOTAL")
         return jsonify({
-            'message': 'Bot iniciado - Usando 100% do saldo com precisão correta',
+            'message': 'Bot iniciado - 100% ABSOLUTO do saldo + reinvestimento total',
             'status': 'running',
             'success': True
         })
@@ -263,30 +254,49 @@ def start_bot():
     except Exception as e:
         return jsonify({'error': str(e), 'success': False}), 500
 
-@app.route('/api/test_calculation')
-def test_calculation():
-    """Testar cálculo de quantidade ETH"""
+@app.route('/api/test_100_percent')
+def test_100_percent():
+    """Testar cálculo de 100% ABSOLUTO"""
     try:
         if not bot:
             return jsonify({'error': 'Bot não inicializado'}, 500)
         
-        # Obter dados atuais
+        # Obter valores ATUAIS (sempre buscar dados frescos)
         current_balance = bot.get_account_balance()
         market_data = bot.bitget_api.get_market_data('ethusdt_UMCBL')
         current_price = float(market_data['price'])
         
-        # Usar 100% do saldo
-        usdt_amount = current_balance * 0.99
-        
-        # Calcular com função corrigida
-        eth_amount = calculate_eth_amount(usdt_amount, current_price)
+        # Calcular 100% ABSOLUTO
+        eth_quantity = calculate_100_percent_exact(current_balance, current_price)
         
         return jsonify({
-            'current_balance': current_balance,
-            'current_price': current_price,
-            'usdt_to_use': usdt_amount,
-            'eth_amount_calculated': eth_amount,
-            'calculation_valid': 0.01 <= eth_amount <= 0.06,
+            'current_balance_exact': current_balance,
+            'current_price_exact': current_price,
+            'calculation': f"{current_balance} ÷ {current_price}",
+            'eth_quantity_exact': eth_quantity,
+            'percentage_used': 100.0,
+            'success': True
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e), 'success': False}), 500
+
+@app.route('/api/current_values')
+def current_values():
+    """Ver valores atuais em tempo real"""
+    try:
+        if not bot:
+            return jsonify({'error': 'Bot não inicializado'}, 500)
+        
+        current_balance = bot.get_account_balance()
+        market_data = bot.bitget_api.get_market_data('ethusdt_UMCBL')
+        current_price = float(market_data['price'])
+        
+        return jsonify({
+            'timestamp': datetime.now().isoformat(),
+            'usdt_balance': current_balance,
+            'eth_price': current_price,
+            'eth_quantity_if_buy_now': current_balance / current_price,
             'success': True
         })
         
@@ -360,7 +370,7 @@ def get_balance():
 @app.route('/api/logs')
 def get_logs():
     return jsonify({
-        'message': 'Bot ativo com precisão corrigida',
+        'message': 'Bot ativo com 100% ABSOLUTO do saldo',
         'status': 'active',
         'logs': [],
         'success': True
@@ -385,9 +395,10 @@ def update_config():
 
 if __name__ == '__main__':
     if bot:
-        logging.warning("🚀 MODO 100% DO SALDO COM PRECISÃO CORRIGIDA")
-        logging.warning("💎 Quantidade ETH: 2 casas decimais (0.01 - 0.06)")
-        logging.warning("💰 Usa 100% do saldo disponível")
+        logging.warning("🚀 MODO 100% ABSOLUTO DO SALDO")
+        logging.warning("💰 Sempre usa EXATAMENTE todo o saldo atual")
+        logging.warning("🔄 Reinveste 100% dos lucros automaticamente")
+        logging.warning("📊 Cálculo: saldo_atual ÷ preço_eth_atual")
         logging.warning("⚡ Monitoramento ultra-rápido: 10ms")
     else:
         logging.error("❌ FALHA: Configure credenciais no Render.com")
