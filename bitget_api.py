@@ -147,9 +147,13 @@ class BitgetAPI:
             return None
 
     def place_order(self, symbol: str, side: str, size: float, price: float = None, leverage: int = 10) -> Dict:
-        """Place FUTURES order com cálculo dinâmico da quantidade ETH"""
+        """Place FUTURES order com cálculo dinâmico da quantidade ETH + DEBUG"""
         try:
             futures_symbol = 'ETH/USDT:USDT'
+            logger.warning(f"🔍 DEBUG - Iniciando place_order:")
+            logger.warning(f"🔍 Symbol recebido: {symbol}")
+            logger.warning(f"🔍 Side: {side}")
+            logger.warning(f"🔍 Price: {price}")
             
             # Definir alavancagem 10x
             try:
@@ -160,17 +164,32 @@ class BitgetAPI:
             
             # Obter preço atual do mercado
             if price is None:
+                logger.warning(f"🔍 Buscando preço do ticker...")
                 ticker = self.exchange.fetch_ticker(futures_symbol)
                 current_price = float(ticker['last'])
+                logger.warning(f"🔍 Preço obtido do ticker: ${current_price:.2f}")
             else:
                 current_price = price
+                logger.warning(f"🔍 Usando preço fornecido: ${current_price:.2f}")
             
             # CORREÇÃO: Buscar saldo atual (100% dinâmico)
+            logger.warning(f"🔍 Buscando saldo atual...")
             current_balance = self.get_account_balance()
+            logger.warning(f"🔍 Saldo retornado: ${current_balance:.2f}")
+            
             usdt_amount = current_balance  # 100% do saldo atual
             
             # CÁLCULO DINÂMICO: Calcular quantidade ETH baseada no valor USDT
+            logger.warning(f"🔍 Calculando quantidade ETH...")
+            logger.warning(f"🔍 USDT amount: {usdt_amount}")
+            logger.warning(f"🔍 Current price: {current_price}")
+            
+            if current_price <= 0:
+                logger.error(f"❌ Preço inválido: {current_price}")
+                return {'success': False, 'error': f'Preço inválido: {current_price}'}
+            
             eth_quantity = usdt_amount / current_price
+            logger.warning(f"🔍 ETH quantity calculado: {eth_quantity}")
             
             logger.warning(f"🚨 CÁLCULO DINÂMICO DA QUANTIDADE:")
             logger.warning(f"💰 Saldo Atual: ${current_balance:.2f} USDT")  
@@ -193,12 +212,14 @@ class BitgetAPI:
             logger.warning(f"📊 Quantidade: {eth_quantity:.8f} ETH")
             logger.warning(f"💰 Valor equivalente: ${usdt_amount:.2f} USDT")
             
+            logger.warning(f"🔍 Chamando exchange.create_order...")
             order = self.exchange.create_order(
                 symbol=futures_symbol,
                 type='market',
                 side=side,
                 amount=eth_quantity  # Quantidade ETH calculada dinamicamente
             )
+            logger.warning(f"🔍 Ordem retornada: {order}")
             
             logger.warning(f"✅ ORDEM EXECUTADA COM CÁLCULO DINÂMICO!")
             logger.warning(f"💰 Valor usado: ${usdt_amount:.2f} USDT")
@@ -215,6 +236,9 @@ class BitgetAPI:
             
         except Exception as e:
             logger.error(f"❌ Erro ao executar ordem com cálculo dinâmico: {e}")
+            logger.error(f"🔍 Tipo do erro: {type(e)}")
+            import traceback
+            logger.error(f"🔍 Stack trace: {traceback.format_exc()}")
             return {
                 'success': False,
                 'error': str(e)
