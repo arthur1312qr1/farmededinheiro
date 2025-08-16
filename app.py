@@ -356,14 +356,27 @@ def get_balance():
         if not bot:
             return jsonify({'error': 'Bot não inicializado', 'success': False}), 500
         
-        balance = bot.get_account_balance()
+        # Usar o método get_balance diretamente
+        balance_info = bot.bitget_api.get_balance()
         
-        return jsonify({
-            'balance': balance,
-            'currency': 'USDT',
-            'leverage_power': balance * 10,
-            'success': True
-        })
+        if balance_info:
+            free_balance = balance_info.get('free', 0)
+            return jsonify({
+                'balance': free_balance,
+                'currency': 'USDT',
+                'leverage_power': free_balance * 10,
+                'total': balance_info.get('total', 0),
+                'used': balance_info.get('used', 0),
+                'success': True
+            })
+        else:
+            return jsonify({
+                'balance': 0,
+                'currency': 'USDT', 
+                'leverage_power': 0,
+                'success': False,
+                'error': 'Não foi possível obter saldo'
+            })
         
     except Exception as e:
         return jsonify({'error': str(e), 'success': False}), 500
