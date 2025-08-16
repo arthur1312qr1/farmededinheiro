@@ -6,7 +6,6 @@ from decimal import Decimal, ROUND_DOWN
 class BitgetAPI:
     def __init__(self, api_key=None, secret_key=None, passphrase=None, sandbox=None, **kwargs):
         """Inicializa com todos os parâmetros possíveis"""
-        
         # Mapear nomes corretos das credenciais
         self.api_key = api_key or os.getenv('BITGET_API_KEY')
         self.secret = secret_key or os.getenv('BITGET_SECRET')
@@ -77,7 +76,6 @@ class BitgetAPI:
         """Dados de mercado - CORRIGIDO para aceitar symbol"""
         try:
             ticker = self.exchange.fetch_ticker(symbol)
-            
             market_data = {
                 'symbol': symbol,
                 'price': ticker['last'],
@@ -93,7 +91,6 @@ class BitgetAPI:
             
             print(f"📊 Dados de mercado {symbol}:")
             print(f"   Preço: ${market_data['price']:.2f}")
-            
             return market_data
             
         except Exception as e:
@@ -120,7 +117,7 @@ class BitgetAPI:
         # Garantir mínimo 0.01 ETH
         if eth_quantity < 0.01:
             eth_quantity = 0.01
-            
+        
         print(f"💪 Cálculo FINAL:")
         print(f"   Saldo: ${usdt_balance:.6f} USDT")
         print(f"   Alavancagem: {leverage}x")
@@ -140,9 +137,8 @@ class BitgetAPI:
             balance_info = self.get_balance()
             if not balance_info:
                 return {"success": False, "error": "Erro ao pegar saldo"}
-                
-            usdt_balance = balance_info['free']
             
+            usdt_balance = balance_info['free']
             if usdt_balance < 1:  # Mínimo $1 para trading
                 error_msg = f"❌ Saldo insuficiente: ${usdt_balance:.4f}"
                 print(error_msg)
@@ -152,7 +148,7 @@ class BitgetAPI:
             eth_price = self.get_eth_price()
             if not eth_price:
                 return {"success": False, "error": "Erro ao pegar preço ETH"}
-                
+            
             # Calcular quantidade (CORREÇÃO APLICADA)
             eth_quantity = self.calculate_eth_quantity(usdt_balance, eth_price)
             
@@ -218,18 +214,18 @@ class BitgetAPI:
             print(f"   Quantidade: {quantity} ETH")
             print(f"   Preço entrada: ${entry_price:.2f}")
             print(f"   Preço atual: ${current_price:.2f}")
-            print(f"   Lucro: {profit_pct*100:.2f}%")
+            print(f"   Lucro: {profit_pct * 100:.2f}%")
             
             # Vender se atingiu o lucro alvo
             if profit_pct >= profit_target:
-                print(f"🎯 Meta de {profit_target*100}% atingida! Vendendo...")
+                print(f"🎯 Meta de {profit_target * 100}% atingida! Vendendo...")
                 
                 order = self.exchange.create_market_sell_order(
                     symbol='ETH/USDT:USDT',
                     amount=quantity
                 )
                 
-                success_msg = f"✅ VENDA EXECUTADA! Lucro: {profit_pct*100:.2f}%"
+                success_msg = f"✅ VENDA EXECUTADA! Lucro: {profit_pct * 100:.2f}%"
                 print(success_msg)
                 
                 return {
@@ -239,7 +235,7 @@ class BitgetAPI:
                     "message": success_msg
                 }
             else:
-                waiting_msg = f"⏳ Aguardando lucro de {profit_target*100}%... Atual: {profit_pct*100:.2f}%"
+                waiting_msg = f"⏳ Aguardando lucro de {profit_target * 100}%... Atual: {profit_pct * 100:.2f}%"
                 print(waiting_msg)
                 return {"success": False, "waiting": True, "message": waiting_msg}
                 
@@ -265,7 +261,6 @@ class BitgetAPI:
                 'position': eth_position,
                 'eth_price': self.get_eth_price()
             }
-            
         except Exception as e:
             print(f"❌ Erro ao pegar informações: {e}")
             return None
