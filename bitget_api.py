@@ -65,13 +65,13 @@ class BitgetAPI:
             print(f"❌ Erro ao pegar preço ETH: {e}")
             return None
 
-    def get_market_data(self):
-        """MÉTODO QUE ESTAVA FALTANDO - Dados de mercado do ETH"""
+    def get_market_data(self, symbol='ETH/USDT:USDT'):
+        """CORREÇÃO - Aceita parâmetro symbol"""
         try:
-            ticker = self.exchange.fetch_ticker('ETH/USDT:USDT')
+            ticker = self.exchange.fetch_ticker(symbol)
             
             market_data = {
-                'symbol': 'ETH/USDT',
+                'symbol': symbol,
                 'price': ticker['last'],
                 'bid': ticker['bid'],
                 'ask': ticker['ask'],
@@ -83,7 +83,7 @@ class BitgetAPI:
                 'timestamp': ticker['timestamp']
             }
             
-            print(f"📊 Dados de mercado ETH:")
+            print(f"📊 Dados de mercado {symbol}:")
             print(f"   Preço: ${market_data['price']:.2f}")
             print(f"   Alta: ${market_data['high']:.2f}")
             print(f"   Baixa: ${market_data['low']:.2f}")
@@ -281,7 +281,7 @@ class BitgetAPI:
 
     def get_ticker(self, symbol='ETH/USDT:USDT'):
         """Compatibilidade - alias para get_market_data"""
-        return self.get_market_data()
+        return self.get_market_data(symbol)
 
     def fetch_balance(self):
         """Compatibilidade - alias para get_balance"""
@@ -302,7 +302,7 @@ if __name__ == "__main__":
         api = BitgetAPI()
         if api.test_connection():
             info = api.get_position_info()
-            market = api.get_market_data()
+            market = api.get_market_data('ETH/USDT:USDT')
             print("🔥 Bot funcionando corretamente!")
         else:
             print("❌ Falha na conexão")
