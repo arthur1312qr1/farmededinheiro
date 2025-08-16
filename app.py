@@ -139,44 +139,6 @@ def init_bot():
             sandbox=False
         )
         
-        # Patch do método place_order para usar 100% ABSOLUTO
-        original_place_order = bitget_api.place_order
-        
-        def patched_place_order(symbol, side, size, price=None, leverage=10):
-            try:
-                logging.warning(f"🔧 ORDEM COM 100% ABSOLUTO DO SALDO:")
-                
-                # Obter saldo ATUAL e COMPLETO (sempre buscar valor atualizado)
-                current_balance = bitget_api.get_account_balance()
-                
-                # Obter preço ATUAL do ETH (sempre buscar valor atualizado)
-                if price is None:
-                    market_data = bitget_api.get_market_data(symbol)
-                    current_price = float(market_data['price'])
-                else:
-                    current_price = float(price)
-                
-                # CALCULAR 100% ABSOLUTO - SEM REDUÇÃO
-                eth_quantity = calculate_100_percent_exact(current_balance, current_price)
-                
-                if eth_quantity is None:
-                    return {'success': False, 'error': 'Erro no cálculo 100%'}
-                
-                logging.warning(f"🚀 ENVIANDO PARA BITGET:")
-                logging.warning(f"   💰 Saldo Atual: {current_balance}")
-                logging.warning(f"   💎 Preço Atual: {current_price}")
-                logging.warning(f"   📊 Quantidade ETH: {eth_quantity}")
-                
-                # Chamar método original com quantidade 100% EXATA
-                return original_place_order(symbol, side, eth_quantity, current_price, leverage)
-                
-            except Exception as e:
-                logging.error(f"❌ Erro na ordem 100%: {e}")
-                return {'success': False, 'error': str(e)}
-        
-        # Aplicar patch
-        bitget_api.place_order = patched_place_order
-        
         # Initialize Trading Bot
         trading_bot = TradingBot(
             bitget_api=bitget_api,
