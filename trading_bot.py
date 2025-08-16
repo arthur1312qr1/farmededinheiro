@@ -10,8 +10,9 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import threading
 
-from .bitget_api import BitgetAPI
-from .gemini_ai import GeminiAI
+# CORREÇÃO: Imports absolutos
+from bitget_api import BitgetAPI
+from gemini_handler import GeminiHandler  # ou gemini_ai se for esse o nome
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +42,21 @@ class TradingBot:
                 sandbox=config.get('PAPER_TRADING', False)
             )
             
-            self.gemini_ai = GeminiAI(
-                api_key=config.get('GEMINI_API_KEY')
-            )
+            # CORREÇÃO: Verificar se existe gemini_ai ou gemini_handler
+            gemini_key = config.get('GEMINI_API_KEY')
+            if gemini_key:
+                try:
+                    from gemini_ai import GeminiAI
+                    self.gemini_ai = GeminiAI(api_key=gemini_key)
+                except ImportError:
+                    try:
+                        from gemini_handler import GeminiHandler
+                        self.gemini_ai = GeminiHandler(api_key=gemini_key)
+                    except ImportError:
+                        logger.warning("⚠️ Gemini AI não disponível - continuando sem IA")
+                        self.gemini_ai = None
+            else:
+                self.gemini_ai = None
             
             logger.info("✅ APIs inicializadas com sucesso")
             
@@ -57,12 +70,12 @@ class TradingBot:
         self.target_trades_per_day = config.get('TARGET_TRADES_PER_DAY', 200)
         self.base_currency = config.get('BASE_CURRENCY', 'USDT')
         
-        # Risk management - CORREÇÃO: Mudança de 10% para 80%
+        # Risk management - CORREÇÃO: 80% do saldo
         self.stop_loss_pct = 0.02  # 2%
         self.take_profit_pct = 0.01  # 1%
-        self.position_size_pct = 0.8  # 80% of balance per trade (CORRIGIDO)
+        self.position_size_pct = 0.8  # 80% of balance per trade
         
-        # ADIÇÃO: Valor mínimo da exchange
+        # Valor mínimo da exchange
         self.MIN_ORDER_USDT = 1.0
         
         # Activity log
@@ -72,11 +85,10 @@ class TradingBot:
         logger.info(f"🤖 Trading Bot configurado:")
         logger.info(f"   Símbolo: {self.symbol}")
         logger.info(f"   Alavancagem: {self.leverage}x")
-        logger.info(f"   Uso do saldo: {self.position_size_pct*100}% (CORRIGIDO)")  # ADIÇÃO
+        logger.info(f"   Uso do saldo: {self.position_size_pct*100}%")
         logger.info(f"   Meta diária: {self.target_trades_per_day} trades")
         logger.info(f"   Paper Trading: {config.get('PAPER_TRADING', False)}")
     
-    # ADIÇÃO: Método de validação
     def validate_min_order_value(self, usdt_amount: float) -> bool:
         """Valida se o valor da ordem atende ao mínimo da exchange"""
         if usdt_amount < self.MIN_ORDER_USDT:
@@ -163,11 +175,20 @@ class TradingBot:
             if not market_data:
                 return None
             
-            # Get AI analysis
-            ai_analysis = self.gemini_ai.analyze_market(
-                symbol=self.symbol,
-                market_data=market_data
-            )
+            # Get AI analysis if available
+            ai_analysis = {}
+            if self.gemini_ai:
+                try:
+                    ai_analysis = self.gemini_ai.analyze_market(
+                        symbol=self.symbol,
+                        market_data=market_data
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ IA indisponível: {e}")
+                    ai_analysis = {'sentiment': 'neutral', 'confidence': 0.5}
+            else:
+                # Mock analysis if no AI
+                ai_analysis = {'sentiment': 'neutral', 'confidence': 0.5}
             
             # Combine with technical analysis
             technical_analysis = self._calculate_technical_indicators(market_data)
@@ -276,7 +297,7 @@ class TradingBot:
             self._check_stop_loss_take_profit(price)
     
     def _execute_buy_order(self, price: float, analysis: Dict):
-        """Execute buy order - CORRIGIDO APENAS O CÁLCULO"""
+        """Execute buy order - CORRIGIDO PARA 80% DO SALDO"""
         try:
             # Calculate position size
             account_balance = self.bitget_api.get_account_balance()
@@ -284,15 +305,16 @@ class TradingBot:
             # CORREÇÃO: Usar 80% do saldo em USDT
             usdt_80_percent = account_balance * self.position_size_pct  # 80% do saldo
             
-            # ADIÇÃO: Verificar valor mínimo
+            # Verificar valor mínimo
             if not self.validate_min_order_value(usdt_80_percent):
                 self.add_log("ERRO", f"Valor insuficiente: ${usdt_80_percent:.2f} < ${self.MIN_ORDER_USDT} USDT", "error")
+                logger.warning(f"⏰ Aguardando saldo suficiente...")
                 return
                 
             # Calcular quantidade ETH (apenas para logs)
             quantity = usdt_80_percent / price
             
-            # ADIÇÃO: Logs detalhados
+            # Logs detalhados
             logger.warning(f"🚨 CÁLCULO DINÂMICO 80% DO SALDO:")
             logger.warning(f"💰 Saldo Atual: ${account_balance:.2f} USDT")
             logger.warning(f"🎯 80% Dinâmico: ${usdt_80_percent:.2f} USDT")
@@ -306,11 +328,11 @@ class TradingBot:
             stop_loss = price * (1 - self.stop_loss_pct)
             take_profit = price * (1 + self.take_profit_pct)
             
-            # CORREÇÃO: Executar ordem com valor USDT
+            # Execute order com valor USDT
             order_result = self.bitget_api.place_order(
                 symbol=self.symbol,
                 side='buy',
-                size=usdt_80_percent,  # USAR VALOR USDT, NÃO QUANTITY
+                size=usdt_80_percent,  # USAR VALOR USDT
                 price=price,
                 leverage=self.leverage
             )
@@ -320,7 +342,7 @@ class TradingBot:
                     'side': 'long',
                     'entry_price': price,
                     'quantity': quantity,
-                    'usdt_value': usdt_80_percent,  # ADIÇÃO: Guardar valor USDT
+                    'usdt_value': usdt_80_percent,
                     'stop_loss': stop_loss,
                     'take_profit': take_profit,
                     'timestamp': datetime.now(),
@@ -329,18 +351,17 @@ class TradingBot:
                 
                 self.daily_trades += 1
                 self.total_trades += 1
-                self.total_volume += usdt_80_percent  # CORREÇÃO: Usar valor USDT
+                self.total_volume += usdt_80_percent
                 
                 self.add_log(
                     "COMPRA EXECUTADA",
-                    f"ETH/USDT - Valor: ${usdt_80_percent:.2f} - Preço: ${price:.2f}",  # CORREÇÃO
+                    f"ETH/USDT - Valor: ${usdt_80_percent:.2f} - Preço: ${price:.2f}",
                     "success",
                     f"Stop Loss: ${stop_loss:.2f} | Take Profit: ${take_profit:.2f}"
                 )
                 
                 logger.info(f"✅ Ordem de compra executada: ${usdt_80_percent:.2f} USDT @ ${price:.2f}")
             else:
-                # ADIÇÃO: Log de erro detalhado
                 error_msg = order_result.get('error', 'Erro desconhecido') if order_result else 'Falha na comunicação'
                 logger.error(f"❌ ORDEM FUTURES FALHOU: bitget {error_msg}")
                 logger.warning(f"❌ TRADE FUTURES FALHOU")
@@ -355,7 +376,6 @@ class TradingBot:
             if not self.current_position:
                 return
             
-            # CORREÇÃO: Usar valor USDT salvo
             usdt_value = self.current_position.get('usdt_value', 0)
             quantity = self.current_position['quantity']
             entry_price = self.current_position['entry_price']
@@ -364,7 +384,7 @@ class TradingBot:
             order_result = self.bitget_api.place_order(
                 symbol=self.symbol,
                 side='sell',
-                size=usdt_value if usdt_value > 0 else quantity,  # Priorizar valor USDT
+                size=usdt_value if usdt_value > 0 else quantity,
                 price=price,
                 leverage=self.leverage
             )
