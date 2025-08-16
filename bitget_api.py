@@ -55,7 +55,10 @@ class BitgetAPI:
 
     def get_account_balance(self):
         """Alias para get_balance - compatibilidade"""
-        return self.get_balance()
+        balance_info = self.get_balance()
+        if balance_info and 'free' in balance_info:
+            return balance_info['free']
+        return 0.0
 
     def get_eth_price(self):
         """Pega preço atual do ETH em tempo real"""
