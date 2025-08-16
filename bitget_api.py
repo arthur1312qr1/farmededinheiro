@@ -65,6 +65,36 @@ class BitgetAPI:
             print(f"❌ Erro ao pegar preço ETH: {e}")
             return None
 
+    def get_market_data(self):
+        """MÉTODO QUE ESTAVA FALTANDO - Dados de mercado do ETH"""
+        try:
+            ticker = self.exchange.fetch_ticker('ETH/USDT:USDT')
+            
+            market_data = {
+                'symbol': 'ETH/USDT',
+                'price': ticker['last'],
+                'bid': ticker['bid'],
+                'ask': ticker['ask'],
+                'high': ticker['high'],
+                'low': ticker['low'],
+                'volume': ticker['baseVolume'],
+                'change': ticker['change'],
+                'percentage': ticker['percentage'],
+                'timestamp': ticker['timestamp']
+            }
+            
+            print(f"📊 Dados de mercado ETH:")
+            print(f"   Preço: ${market_data['price']:.2f}")
+            print(f"   Alta: ${market_data['high']:.2f}")
+            print(f"   Baixa: ${market_data['low']:.2f}")
+            print(f"   Mudança: {market_data['percentage']:.2f}%")
+            
+            return market_data
+            
+        except Exception as e:
+            print(f"❌ Erro ao pegar dados de mercado: {e}")
+            return None
+
     def calculate_eth_quantity(self, usdt_balance, eth_price):
         """CORREÇÃO DEFINITIVA - Calcula quantidade ETH com alavancagem"""
         leverage = 10  # Alavancagem 10x
@@ -241,13 +271,25 @@ class BitgetAPI:
             print(f"❌ Erro de conexão: {e}")
             return False
 
-    # Métodos antigos para compatibilidade
+    # Métodos antigos para compatibilidade TOTAL
     def place_order(self, side='buy'):
         """Compatibilidade com código antigo"""
         if side == 'buy':
             return self.place_buy_order()
         else:
             return self.place_sell_order()
+
+    def get_ticker(self, symbol='ETH/USDT:USDT'):
+        """Compatibilidade - alias para get_market_data"""
+        return self.get_market_data()
+
+    def fetch_balance(self):
+        """Compatibilidade - alias para get_balance"""
+        return self.get_balance()
+
+    def fetch_ticker(self, symbol='ETH/USDT:USDT'):
+        """Compatibilidade - acesso direto ao exchange"""
+        return self.exchange.fetch_ticker(symbol)
 
 # Função para compatibilidade total
 def create_bitget_api():
@@ -260,6 +302,7 @@ if __name__ == "__main__":
         api = BitgetAPI()
         if api.test_connection():
             info = api.get_position_info()
+            market = api.get_market_data()
             print("🔥 Bot funcionando corretamente!")
         else:
             print("❌ Falha na conexão")
