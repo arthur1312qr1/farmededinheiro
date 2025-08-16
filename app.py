@@ -23,25 +23,26 @@ def init_bot():
     try:
         # Get API credentials from environment
         api_key = os.getenv('BITGET_API_KEY')
-        secret_key = os.getenv('BITGET_SECRET_KEY')  # ← CORRIGIDO: era BITGET_SECRET
+        secret_key = os.getenv('BITGET_SECRET_KEY')
         passphrase = os.getenv('BITGET_PASSPHRASE')
         
+        # FAIL HARD if no credentials - NO SIMULATION ALLOWED
         if not all([api_key, secret_key, passphrase]):
-            logging.error("❌ Credenciais não encontradas - usando valores de teste")
-            # Valores de teste para não quebrar o deploy
-            api_key = "test_key"
-            secret_key = "test_secret"
-            passphrase = "test_pass"
+            logging.error("❌ ERRO CRÍTICO: Credenciais não encontradas no ambiente")
+            logging.error("❌ Configure BITGET_API_KEY, BITGET_SECRET_KEY, BITGET_PASSPHRASE")
+            return None
         
-        # Initialize Bitget API
+        logging.info("✅ Credenciais encontradas - MODO PRODUÇÃO")
+        
+        # Initialize Bitget API - PRODUCTION MODE ONLY
         bitget_api = BitgetAPI(
             api_key=api_key,
             secret_key=secret_key,
             passphrase=passphrase,
-            sandbox=True  # Usar sandbox se não tem credenciais reais
+            sandbox=False  # PRODUCTION MODE
         )
         
-        # Initialize Trading Bot
+        # Initialize Trading Bot - REAL TRADING ONLY
         trading_bot = TradingBot(
             bitget_api=bitget_api,
             symbol='ethusdt_UMCBL',
@@ -49,9 +50,10 @@ def init_bot():
             balance_percentage=100.0,
             daily_target=200,
             scalping_interval=2,
-            paper_trading=True  # Paper trading se não tem credenciais
+            paper_trading=False  # REAL TRADING
         )
         
+        logging.info("🚀 Bot inicializado em MODO PRODUÇÃO - Trading Real")
         return trading_bot
         
     except Exception as e:
@@ -71,7 +73,14 @@ def get_status():
     """Get real bot status"""
     try:
         if not bot:
-            return jsonify({'error': 'Bot não inicializado', 'status': 'error'}), 500
+            return jsonify({
+                'error': 'Bot não inicializado - verifique credenciais', 
+                'status': 'error',
+                'is_running': False,
+                'is_paused': False,
+                'daily_trades': 0,
+                'win_rate': 0.0
+            }), 500
         
         stats = bot.get_status()
         return jsonify(stats)
@@ -85,10 +94,18 @@ def start_bot():
     """Start the real trading bot"""
     try:
         if not bot:
-            return jsonify({'error': 'Bot não inicializado', 'success': False}), 500
+            return jsonify({
+                'error': 'Bot não inicializado - verifique credenciais',
+                'success': False
+            }), 500
         
         bot.start()
-        return jsonify({'message': 'Bot iniciado com sucesso', 'status': 'running', 'success': True})
+        logging.info("🟢 Bot INICIADO - Trading Real Ativo")
+        return jsonify({
+            'message': 'Bot iniciado - Trading Real',
+            'status': 'running',
+            'success': True
+        })
         
     except Exception as e:
         logging.error(f"❌ Erro ao iniciar bot: {e}")
@@ -99,10 +116,18 @@ def stop_bot():
     """Stop the real trading bot"""
     try:
         if not bot:
-            return jsonify({'error': 'Bot não inicializado', 'success': False}), 500
+            return jsonify({
+                'error': 'Bot não inicializado',
+                'success': False
+            }), 500
         
         bot.stop()
-        return jsonify({'message': 'Bot parado com sucesso', 'status': 'stopped', 'success': True})
+        logging.info("🔴 Bot PARADO")
+        return jsonify({
+            'message': 'Bot parado',
+            'status': 'stopped',
+            'success': True
+        })
         
     except Exception as e:
         logging.error(f"❌ Erro ao parar bot: {e}")
@@ -113,14 +138,25 @@ def pause_bot():
     """Pause the real trading bot"""
     try:
         if not bot:
-            return jsonify({'error': 'Bot não inicializado', 'success': False}), 500
+            return jsonify({
+                'error': 'Bot não inicializado',
+                'success': False
+            }), 500
         
         # Call real pause method if exists
         if hasattr(bot, 'pause'):
             bot.pause()
-            return jsonify({'message': 'Bot pausado com sucesso', 'status': 'paused', 'success': True})
+            logging.info("⏸️ Bot PAUSADO")
+            return jsonify({
+                'message': 'Bot pausado',
+                'status': 'paused',
+                'success': True
+            })
         else:
-            return jsonify({'error': 'Método pause não disponível', 'success': False}), 400
+            return jsonify({
+                'error': 'Método pause não disponível',
+                'success': False
+            }), 400
             
     except Exception as e:
         logging.error(f"❌ Erro ao pausar bot: {e}")
@@ -131,10 +167,18 @@ def emergency_stop():
     """Emergency stop the bot"""
     try:
         if not bot:
-            return jsonify({'error': 'Bot não inicializado', 'success': False}), 500
+            return jsonify({
+                'error': 'Bot não inicializado',
+                'success': False
+            }), 500
         
         bot.stop()  # Force stop
-        return jsonify({'message': 'Parada de emergência executada', 'status': 'emergency_stopped', 'success': True})
+        logging.warning("🚨 PARADA DE EMERGÊNCIA ATIVADA")
+        return jsonify({
+            'message': 'Parada de emergência executada',
+            'status': 'emergency_stopped',
+            'success': True
+        })
         
     except Exception as e:
         logging.error(f"❌ Erro na parada de emergência: {e}")
@@ -145,7 +189,10 @@ def get_balance():
     """Get real account balance"""
     try:
         if not bot:
-            return jsonify({'error': 'Bot não inicializado'}), 500
+            return jsonify({
+                'error': 'Bot não inicializado',
+                'success': False
+            }), 500
         
         balance = bot.get_account_balance()
         return jsonify({
@@ -163,7 +210,6 @@ def get_balance():
 def get_logs():
     """Get logs from bot"""
     try:
-        # Return basic response since we don't simulate logs
         return jsonify({
             'message': 'Verifique os logs no console do servidor',
             'status': 'active',
@@ -178,11 +224,19 @@ def update_config():
     """Update bot configuration"""
     try:
         if not bot:
-            return jsonify({'error': 'Bot não inicializado', 'success': False}), 500
+            return jsonify({
+                'error': 'Bot não inicializado',
+                'success': False
+            }), 500
         
         data = request.get_json()
         bot.update_config(**data)
-        return jsonify({'message': 'Configuração atualizada', 'config': data, 'success': True})
+        logging.info(f"⚙️ Configuração atualizada: {data}")
+        return jsonify({
+            'message': 'Configuração atualizada',
+            'config': data,
+            'success': True
+        })
         
     except Exception as e:
         logging.error(f"❌ Erro ao atualizar config: {e}")
@@ -190,9 +244,11 @@ def update_config():
 
 if __name__ == '__main__':
     if bot:
-        logging.info("🚀 Trading Bot API iniciada com sucesso!")
+        logging.info("🚀 Trading Bot API iniciada - MODO PRODUÇÃO")
+        logging.info("💰 TRADING REAL ATIVO")
     else:
-        logging.error("❌ Falha ao inicializar Trading Bot - usando modo de teste")
+        logging.error("❌ FALHA CRÍTICA: Bot não pôde ser inicializado")
+        logging.error("❌ Verifique as credenciais no ambiente")
     
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
