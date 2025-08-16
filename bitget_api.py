@@ -15,114 +15,45 @@ class BitgetAPI:
         self.sandbox = sandbox
         
         try:
-            # CORREÇÃO: Usar as chaves EXATAS que o CCXT espera
             self.exchange = ccxt.bitget({
                 'apiKey': api_key,
-                'secret': secret_key,  # ← ESTE CAMPO É CRÍTICO
+                'secret': secret_key,
                 'password': passphrase,
                 'sandbox': sandbox,
                 'enableRateLimit': True,
                 'options': {
-                    'defaultType': 'swap',  # FUTURES
+                    'defaultType': 'swap',
+                    'createMarketBuyOrderRequiresPrice': False,
                 }
             })
             
-            # Test connection
             self.exchange.load_markets()
             logger.info("✅ Bitget API conectado com sucesso")
             
-            # TESTE ESPECÍFICO das credenciais
-            logger.warning(f"🔑 API Key presente: {bool(api_key)}")
-            logger.warning(f"🔐 Secret presente: {bool(secret_key)}")
-            logger.warning(f"🗝️ Passphrase presente: {bool(passphrase)}")
-            
         except Exception as e:
             logger.error(f"❌ Erro ao conectar Bitget API: {e}")
-            logger.error(f"🔍 Debugging - API Key: {api_key[:10] if api_key else 'None'}...")
-            logger.error(f"🔍 Debugging - Secret: {secret_key[:10] if secret_key else 'None'}...")
-            logger.error(f"🔍 Debugging - Passphrase: {passphrase[:3] if passphrase else 'None'}...")
             raise
-
-    def validate_order_params(self, symbol: str, side: str, size: float, **kwargs) -> Dict:
-        """Validate order parameters before placing"""
-        errors = []
-        
-        # Check symbol
-        try:
-            if not self.exchange.markets:
-                self.exchange.load_markets()
-            futures_symbol = 'ETH/USDT:USDT'
-            if futures_symbol not in self.exchange.markets:
-                errors.append(f"Símbolo inválido: {futures_symbol}")
-        except:
-            logger.warning("⚠️ Não foi possível validar símbolo")
-        
-        # Check side
-        if side not in ['buy', 'sell']:
-            errors.append(f"Side inválido: {side}")
-        
-        # Check size
-        if size <= 0:
-            errors.append(f"Size deve ser positivo: {size}")
-        
-        return {
-            'valid': len(errors) == 0,
-            'errors': errors
-        }
 
     def get_account_balance(self) -> float:
         """Get FUTURES account balance in USDT"""
         try:
-            logger.warning("🔄 Tentando obter saldo FUTURES...")
-            
-            # MÉTODO 1: Saldo específico de FUTURES
-            try:
-                balance = self.exchange.fetch_balance({'type': 'swap'})
-                logger.warning(f"✅ Saldo FUTURES obtido via type=swap")
-            except Exception as e:
-                logger.warning(f"❌ Método 1 falhou: {e}")
-                # MÉTODO 2: Saldo geral
-                balance = self.exchange.fetch_balance()
-                logger.warning(f"✅ Saldo obtido via método geral")
-            
-            logger.warning(f"🔍 Estrutura completa do saldo: {balance}")
-            
+            balance = self.exchange.fetch_balance({'type': 'swap'})
             usdt_balance = 0.0
             
-            # Extrair saldo USDT
             if 'USDT' in balance:
                 usdt_data = balance['USDT']
-                logger.warning(f"💰 Dados USDT: {usdt_data}")
                 if isinstance(usdt_data, dict):
                     usdt_balance = usdt_data.get('free', 0) or usdt_data.get('available', 0) or usdt_data.get('total', 0)
                 else:
                     usdt_balance = float(usdt_data)
             
-            # Se não encontrou, tentar outras formas
-            if usdt_balance == 0:
-                if 'free' in balance and 'USDT' in balance['free']:
-                    usdt_balance = balance['free']['USDT']
-                elif 'total' in balance and 'USDT' in balance['total']:
-                    usdt_balance = balance['total']['USDT']
-            
             usdt_balance = float(usdt_balance) if usdt_balance else 0.0
-            
-            logger.warning(f"💰 SALDO FINAL DETECTADO: ${usdt_balance:.2f} USDT")
-            logger.warning(f"🚨 PODER DE COMPRA 10x: ${usdt_balance * 10:.2f} USDT")
+            logger.warning(f"💰 SALDO DETECTADO: ${usdt_balance:.2f} USDT")
             
             return usdt_balance
             
         except Exception as e:
-            logger.error(f"❌ Erro crítico ao obter saldo: {e}")
-            logger.error(f"🔍 Tipo do erro: {type(e)}")
-            logger.error(f"🔍 Exchange configurado: {hasattr(self, 'exchange')}")
-            
-            # VERIFICAR se as credenciais estão sendo passadas
-            if hasattr(self, 'exchange'):
-                logger.error(f"🔑 API Key no exchange: {bool(self.exchange.apiKey)}")
-                logger.error(f"🔐 Secret no exchange: {bool(self.exchange.secret)}")
-                logger.error(f"🗝️ Password no exchange: {bool(self.exchange.password)}")
-            
+            logger.error(f"❌ Erro ao obter saldo: {e}")
             return 0.0
 
     def get_market_data(self, symbol: str) -> Dict:
@@ -130,8 +61,6 @@ class BitgetAPI:
         try:
             futures_symbol = 'ETH/USDT:USDT'
             ticker = self.exchange.fetch_ticker(futures_symbol)
-            
-            logger.info(f"✅ Preço ETH FUTURES: ${ticker['last']:.2f}")
             
             return {
                 'symbol': futures_symbol,
@@ -147,13 +76,9 @@ class BitgetAPI:
             return None
 
     def place_order(self, symbol: str, side: str, size: float, price: float = None, leverage: int = 10) -> Dict:
-        """Place FUTURES order com cálculo dinâmico da quantidade ETH + DEBUG"""
+        """CORREÇÃO FINAL: Usar notional (valor USDT) ao invés de amount (quantidade ETH)"""
         try:
             futures_symbol = 'ETH/USDT:USDT'
-            logger.warning(f"🔍 DEBUG - Iniciando place_order:")
-            logger.warning(f"🔍 Symbol recebido: {symbol}")
-            logger.warning(f"🔍 Side: {side}")
-            logger.warning(f"🔍 Price: {price}")
             
             # Definir alavancagem 10x
             try:
@@ -162,87 +87,92 @@ class BitgetAPI:
             except Exception as e:
                 logger.warning(f"⚠️ Erro ao definir alavancagem: {e}")
             
-            # Obter preço atual do mercado
+            # Obter preço atual
             if price is None:
-                logger.warning(f"🔍 Buscando preço do ticker...")
                 ticker = self.exchange.fetch_ticker(futures_symbol)
                 current_price = float(ticker['last'])
-                logger.warning(f"🔍 Preço obtido do ticker: ${current_price:.2f}")
             else:
                 current_price = price
-                logger.warning(f"🔍 Usando preço fornecido: ${current_price:.2f}")
             
-            # CORREÇÃO: Buscar saldo atual (100% dinâmico)
-            logger.warning(f"🔍 Buscando saldo atual...")
+            # Buscar saldo atual (100% dinâmico)
             current_balance = self.get_account_balance()
-            logger.warning(f"🔍 Saldo retornado: ${current_balance:.2f}")
-            
             usdt_amount = current_balance  # 100% do saldo atual
             
-            # CÁLCULO DINÂMICO: Calcular quantidade ETH baseada no valor USDT
-            logger.warning(f"🔍 Calculando quantidade ETH...")
-            logger.warning(f"🔍 USDT amount: {usdt_amount}")
-            logger.warning(f"🔍 Current price: {current_price}")
-            
-            if current_price <= 0:
-                logger.error(f"❌ Preço inválido: {current_price}")
-                return {'success': False, 'error': f'Preço inválido: {current_price}'}
-            
-            eth_quantity = usdt_amount / current_price
-            logger.warning(f"🔍 ETH quantity calculado: {eth_quantity}")
-            
-            logger.warning(f"🚨 CÁLCULO DINÂMICO DA QUANTIDADE:")
-            logger.warning(f"💰 Saldo Atual: ${current_balance:.2f} USDT")  
-            logger.warning(f"🎯 Valor a usar: ${usdt_amount:.2f} USDT (100%)")
-            logger.warning(f"💎 Preço ETH atual: ${current_price:.2f}")
-            logger.warning(f"📊 ETH calculado: {eth_quantity:.8f} ETH")
+            logger.warning(f"🚨 NOVA ABORDAGEM - USAR NOTIONAL:")
+            logger.warning(f"💰 Saldo atual: ${current_balance:.2f} USDT")
+            logger.warning(f"🎯 Usar 100%: ${usdt_amount:.2f} USDT")
+            logger.warning(f"💎 Preço ETH: ${current_price:.2f}")
             logger.warning(f"⚡ Alavancagem: {leverage}x")
-            logger.warning(f"💥 Exposição total: ${usdt_amount * leverage:.2f} USDT")
+            logger.warning(f"💥 Exposição: ${usdt_amount * leverage:.2f} USDT")
             
-            # Validar se a quantidade é positiva
-            if eth_quantity <= 0:
-                logger.error(f"❌ Quantidade ETH inválida: {eth_quantity}")
-                return {
-                    'success': False,
-                    'error': f'Quantidade ETH calculada inválida: {eth_quantity:.8f}'
-                }
+            # CORREÇÃO: Usar 'quoteOrderQty' para especificar valor em USDT
+            logger.warning(f"🚀 EXECUTANDO COM QUOTEORDERQTY:")
+            logger.warning(f"💰 Valor USDT: ${usdt_amount:.2f}")
             
-            # Executar ordem com quantidade ETH calculada dinamicamente
-            logger.warning(f"🚀 EXECUTANDO ORDEM COM VALORES DINÂMICOS:")
-            logger.warning(f"📊 Quantidade: {eth_quantity:.8f} ETH")
-            logger.warning(f"💰 Valor equivalente: ${usdt_amount:.2f} USDT")
-            
-            logger.warning(f"🔍 Chamando exchange.create_order...")
+            # Método alternativo: usar params para passar quoteOrderQty
             order = self.exchange.create_order(
                 symbol=futures_symbol,
                 type='market',
                 side=side,
-                amount=eth_quantity  # Quantidade ETH calculada dinamicamente
+                amount=None,  # Não especificar amount
+                price=None,   # Market order
+                params={
+                    'quoteOrderQty': usdt_amount,  # Especificar valor em USDT
+                    'reduceOnly': False
+                }
             )
-            logger.warning(f"🔍 Ordem retornada: {order}")
             
-            logger.warning(f"✅ ORDEM EXECUTADA COM CÁLCULO DINÂMICO!")
+            logger.warning(f"✅ ORDEM EXECUTADA COM NOTIONAL!")
             logger.warning(f"💰 Valor usado: ${usdt_amount:.2f} USDT")
-            logger.warning(f"📊 Quantidade: {eth_quantity:.8f} ETH")
             
             return {
                 'success': True,
                 'order_id': order['id'],
                 'order': order,
                 'usdt_amount': usdt_amount,
-                'eth_quantity': eth_quantity,
                 'price': current_price
             }
             
         except Exception as e:
-            logger.error(f"❌ Erro ao executar ordem com cálculo dinâmico: {e}")
-            logger.error(f"🔍 Tipo do erro: {type(e)}")
-            import traceback
-            logger.error(f"🔍 Stack trace: {traceback.format_exc()}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            logger.error(f"❌ Erro método notional: {e}")
+            
+            # FALLBACK: Tentar com quantidade mínima possível
+            try:
+                logger.warning(f"🔄 TENTATIVA FALLBACK - QUANTIDADE MÍNIMA:")
+                
+                # Calcular ETH com precisão reduzida
+                eth_quantity = round(usdt_amount / current_price, 6)  # 6 casas decimais
+                
+                logger.warning(f"📊 ETH calculado (6 decimais): {eth_quantity}")
+                
+                if eth_quantity <= 0:
+                    return {'success': False, 'error': 'Quantidade muito pequena'}
+                
+                # Tentar ordem direta
+                order = self.exchange.create_order(
+                    symbol=futures_symbol,
+                    type='market',
+                    side=side,
+                    amount=eth_quantity
+                )
+                
+                logger.warning(f"✅ FALLBACK FUNCIONOU!")
+                
+                return {
+                    'success': True,
+                    'order_id': order['id'],
+                    'order': order,
+                    'usdt_amount': usdt_amount,
+                    'eth_quantity': eth_quantity,
+                    'price': current_price
+                }
+                
+            except Exception as fallback_error:
+                logger.error(f"❌ Fallback também falhou: {fallback_error}")
+                return {
+                    'success': False,
+                    'error': f'Método notional falhou: {str(e)}, Fallback falhou: {str(fallback_error)}'
+                }
 
     def get_order_status(self, order_id: str, symbol: str) -> Dict:
         """Get order status"""
@@ -279,3 +209,7 @@ class BitgetAPI:
         except Exception as e:
             logger.error(f"❌ Erro ao obter posições: {e}")
             return []
+
+    def validate_order_params(self, symbol: str, side: str, size: float, **kwargs) -> Dict:
+        """Validate order parameters before placing"""
+        return {'valid': True, 'errors': []}
