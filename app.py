@@ -6,6 +6,7 @@ from datetime import datetime
 from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 from dotenv import load_dotenv
+
 from bitget_api import BitgetAPI
 from trading_bot import TradingBot
 
@@ -46,11 +47,11 @@ def ultra_fast_price_monitoring():
             if not bot:
                 time.sleep(0.01)
                 continue
-                
+            
             start_time = time.perf_counter()
             
             # Obter dados de mercado
-            market_data = bot.bitget_api.get_market_data('ethusdt_UMCBL')
+            market_data = bot.bitget_api.get_market_data('ETH/USDT:USDT')
             
             if market_data and 'price' in market_data:
                 current_price = float(market_data['price'])
@@ -179,7 +180,7 @@ def init_bot():
         # Initialize Trading Bot
         trading_bot = TradingBot(
             bitget_api=bitget_api,
-            symbol='ethusdt_UMCBL',
+            symbol='ETH/USDT:USDT',
             leverage=10,
             balance_percentage=100.0,  # 100% ABSOLUTO
             daily_target=200,
@@ -245,6 +246,7 @@ def start_bot():
             logging.warning("🎯 Monitoramento ultra-rápido iniciado")
         
         logging.warning("🟢 Bot iniciado - 100% ABSOLUTO + REINVESTIMENTO TOTAL")
+        
         return jsonify({
             'message': 'Bot iniciado - 100% ABSOLUTO do saldo + reinvestimento total',
             'status': 'running',
@@ -263,7 +265,7 @@ def test_100_percent():
         
         # Obter valores ATUAIS (sempre buscar dados frescos)
         current_balance = bot.get_account_balance()
-        market_data = bot.bitget_api.get_market_data('ethusdt_UMCBL')
+        market_data = bot.bitget_api.get_market_data('ETH/USDT:USDT')
         current_price = float(market_data['price'])
         
         # Calcular 100% ABSOLUTO
@@ -289,7 +291,7 @@ def current_values():
             return jsonify({'error': 'Bot não inicializado'}, 500)
         
         current_balance = bot.get_account_balance()
-        market_data = bot.bitget_api.get_market_data('ethusdt_UMCBL')
+        market_data = bot.bitget_api.get_market_data('ETH/USDT:USDT')
         current_price = float(market_data['price'])
         
         return jsonify({
@@ -308,9 +310,8 @@ def stop_bot():
     try:
         if bot:
             bot.stop()
-        
-        price_monitor['monitoring'] = False
-        logging.warning("🔴 Bot e monitoramento parados")
+            price_monitor['monitoring'] = False
+            logging.warning("🔴 Bot e monitoramento parados")
         
         return jsonify({'message': 'Bot parado', 'status': 'stopped', 'success': True})
         
@@ -337,9 +338,8 @@ def emergency_stop():
     try:
         if bot:
             bot.stop()
-        
-        price_monitor['monitoring'] = False
-        logging.warning("🚨 PARADA DE EMERGÊNCIA")
+            price_monitor['monitoring'] = False
+            logging.warning("🚨 PARADA DE EMERGÊNCIA")
         
         return jsonify({
             'message': 'Parada de emergência executada',
@@ -357,6 +357,7 @@ def get_balance():
             return jsonify({'error': 'Bot não inicializado', 'success': False}), 500
         
         balance = bot.get_account_balance()
+        
         return jsonify({
             'balance': balance,
             'currency': 'USDT',
@@ -383,25 +384,14 @@ def update_config():
             return jsonify({'error': 'Bot não inicializado', 'success': False}), 500
         
         data = request.get_json()
-        bot.update_config(**data)
-        return jsonify({
-            'message': 'Configuração atualizada',
-            'config': data,
-            'success': True
-        })
-        
+        if data:
+            bot.update_config(**data)
+            return jsonify({'message': 'Configuração atualizada', 'success': True})
+        else:
+            return jsonify({'error': 'Dados não fornecidos', 'success': False}), 400
+            
     except Exception as e:
         return jsonify({'error': str(e), 'success': False}), 500
 
 if __name__ == '__main__':
-    if bot:
-        logging.warning("🚀 MODO 100% ABSOLUTO DO SALDO")
-        logging.warning("💰 Sempre usa EXATAMENTE todo o saldo atual")
-        logging.warning("🔄 Reinveste 100% dos lucros automaticamente")
-        logging.warning("📊 Cálculo: saldo_atual ÷ preço_eth_atual")
-        logging.warning("⚡ Monitoramento ultra-rápido: 10ms")
-    else:
-        logging.error("❌ FALHA: Configure credenciais no Render.com")
-    
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(debug=True)
