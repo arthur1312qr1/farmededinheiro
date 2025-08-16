@@ -4,10 +4,8 @@ import logging
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import ccxt
 import threading
 import time
-import random
 import json
 
 # Configuração de logging
@@ -16,627 +14,317 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-
 logger = logging.getLogger(__name__)
 
-# ⚠️ TRADING REAL FUTURES - CONFIGURAÇÕES IMPORTANTES ⚠️
-PAPER_TRADING = False  # ❌ FALSE = SALDO REAL
-REAL_MONEY_MODE = True  # ✅ TRUE = USAR DINHEIRO REAL
-LEVERAGE = 10  # 🚨 ALAVANCAGEM 10x - CUIDADO!
-
-# Variáveis de ambiente para TRADING REAL
-api_key = os.environ.get('BITGET_API_KEY', '').strip()
-secret_key = os.environ.get('BITGET_API_SECRET', '').strip()
-passphrase = os.environ.get('BITGET_PASSPHRASE', '').strip()
-
-logger.warning("🚨 ⚠️ MODO TRADING REAL FUTURES ATIVADO ⚠️ 🚨")
-logger.warning("💰 ESTE BOT VAI USAR SEU DINHEIRO REAL!")
-logger.warning(f"🎯 80% DINÂMICO + ALAVANCAGEM {LEVERAGE}x!")
-logger.warning("⚠️ RISCO DE LIQUIDAÇÃO ALTO!")
-logger.info(f"🔍 Credenciais REAL: API={bool(api_key)} SECRET={bool(secret_key)} PASS={bool(passphrase)}")
-
-# Estado do bot - RESETADO PARA ZERO
-bot_state = {
-    'active': False,
-    'balance': 0.0,
-    'daily_trades': 0,
-    'total_trades': 0,
-    'daily_pnl': 0.0,
-    'total_pnl': 0.0,
-    'last_update': datetime.now(),
-    'start_time': None,
-    'uptime_hours': 0,
-    'connection_status': 'Desconectado',
-    'last_trade_time': None,
-    'trades_today': [],
-    'real_trades_executed': 0,
-    'last_trade_result': None,
-    'error_count': 0,
-    'eth_price': 0.0,
-    'eth_change_24h': 0.0,
-    'last_price_update': None,
-    'percentage_used': 80.0,
-    'last_trade_amount': 0.0,
-    'mode': f'FUTURES {LEVERAGE}x 💰',
-    'paper_trading': False,
-    'verified_real_trades': 0,
-    'last_error': None,
-    'leverage': LEVERAGE,
-    'trading_type': 'futures',
-    'calculated_order_value': 0.0,
-    'last_usdt_used': 0.0,
-    'last_eth_calculated': 0.0
-}
-
-class ETHBotFutures80Percent:
-    def __init__(self):
-        self.exchange = None
-        self.running = False
-        self.thread = None
-        self.price_thread = None
-        self.symbol = 'ETH/USDT'  # Futures symbol
-        self.percentage = 0.80  # 80% do saldo
-        self.leverage = LEVERAGE
-        self.real_trading = True
-
-    def setup_exchange_futures_real_money(self):
-        """🚨 SETUP EXCHANGE PARA FUTURES REAL 🚨"""
-        try:
-            if not api_key or not secret_key or not passphrase:
-                raise Exception("❌ CREDENCIAIS OBRIGATÓRIAS PARA TRADING REAL!")
-
-            logger.warning("🚨 CONFIGURANDO EXCHANGE PARA FUTURES REAL!")
-
-            # ✅ CONFIGURAÇÃO FUTURES REAL - SEM SANDBOX
-            self.exchange = ccxt.bitget({
-                'apiKey': api_key,
-                'secret': secret_key,
-                'password': passphrase,
-                'sandbox': False,  # ✅ FALSE = TRADING REAL
-                'enableRateLimit': True,
-                'options': {
-                    'defaultType': 'swap',  # 🚨 FUTURES/SWAP
-                    'createMarketBuyOrderRequiresPrice': False,
-                    'adjustForTimeDifference': True
-                },
-                'timeout': 30000
-            })
-
-            # ✅ DEFINIR ALAVANCAGEM
-            logger.warning(f"🚨 DEFININDO ALAVANCAGEM {self.leverage}x!")
-            try:
-                self.exchange.set_leverage(self.leverage, self.symbol, params={'marginCoin': 'USDT'})
-                logger.warning(f"✅ ALAVANCAGEM {self.leverage}x DEFINIDA!")
-            except Exception as lev_error:
-                logger.warning(f"⚠️ Erro definir alavancagem: {lev_error}")
-
-            # ✅ TESTE CONEXÃO COM SALDO REAL
-            logger.warning("💰 BUSCANDO SALDO FUTURES REAL...")
-            balance = self.exchange.fetch_balance({'type': 'swap'})
-            ticker = self.exchange.fetch_ticker(self.symbol)
-
-            # ✅ SALDO REAL USDT FUTURES
-            usdt_balance = balance.get('USDT', {}).get('free', 0.0)
-
-            if usdt_balance < 2:
-                logger.warning(f"⚠️ SALDO BAIXO: ${usdt_balance:.2f} USDT")
-
-            bot_state['eth_price'] = ticker['last']
-            bot_state['balance'] = usdt_balance
-
-            logger.warning("✅ CONECTADO AO FUTURES REAL!")
-            logger.warning(f"💰 SALDO FUTURES: ${usdt_balance:.2f} USDT")
-            logger.warning(f"💎 PREÇO ETH: ${ticker['last']:.2f}")
-            logger.warning(f"🎯 80% DINÂMICO: ${usdt_balance * 0.8:.2f} USDT")
-            logger.warning(f"🚨 ALAVANCAGEM: {self.leverage}x")
-            logger.warning("🚨 PRÓXIMO TRADE USARÁ DINHEIRO REAL!")
-
-            bot_state['connection_status'] = f'💰 CONECTADO - FUTURES {self.leverage}x'
-            return True
-
-        except Exception as e:
-            logger.error(f"❌ ERRO CONEXÃO FUTURES: {e}")
-            bot_state['connection_status'] = f'❌ Erro Futures: {str(e)}'
-            return False
-
-    def get_real_futures_balance(self):
-        """💰 BUSCAR SALDO REAL FUTURES"""
-        try:
-            logger.info("💰 Buscando saldo futures real...")
-            balance = self.exchange.fetch_balance({'type': 'swap'})
-
-            usdt_free = balance.get('USDT', {}).get('free', 0.0)
-            usdt_used = balance.get('USDT', {}).get('used', 0.0)
-            usdt_total = balance.get('USDT', {}).get('total', 0.0)
-
-            bot_state['balance'] = usdt_free
-
-            logger.info(f"💰 Saldo Livre: ${usdt_free:.2f}")
-            logger.info(f"🔒 Saldo Usado: ${usdt_used:.2f}")
-            logger.info(f"📊 Saldo Total: ${usdt_total:.2f}")
-            logger.info(f"🎯 80% Dinâmico: ${usdt_free * 0.8:.2f}")
-
-            return usdt_free
-        except Exception as e:
-            logger.error(f"❌ Erro buscar saldo futures: {e}")
-            return bot_state['balance']
-
-    def execute_FUTURES_trade_with_leverage(self):
-        """🚨 EXECUTAR TRADE FUTURES COM 80% DINÂMICO DO SALDO 🚨"""
-        try:
-            logger.warning("🚨 INICIANDO TRADE FUTURES COM 80% DINÂMICO!")
-
-            # ✅ BUSCAR SALDO REAL ATUAL (sempre atualizado)
-            current_balance = self.get_real_futures_balance()
-
-            # 🚨 VERIFICAR SALDO MÍNIMO
-            if current_balance < 1.5:
-                logger.warning(f"❌ SALDO INSUFICIENTE: ${current_balance:.2f} USDT")
-                bot_state['last_error'] = f"Saldo insuficiente: ${current_balance:.2f} USDT"
-                return False
-
-            # ✅ PREÇO ETH ATUAL
-            ticker = self.exchange.fetch_ticker(self.symbol)
-            current_price = ticker['last']
-            bot_state['eth_price'] = current_price
-
-            # 🎯 CALCULAR 80% DO SALDO ATUAL EM USDT (DINÂMICO)
-            usdt_to_use = current_balance * 0.80  # 80% do saldo ATUAL
-            
-            # ✅ CONVERTER USDT PARA QUANTIDADE ETH
-            eth_quantity = usdt_to_use / current_price
-            
-            # ✅ ARREDONDAR PARA 6 CASAS DECIMAIS (padrão Bitget)
-            eth_quantity = round(eth_quantity, 6)
-
-            # 📊 ATUALIZAR ESTADO COM CÁLCULOS
-            bot_state['calculated_order_value'] = usdt_to_use
-            bot_state['last_usdt_used'] = usdt_to_use
-            bot_state['last_eth_calculated'] = eth_quantity
-
-            logger.warning("🚨 CÁLCULO DINÂMICO 80% DO SALDO:")
-            logger.warning(f"💰 Saldo Atual: ${current_balance:.2f} USDT")
-            logger.warning(f"🎯 80% Dinâmico: ${usdt_to_use:.2f} USDT")
-            logger.warning(f"💎 Preço ETH: ${current_price:.2f}")
-            logger.warning(f"📊 ETH Calculado: {eth_quantity:.6f} ETH")
-            logger.warning(f"🚨 Alavancagem: {self.leverage}x")
-            logger.warning(f"💥 Exposição Total: ${usdt_to_use * self.leverage:.2f} USDT")
-
-            # ✅ EXECUTAR ORDEM FUTURES COM QUANTIDADE CALCULADA
-            logger.warning("💰 EXECUTANDO ORDEM FUTURES!")
-
-            try:
-                # USAR QUANTIDADE CALCULADA BASEADA EM 80% DO SALDO ATUAL
-                order = self.exchange.create_market_buy_order(
-                    symbol=self.symbol,
-                    amount=eth_quantity,  # QUANTIDADE BASEADA EM 80% DO SALDO ATUAL
-                    params={
-                        'type': 'swap',
-                        'marginCoin': 'USDT'
-                    }
-                )
-
-                order_id = order.get('id')
-                logger.warning(f"✅ ORDEM FUTURES CRIADA: {order_id}")
-
-            except Exception as order_error:
-                logger.error(f"❌ ORDEM FUTURES FALHOU: {order_error}")
-                bot_state['last_error'] = f"Falha execução futures: {str(order_error)[:100]}"
-                return False
-
-            order_id = order.get('id')
-
-            # ✅ AGUARDAR PROCESSAMENTO
-            time.sleep(5)
-
-            # ✅ VERIFICAR EXECUÇÃO FUTURES
-            try:
-                order_status = self.exchange.fetch_order(order_id, self.symbol)
-
-                logger.warning(f"📊 Status: {order_status.get('status')}")
-                logger.warning(f"💰 Filled: {order_status.get('filled', 0):.6f} ETH")
-                logger.warning(f"💲 Cost: ${order_status.get('cost', 0):.2f} USDT")
-
-                if order_status.get('status') == 'closed' and order_status.get('filled', 0) > 0:
-                    # ✅ TRADE FUTURES EXECUTADO
-                    filled_amount = order_status.get('filled', 0)
-                    cost_usd = order_status.get('cost', 0)
-
-                    # ✅ BUSCAR NOVO SALDO (PARA PRÓXIMO CÁLCULO DE 80%)
-                    time.sleep(3)
-                    new_balance = self.get_real_futures_balance()
-                    margin_used = current_balance - new_balance
-
-                    # ✅ REGISTRAR TRADE FUTURES
-                    trade_info = {
-                        'time': datetime.now(),
-                        'pair': self.symbol,
-                        'side': 'BUY',
-                        'amount': filled_amount,
-                        'value_usd': cost_usd,
-                        'margin_used': margin_used,
-                        'leverage': self.leverage,
-                        'total_exposure': cost_usd,
-                        'price': current_price,
-                        'order_id': order_id,
-                        'balance_before': current_balance,
-                        'balance_after': new_balance,
-                        'verified': True,
-                        'real_trade': True,
-                        'trading_type': 'futures',
-                        'exchange_status': order_status.get('status'),
-                        'method': '80_percent_dynamic',
-                        'usdt_used': usdt_to_use,
-                        'eth_calculated': eth_quantity,
-                        'percentage_used': 80.0
-                    }
-
-                    # ✅ ATUALIZAR CONTADORES
-                    bot_state['trades_today'].append(trade_info)
-                    bot_state['daily_trades'] += 1
-                    bot_state['real_trades_executed'] += 1
-                    bot_state['verified_real_trades'] += 1
-                    bot_state['total_trades'] += 1
-                    bot_state['last_trade_time'] = datetime.now()
-                    bot_state['last_trade_result'] = trade_info
-                    bot_state['last_trade_amount'] = margin_used
-                    bot_state['error_count'] = 0
-                    bot_state['last_error'] = None
-
-                    logger.warning("✅ TRADE FUTURES EXECUTADO COM 80% DINÂMICO!")
-                    logger.warning(f"📊 Order ID: {order_id}")
-                    logger.warning(f"🎯 USDT Usado (80%): ${usdt_to_use:.2f}")
-                    logger.warning(f"💰 Margem Real: ${margin_used:.2f} USDT")
-                    logger.warning(f"💥 Exposição: ${cost_usd:.2f} USDT")
-                    logger.warning(f"💎 ETH Executado: {filled_amount:.6f}")
-                    logger.warning(f"🚨 Alavancagem: {self.leverage}x")
-                    logger.warning(f"💰 Saldo Anterior: ${current_balance:.2f} USDT")
-                    logger.warning(f"💰 Novo Saldo: ${new_balance:.2f} USDT")
-                    logger.warning(f"🔄 Próximo trade usará 80% de ${new_balance:.2f}")
-
-                    return True
-
-                else:
-                    logger.warning(f"❌ ORDEM NÃO EXECUTADA: Status={order_status.get('status')}")
-                    bot_state['last_error'] = f"Ordem não executada: {order_status.get('status')}"
-                    return False
-
-            except Exception as status_error:
-                logger.error(f"❌ ERRO VERIFICAR STATUS: {status_error}")
-                bot_state['last_error'] = f"Erro verificar status: {str(status_error)[:100]}"
-                return False
-
-        except Exception as e:
-            logger.error(f"❌ ERRO CRÍTICO FUTURES: {e}")
-            bot_state['error_count'] += 1
-            bot_state['last_error'] = f"Erro crítico futures: {str(e)[:100]}"
-            return False
-
-    def update_eth_price(self):
-        """Atualizar preço ETH"""
-        try:
-            if not self.exchange:
-                return
-            ticker = self.exchange.fetch_ticker(self.symbol)
-            bot_state['eth_price'] = ticker['last']
-            bot_state['eth_change_24h'] = ticker.get('percentage', 0)
-            bot_state['last_price_update'] = datetime.now()
-        except Exception as e:
-            logger.error(f"❌ Erro atualizar preço: {e}")
-
-    def price_monitoring_loop(self):
-        """Loop de monitoramento de preços"""
-        while self.running:
-            try:
-                self.update_eth_price()
-                time.sleep(30)
-            except:
-                time.sleep(60)
-
-    def run_futures_trading_loop(self):
-        """🚨 LOOP PRINCIPAL FUTURES - 80% DINÂMICO 🚨"""
-        logger.warning("🚨 LOOP FUTURES TRADING INICIADO!")
-        logger.warning("🎯 80% DINÂMICO - REINVESTIMENTO AUTOMÁTICO!")
-        logger.warning("💰 ESTE BOT VAI USAR SEU DINHEIRO REAL!")
-        logger.warning(f"💥 COM ALAVANCAGEM {self.leverage}x!")
-
-        bot_state['start_time'] = datetime.now()
-
-        # Thread de preços
-        self.price_thread = threading.Thread(target=self.price_monitoring_loop)
-        self.price_thread.daemon = True
-        self.price_thread.start()
-
-        try:
-            while self.running:
-                logger.warning("🎯 CALCULANDO 80% DO SALDO ATUAL...")
-
-                # ✅ EXECUTAR TRADE COM 80% DINÂMICO
-                success = self.execute_FUTURES_trade_with_leverage()
-
-                if success:
-                    logger.warning("✅ TRADE EXECUTADO! SALDO ATUALIZADO PARA PRÓXIMO 80%!")
-                else:
-                    logger.warning("❌ TRADE FUTURES FALHOU")
-
-                # Aguardar próximo ciclo
-                wait_time = random.randint(120, 300)  # 2-5 minutos
-                logger.info(f"⏰ Aguardando {wait_time} segundos...")
-                time.sleep(wait_time)
-
-        except KeyboardInterrupt:
-            logger.warning("🛑 TRADING INTERROMPIDO PELO USUÁRIO")
-        except Exception as e:
-            logger.error(f"❌ ERRO NO LOOP TRADING: {e}")
-        finally:
-            logger.warning("🚨 BOT FUTURES PARADO!")
-
-    def start(self):
-        """Iniciar bot"""
-        if self.running:
-            return False
-
-        # ✅ SETUP EXCHANGE REAL
-        if not self.setup_exchange_futures_real_money():
-            return False
-
-        self.running = True
-        bot_state['active'] = True
-
-        # Thread principal
-        self.thread = threading.Thread(target=self.run_futures_trading_loop)
-        self.thread.daemon = True
-        self.thread.start()
-
-        logger.warning("🚀 BOT FUTURES (80% DINÂMICO) INICIADO!")
-        return True
-
-    def stop(self):
-        """Parar bot"""
-        self.running = False
-        bot_state['active'] = False
-        logger.warning("🛑 PARANDO BOT FUTURES...")
-
-
-# Instância global
-bot = ETHBotFutures80Percent()
-
-# Flask app
-app = Flask(__name__)
-CORS(app)
-
-logger.warning("🚨 INICIANDO SERVIDOR FUTURES (80% DINÂMICO)!")
-
-@app.route('/')
-def index():
-    """Dashboard"""
+# Importar nosso sistema de trading corrigido
+from trading_bot import TradingBot
+from bitget_api import BitgetAPI
+
+def create_app():
+    """Factory function para criar app Flask"""
+    app = Flask(__name__)
+    CORS(app)
+    
+    # Configurações do bot - CORRIGIDAS
+    config = {
+        'BITGET_API_KEY': os.environ.get('BITGET_API_KEY', '').strip(),
+        'BITGET_SECRET_KEY': os.environ.get('BITGET_API_SECRET', '').strip(),
+        'BITGET_PASSPHRASE': os.environ.get('BITGET_PASSPHRASE', '').strip(),
+        'GEMINI_API_KEY': os.environ.get('GEMINI_API_KEY', '').strip(),
+        'PAPER_TRADING': os.environ.get('PAPER_TRADING', 'true').lower() == 'true',
+        'SYMBOL': 'ethusdt_UMCBL',
+        'LEVERAGE': int(os.environ.get('LEVERAGE', '10')),
+        'TARGET_TRADES_PER_DAY': int(os.environ.get('TARGET_TRADES', '200')),
+        'BASE_CURRENCY': 'USDT'
+    }
+    
+    # Inicializar bot com configuração corrigida
     try:
-        # HTML do dashboard
-        html = f"""
+        trading_bot = TradingBot(config)
+        logger.info("✅ Trading Bot inicializado com configuração corrigida")
+    except Exception as e:
+        logger.error(f"❌ Erro ao inicializar Trading Bot: {e}")
+        trading_bot = None
+    
+    # Estado global do sistema - SIMPLIFICADO
+    app_state = {
+        'bot_active': False,
+        'last_update': datetime.now(),
+        'trades_today': 0,
+        'current_balance': 0.0,
+        'daily_pnl': 0.0,
+        'eth_price': 0.0,
+        'last_trade_time': None,
+        'error_count': 0,
+        'connection_status': 'Desconectado'
+    }
+    
+    @app.route('/')
+    def dashboard():
+        """Dashboard principal - SIMPLIFICADO"""
+        html = """
         <!DOCTYPE html>
         <html>
         <head>
-            <title>🚀 BOT FUTURES - 80% DINÂMICO</title>
+            <title>ETH Bot 80% - Corrigido</title>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
-                body {{ 
+                body { 
                     font-family: Arial, sans-serif; 
-                    background: linear-gradient(135deg, #1e3c72, #2a5298);
-                    color: white; 
-                    margin: 0; 
-                    padding: 20px;
-                }}
-                .container {{ 
-                    max-width: 1200px; 
-                    margin: 0 auto;
-                }}
-                .card {{ 
-                    background: rgba(255,255,255,0.1); 
-                    border-radius: 10px; 
+                    margin: 20px; 
+                    background: #1a1a1a; 
+                    color: #fff; 
+                }
+                .container { max-width: 1200px; margin: 0 auto; }
+                .header { text-align: center; margin-bottom: 30px; }
+                .status { 
                     padding: 20px; 
-                    margin: 10px 0;
-                    backdrop-filter: blur(10px);
-                }}
-                .grid {{ 
-                    display: grid; 
-                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
-                    gap: 20px;
-                }}
-                .status-active {{ color: #00ff00; }}
-                .status-inactive {{ color: #ff6b6b; }}
-                .btn {{ 
-                    background: #ff6b6b; 
-                    color: white; 
+                    border-radius: 10px; 
+                    margin: 10px 0; 
+                    background: #2d2d2d;
+                }
+                .active { background: #0d5f2a !important; }
+                .inactive { background: #5f0d0d !important; }
+                .controls { text-align: center; margin: 20px 0; }
+                button { 
+                    padding: 15px 30px; 
+                    margin: 0 10px; 
                     border: none; 
-                    padding: 10px 20px; 
                     border-radius: 5px; 
-                    cursor: pointer;
-                    font-size: 16px;
-                    margin: 5px;
-                }}
-                .btn:hover {{ background: #ff5252; }}
-                .btn-success {{ background: #4caf50; }}
-                .btn-success:hover {{ background: #45a049; }}
-                .warning {{ 
-                    background: rgba(255,193,7,0.2); 
-                    border-left: 4px solid #ffc107; 
+                    font-size: 16px; 
+                    cursor: pointer; 
+                }
+                .start-btn { background: #28a745; color: white; }
+                .stop-btn { background: #dc3545; color: white; }
+                .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; }
+                .metric { background: #2d2d2d; padding: 15px; border-radius: 8px; text-align: center; }
+                .logs { 
+                    background: #000; 
                     padding: 15px; 
-                    margin: 20px 0;
-                }}
-                .danger {{ 
-                    background: rgba(220,53,69,0.2); 
-                    border-left: 4px solid #dc3545; 
-                    padding: 15px; 
-                    margin: 20px 0;
-                }}
-                .success {{ 
-                    background: rgba(40,167,69,0.2); 
-                    border-left: 4px solid #28a745; 
-                    padding: 15px; 
-                    margin: 20px 0;
-                }}
-                h1 {{ text-align: center; font-size: 2.5em; margin-bottom: 30px; }}
-                h2 {{ color: #ffc107; }}
-                .metric {{ font-size: 1.5em; font-weight: bold; }}
-                .refresh {{ margin: 20px 0; text-align: center; }}
+                    border-radius: 8px; 
+                    height: 300px; 
+                    overflow-y: auto; 
+                    font-family: monospace; 
+                }
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>🚀 BOT FUTURES - 80% DINÂMICO</h1>
+                <div class="header">
+                    <h1>🤖 ETH Trading Bot - 80% Dinâmico</h1>
+                    <p>Sistema Corrigido - Valor Mínimo Validado</p>
+                </div>
                 
-                <div class="danger">
-                    <h3>⚠️ AVISO IMPORTANTE - TRADING REAL ⚠️</h3>
-                    <p>🚨 Este bot está configurado para TRADING REAL com ALAVANCAGEM {LEVERAGE}x</p>
-                    <p>🎯 O bot usa SEMPRE 80% do saldo ATUAL (reinvestimento automático)</p>
-                    <p>⚠️ RISCO DE LIQUIDAÇÃO MUITO ALTO!</p>
+                <div class="status inactive" id="status">
+                    <h3>Status: Bot Parado</h3>
+                    <p>Aguardando início do trading...</p>
                 </div>
-
-                <div class="success">
-                    <h3>🎯 CÁLCULO DINÂMICO 80%</h3>
-                    <p>💰 Saldo Atual: <span class="metric">${bot_state['balance']:.2f} USDT</span></p>
-                    <p>🎯 80% Atual: <span class="metric">${bot_state['balance'] * 0.8:.2f} USDT</span></p>
-                    <p>📊 ETH Calculado: <span class="metric">{bot_state['last_eth_calculated']:.6f} ETH</span></p>
-                    <p>💎 Preço ETH: <span class="metric">${bot_state['eth_price']:.2f}</span></p>
-                    <p>🔄 <strong>Próximo trade usará 80% do saldo ATUALIZADO</strong></p>
+                
+                <div class="controls">
+                    <button class="start-btn" onclick="startBot()">🚀 Iniciar Bot</button>
+                    <button class="stop-btn" onclick="stopBot()">🛑 Parar Bot</button>
                 </div>
-
-                <div class="grid">
-                    <div class="card">
-                        <h2>📊 Status do Bot</h2>
-                        <p>Status: <span class="{'status-active' if bot_state['active'] else 'status-inactive'}">{'🟢 ATIVO' if bot_state['active'] else '🔴 INATIVO'}</span></p>
-                        <p>Conexão: {bot_state['connection_status']}</p>
-                        <p>Modo: 80% Dinâmico + Reinvestimento</p>
-                        <p>Alavancagem: {bot_state['leverage']}x</p>
-                        <p>Tipo: Futures Real Money</p>
+                
+                <div class="metrics">
+                    <div class="metric">
+                        <h4>💰 Saldo</h4>
+                        <div id="balance">$0.00 USDT</div>
                     </div>
-
-                    <div class="card">
-                        <h2>💰 Saldo & Cálculos</h2>
-                        <p>Saldo Atual: <span class="metric">${bot_state['balance']:.2f} USDT</span></p>
-                        <p>80% Dinâmico: <span class="metric">${bot_state['balance'] * 0.8:.2f} USDT</span></p>
-                        <p>ETH Calculado: <span class="metric">{bot_state['last_eth_calculated']:.6f}</span></p>
-                        <p>Último USDT Usado: <span class="metric">${bot_state['last_usdt_used']:.2f}</span></p>
+                    <div class="metric">
+                        <h4>📊 Trades Hoje</h4>
+                        <div id="trades">0</div>
                     </div>
-
-                    <div class="card">
-                        <h2>📈 Estatísticas</h2>
-                        <p>Trades Hoje: <span class="metric">{bot_state['daily_trades']}</span></p>
-                        <p>Trades Reais: <span class="metric">{bot_state['real_trades_executed']}</span></p>
-                        <p>Total Trades: <span class="metric">{bot_state['total_trades']}</span></p>
-                        <p>Última Atividade: {bot_state['last_trade_time'].strftime('%H:%M:%S') if bot_state['last_trade_time'] else 'Nenhuma'}</p>
+                    <div class="metric">
+                        <h4>💎 Preço ETH</h4>
+                        <div id="eth-price">$0.00</div>
                     </div>
-
-                    <div class="card">
-                        <h2>⚠️ Status & Erros</h2>
-                        <p>Último Erro: {bot_state['last_error'] or 'Nenhum'}</p>
-                        <p>Contagem Erros: {bot_state['error_count']}</p>
-                        <p>Último Trade: ${bot_state['last_trade_amount']:.2f} USDT</p>
-                        <p>Preço Atualizado: {bot_state['last_price_update'].strftime('%H:%M:%S') if bot_state['last_price_update'] else 'Nunca'}</p>
+                    <div class="metric">
+                        <h4>📈 P&L Diário</h4>
+                        <div id="pnl">$0.00</div>
                     </div>
                 </div>
-
-                <div class="card">
-                    <h2>🎮 Controles</h2>
-                    <div style="text-align: center;">
-                        <button class="btn btn-success" onclick="startBot()">🚀 INICIAR BOT (80% DINÂMICO)</button>
-                        <button class="btn" onclick="stopBot()">🛑 PARAR BOT</button>
-                        <button class="btn" onclick="location.reload()">🔄 ATUALIZAR</button>
-                    </div>
-                </div>
-
-                <div class="refresh">
-                    <p>📊 Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
-                    <p>⚡ Auto-refresh em 30 segundos</p>
+                
+                <div class="logs" id="logs">
+                    <div>Sistema inicializado - Aguardando comandos...</div>
                 </div>
             </div>
-
+            
             <script>
-                function startBot() {{
-                    fetch('/start', {{method: 'POST'}})
-                    .then(response => response.json())
-                    .then(data => {{
-                        alert(data.message);
-                        setTimeout(() => location.reload(), 2000);
-                    }});
-                }}
-
-                function stopBot() {{
-                    fetch('/stop', {{method: 'POST'}})
-                    .then(response => response.json())
-                    .then(data => {{
-                        alert(data.message);
-                        setTimeout(() => location.reload(), 2000);
-                    }});
-                }}
-
-                // Auto-refresh
-                setTimeout(() => location.reload(), 30000);
+                function startBot() {
+                    fetch('/start', { method: 'POST' })
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data.success) {
+                                document.getElementById('status').className = 'status active';
+                                document.getElementById('status').innerHTML = '<h3>Status: Bot Ativo</h3><p>' + data.message + '</p>';
+                                addLog('✅ ' + data.message);
+                            } else {
+                                addLog('❌ ' + data.message);
+                            }
+                        });
+                }
+                
+                function stopBot() {
+                    fetch('/stop', { method: 'POST' })
+                        .then(r => r.json())
+                        .then(data => {
+                            document.getElementById('status').className = 'status inactive';
+                            document.getElementById('status').innerHTML = '<h3>Status: Bot Parado</h3><p>' + data.message + '</p>';
+                            addLog('🛑 ' + data.message);
+                        });
+                }
+                
+                function addLog(message) {
+                    const logs = document.getElementById('logs');
+                    const time = new Date().toLocaleTimeString();
+                    logs.innerHTML += '<div>' + time + ' - ' + message + '</div>';
+                    logs.scrollTop = logs.scrollHeight;
+                }
+                
+                function updateStatus() {
+                    fetch('/status')
+                        .then(r => r.json())
+                        .then(data => {
+                            document.getElementById('balance').textContent = '$' + (data.balance || 0).toFixed(2) + ' USDT';
+                            document.getElementById('trades').textContent = data.trades_today || 0;
+                            document.getElementById('eth-price').textContent = '$' + (data.eth_price || 0).toFixed(2);
+                            document.getElementById('pnl').textContent = '$' + (data.daily_pnl || 0).toFixed(2);
+                        })
+                        .catch(e => console.error('Erro ao atualizar status:', e));
+                }
+                
+                // Atualizar status a cada 5 segundos
+                setInterval(updateStatus, 5000);
+                updateStatus();
             </script>
         </body>
         </html>
         """
         return html
-    except Exception as e:
-        logger.error(f"❌ Erro carregar dashboard: {e}")
-        return f"❌ Erro: {e}"
 
-@app.route('/start', methods=['POST'])
-def start_bot():
-    """Iniciar trading"""
-    try:
-        logger.warning("🚨 RECEBIDO COMANDO PARA INICIAR FUTURES 80% DINÂMICO!")
-        logger.warning("🚨 VERIFICANDO CREDENCIAIS PARA FUTURES...")
-
-        if bot.start():
-            return jsonify({
-                'success': True,
-                'message': '🚀 Bot Futures (80% dinâmico + reinvestimento) iniciado!'
-            })
-        else:
+    @app.route('/start', methods=['POST'])
+    def start_bot():
+        """Iniciar trading usando nosso bot corrigido"""
+        try:
+            if trading_bot is None:
+                return jsonify({
+                    'success': False,
+                    'message': '❌ Bot não inicializado corretamente'
+                })
+            
+            if not trading_bot.is_running:
+                trading_bot.start()
+                app_state['bot_active'] = True
+                logger.info("🚀 Trading Bot iniciado via web interface")
+                
+                return jsonify({
+                    'success': True,
+                    'message': '🚀 Bot iniciado com sistema de 80% corrigido!'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': '⚠️ Bot já está em execução'
+                })
+                
+        except Exception as e:
+            logger.error(f"❌ Erro ao iniciar bot: {e}")
             return jsonify({
                 'success': False,
-                'message': '❌ Falha ao iniciar bot futures'
+                'message': f'❌ Erro: {str(e)}'
             })
-    except Exception as e:
-        logger.error(f"❌ Erro iniciar bot: {e}")
+
+    @app.route('/stop', methods=['POST'])
+    def stop_bot():
+        """Parar trading"""
+        try:
+            if trading_bot and trading_bot.is_running:
+                trading_bot.stop()
+                app_state['bot_active'] = False
+                logger.info("🛑 Trading Bot parado via web interface")
+                
+                return jsonify({
+                    'success': True,
+                    'message': '🛑 Bot parado com segurança'
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'message': '🛑 Bot já estava parado'
+                })
+                
+        except Exception as e:
+            logger.error(f"❌ Erro ao parar bot: {e}")
+            return jsonify({
+                'success': False,
+                'message': f'❌ Erro: {str(e)}'
+            })
+
+    @app.route('/status')
+    def get_status():
+        """Status do sistema"""
+        try:
+            if trading_bot:
+                # Obter dados do bot
+                bitget_api = BitgetAPI(
+                    api_key=config['BITGET_API_KEY'],
+                    secret_key=config['BITGET_SECRET_KEY'],
+                    passphrase=config['BITGET_PASSPHRASE'],
+                    sandbox=config['PAPER_TRADING']
+                )
+                
+                # Tentar obter saldo atual
+                try:
+                    balance = bitget_api.get_account_balance()
+                    app_state['current_balance'] = balance
+                except:
+                    pass
+                
+                # Tentar obter preço ETH
+                try:
+                    market_data = bitget_api.get_market_data(config['SYMBOL'])
+                    if market_data:
+                        app_state['eth_price'] = market_data.get('price', 0)
+                except:
+                    pass
+                
+                # Dados do bot
+                app_state.update({
+                    'bot_active': trading_bot.is_running,
+                    'trades_today': trading_bot.daily_trades,
+                    'daily_pnl': trading_bot.daily_pnl,
+                    'last_update': datetime.now().isoformat(),
+                    'connection_status': 'Conectado' if trading_bot.is_running else 'Desconectado'
+                })
+            
+            return jsonify(app_state)
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao obter status: {e}")
+            return jsonify({
+                'error': str(e),
+                'bot_active': False,
+                'balance': 0.0
+            })
+
+    @app.route('/health')
+    def health_check():
+        """Health check para monitoring"""
         return jsonify({
-            'success': False,
-            'message': f'❌ Erro: {str(e)}'
+            'status': 'OK',
+            'timestamp': datetime.now().isoformat(),
+            'bot_initialized': trading_bot is not None,
+            'bot_active': app_state['bot_active']
         })
 
-@app.route('/stop', methods=['POST'])
-def stop_bot():
-    """Parar trading"""
-    try:
-        bot.stop()
-        return jsonify({
-            'success': True,
-            'message': '🛑 Bot futures parado'
-        })
-    except Exception as e:
-        logger.error(f"❌ Erro parar bot: {e}")
-        return jsonify({
-            'success': False,
-            'message': f'❌ Erro: {str(e)}'
-        })
+    return app
 
-@app.route('/status')
-def get_status():
-    """Status do bot"""
-    return jsonify(bot_state)
-
-@app.route('/health')
-def health_check():
-    """Health check"""
-    return jsonify({
-        'status': 'OK',
-        'timestamp': datetime.now().isoformat(),
-        'bot_active': bot_state['active']
-    })
+# Criar aplicação
+app = create_app()
 
 if __name__ == '__main__':
     # Configurar para produção
     port = int(os.environ.get('PORT', 5000))
+    logger.info(f"🌐 Iniciando servidor Flask na porta {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
