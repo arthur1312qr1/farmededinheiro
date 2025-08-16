@@ -1,509 +1,305 @@
-"""
-Trading Bot Core Logic for Scalping Strategy
-Integrates with Bitget API and Gemini AI for automated trading
-"""
-
-import asyncio
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List
 import threading
-
 from bitget_api import BitgetAPI
 
 logger = logging.getLogger(__name__)
 
 class TradingBot:
-    def __init__(self, config: Dict[str, Any]):
-        """Initialize trading bot with configuration"""
-        self.config = config
-        self.is_running = False
-        self.is_paused = False
-        self.start_time = datetime.now()
-
+    def __init__(self, bitget_api: BitgetAPI, symbol: str = 'ethusdt_UMCBL', 
+                 leverage: int = 10, balance_percentage: float = 100.0,
+                 daily_target: int = 200, scalping_interval: int = 2, 
+                 paper_trading: bool = False):
+        """
+        Initialize Trading Bot
+        
+        Args:
+            bitget_api: BitgetAPI instance
+            symbol: Trading symbol
+            leverage: Leverage multiplier
+            balance_percentage: Percentage of balance to use (now 100%)
+            daily_target: Number of trades per day
+            scalping_interval: Seconds between trades
+            paper_trading: If True, simulate trades
+        """
+        self.bitget_api = bitget_api
+        self.symbol = symbol
+        self.leverage = leverage
+        self.balance_percentage = balance_percentage
+        self.daily_target = daily_target
+        self.scalping_interval = scalping_interval
+        self.paper_trading = paper_trading
+        
         # Trading state
+        self.is_running = False
+        self.trades_today = 0
         self.current_position = None
-        self.daily_trades = 0
-        self.daily_pnl = 0.0
-        self.total_volume = 0.0
-        self.win_rate = 0.0
-        self.successful_trades = 0
+        self.entry_price = None
+        self.position_side = None
+        self.profit_target = 0.01  # 1% profit target
+        
+        # Statistics
         self.total_trades = 0
-
-        # Initialize APIs
-        try:
-            self.bitget_api = BitgetAPI(
-                api_key=config.get('BITGET_API_KEY'),
-                secret_key=config.get('BITGET_SECRET_KEY'),
-                passphrase=config.get('BITGET_PASSPHRASE'),
-                sandbox=config.get('PAPER_TRADING', False)
-            )
-
-            # Gemini AI optional
-            gemini_key = config.get('GEMINI_API_KEY')
-            if gemini_key:
-                try:
-                    from gemini_handler import GeminiHandler
-                    self.gemini_ai = GeminiHandler(api_key=gemini_key)
-                except ImportError:
-                    logger.warning("⚠️ Gemini AI não disponível - continuando sem IA")
-                    self.gemini_ai = None
-            else:
-                self.gemini_ai = None
-
-            logger.info("✅ APIs inicializadas com sucesso")
-
-        except Exception as e:
-            logger.error(f"❌ Erro ao inicializar APIs: {e}")
-            raise
-
-        # Trading parameters
-        self.symbol = config.get('SYMBOL', 'ethusdt_UMCBL')
-        self.leverage = config.get('LEVERAGE', 10)
-        self.target_trades_per_day = config.get('TARGET_TRADES_PER_DAY', 200)
-        self.base_currency = config.get('BASE_CURRENCY', 'USDT')
-
-        # Risk management - 80% do saldo
-        self.stop_loss_pct = 0.02  # 2%
-        self.take_profit_pct = 0.01  # 1%
-        self.position_size_pct = 0.8  # 80% of balance per trade
-
-        # CORREÇÃO: Scalping ultra rápido
-        self.scalping_cooldown = 2  # 2 segundos entre trades
-        self.last_trade_time = None
-
-        # Valor mínimo da exchange
-        self.MIN_ORDER_USDT = 1.0
-
-        # Activity log
-        self.activity_log = []
-        self.max_log_entries = 100
-
+        self.profitable_trades = 0
+        self.total_profit = 0.0
+        self.start_balance = 0.0
+        
+        logger.info("✅ APIs inicializadas com sucesso")
         logger.info(f"🤖 Trading Bot configurado:")
         logger.info(f"   Símbolo: {self.symbol}")
         logger.info(f"   Alavancagem: {self.leverage}x")
-        logger.info(f"   Uso do saldo: {self.position_size_pct*100}%")
-        logger.info(f"   Meta diária: {self.target_trades_per_day} trades")
-        logger.info(f"   Scalping: {self.scalping_cooldown}s entre trades")
-        logger.info(f"   Paper Trading: {config.get('PAPER_TRADING', False)}")
+        logger.info(f"   Uso do saldo: {self.balance_percentage}%")
+        logger.info(f"   Meta diária: {self.daily_target} trades")
+        logger.info(f"   Scalping: {self.scalping_interval}s entre trades")
+        logger.info(f"   Paper Trading: {self.paper_trading}")
 
-    def validate_min_order_value(self, usdt_amount: float) -> bool:
-        """Valida se o valor da ordem atende ao mínimo da exchange"""
-        if usdt_amount < self.MIN_ORDER_USDT:
-            logger.warning(f"❌ Valor {usdt_amount:.2f} USDT abaixo do mínimo {self.MIN_ORDER_USDT} USDT")
+    def get_market_data(self) -> Dict:
+        """Get current market data"""
+        return self.bitget_api.get_market_data(self.symbol)
+
+    def get_account_balance(self) -> float:
+        """Get current account balance"""
+        return self.bitget_api.get_account_balance()
+
+    def execute_trade(self, side: str) -> Dict:
+        """Execute trade com cálculo 100% dinâmico"""
+        try:
+            logger.warning(f"🚀 INICIANDO TRADE {side.upper()}")
+            
+            # Buscar preço atual primeiro
+            market_data = self.bitget_api.get_market_data(self.symbol)
+            if not market_data:
+                logger.error("❌ Erro ao obter dados do mercado")
+                return {'success': False, 'error': 'Dados de mercado indisponíveis'}
+            
+            current_price = market_data['price']
+            logger.warning(f"💎 Preço ETH atual: ${current_price:.2f}")
+            
+            # Executar ordem com cálculo dinâmico
+            result = self.bitget_api.place_order(
+                symbol=self.symbol,
+                side=side,
+                size=0,  # Será ignorado - usamos cálculo dinâmico
+                price=current_price,
+                leverage=self.leverage
+            )
+            
+            if result['success']:
+                logger.warning(f"✅ TRADE {side.upper()} EXECUTADO!")
+                logger.warning(f"💰 Valor USDT: ${result.get('usdt_amount', 0):.2f}")
+                logger.warning(f"📊 Quantidade ETH: {result.get('eth_quantity', 0):.8f}")
+                logger.warning(f"💎 Preço: ${result.get('price', 0):.2f}")
+                
+                return result
+            else:
+                logger.error(f"❌ Erro no trade {side}: {result.get('error', 'Erro desconhecido')}")
+                return result
+                
+        except Exception as e:
+            logger.error(f"❌ Erro crítico ao executar trade {side}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def close_position(self) -> Dict:
+        """Close current position"""
+        try:
+            if not self.current_position:
+                return {'success': False, 'error': 'Nenhuma posição para fechar'}
+            
+            # Determine opposite side
+            close_side = 'sell' if self.position_side == 'buy' else 'buy'
+            
+            logger.warning(f"🔄 FECHANDO POSIÇÃO {self.position_side.upper()}")
+            
+            result = self.execute_trade(close_side)
+            
+            if result['success']:
+                # Calculate profit
+                current_price = result.get('price', 0)
+                if self.entry_price and current_price:
+                    if self.position_side == 'buy':
+                        profit_pct = ((current_price - self.entry_price) / self.entry_price) * 100
+                    else:
+                        profit_pct = ((self.entry_price - current_price) / self.entry_price) * 100
+                    
+                    logger.warning(f"💰 LUCRO: {profit_pct:.2f}%")
+                    
+                    if profit_pct > 0:
+                        self.profitable_trades += 1
+                        self.total_profit += profit_pct
+                
+                # Reset position
+                self.current_position = None
+                self.entry_price = None
+                self.position_side = None
+                
+                logger.warning(f"✅ POSIÇÃO FECHADA COM SUCESSO!")
+                
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao fechar posição: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def check_profit_target(self) -> bool:
+        """Check if profit target is reached"""
+        try:
+            if not self.current_position or not self.entry_price:
+                return False
+            
+            market_data = self.get_market_data()
+            if not market_data:
+                return False
+            
+            current_price = market_data['price']
+            
+            if self.position_side == 'buy':
+                profit_pct = ((current_price - self.entry_price) / self.entry_price)
+            else:
+                profit_pct = ((self.entry_price - current_price) / self.entry_price)
+            
+            if profit_pct >= self.profit_target:
+                logger.warning(f"🎯 META DE LUCRO ATINGIDA: {profit_pct*100:.2f}%")
+                return True
+                
             return False
-        return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao verificar meta de lucro: {e}")
+            return False
 
-    def add_log(self, action: str, message: str, level: str = "info", details: str = ""):
-        """Add log entry"""
-        log_entry = {
-            'timestamp': datetime.now(),
-            'action': action,
-            'message': message,
-            'level': level,
-            'details': details
-        }
-        
-        self.activity_log.append(log_entry)
-        
-        # Keep only recent entries
-        if len(self.activity_log) > self.max_log_entries:
-            self.activity_log = self.activity_log[-self.max_log_entries:]
+    def scalping_strategy(self):
+        """Rapid scalping strategy with 1% profit target"""
+        try:
+            logger.warning(f"🔥 EXECUTANDO ESTRATÉGIA DE SCALPING")
+            
+            # If no position, open one
+            if not self.current_position:
+                # Simple strategy: alternate buy/sell
+                side = 'buy' if self.trades_today % 2 == 0 else 'sell'
+                
+                logger.warning(f"🚀 ABRINDO POSIÇÃO {side.upper()}")
+                
+                result = self.execute_trade(side)
+                
+                if result['success']:
+                    self.current_position = result['order_id']
+                    self.entry_price = result.get('price', 0)
+                    self.position_side = side
+                    self.trades_today += 1
+                    self.total_trades += 1
+                    
+                    logger.warning(f"✅ POSIÇÃO ABERTA: {side.upper()}")
+                    logger.warning(f"💰 Preço entrada: ${self.entry_price:.2f}")
+                    logger.warning(f"📊 Trades hoje: {self.trades_today}/{self.daily_target}")
+                
+            else:
+                # Check if profit target reached
+                if self.check_profit_target():
+                    self.close_position()
+                    
+        except Exception as e:
+            logger.error(f"❌ Erro na estratégia de scalping: {e}")
 
-    def can_trade_now(self) -> bool:
-        """Verifica se pode fazer um novo trade (cooldown de 2 segundos)"""
-        if self.last_trade_time is None:
-            return True
+    def run_trading_loop(self):
+        """Main trading loop"""
+        logger.warning(f"🚀 Trading bot iniciado")
         
-        time_diff = (datetime.now() - self.last_trade_time).total_seconds()
-        return time_diff >= self.scalping_cooldown
+        # Get starting balance
+        self.start_balance = self.get_account_balance()
+        logger.warning(f"💰 Saldo inicial: ${self.start_balance:.2f} USDT")
+        
+        while self.is_running:
+            try:
+                # Check if daily target reached
+                if self.trades_today >= self.daily_target:
+                    logger.warning(f"🎯 META DIÁRIA ATINGIDA: {self.trades_today} trades")
+                    logger.warning(f"😴 Aguardando próximo dia...")
+                    time.sleep(60)  # Check every minute
+                    
+                    # Reset daily counter at midnight (simplified)
+                    current_hour = datetime.now().hour
+                    if current_hour == 0:
+                        self.trades_today = 0
+                        logger.warning(f"🌅 NOVO DIA - Contador zerado")
+                    
+                    continue
+                
+                # Execute scalping strategy
+                self.scalping_strategy()
+                
+                # Wait for next iteration
+                logger.warning(f"⏱️ Aguardando {self.scalping_interval}s para próximo trade...")
+                time.sleep(self.scalping_interval)
+                
+            except Exception as e:
+                logger.error(f"❌ Erro no loop de trading: {e}")
+                time.sleep(5)  # Wait 5 seconds on error
+                
+            except KeyboardInterrupt:
+                logger.warning(f"🛑 Bot interrompido pelo usuário")
+                self.stop()
+                break
 
     def start(self):
         """Start the trading bot"""
         if self.is_running:
-            logger.warning("⚠️ Bot já está em execução")
+            logger.warning(f"⚠️ Bot já está rodando")
             return
-
+        
         self.is_running = True
-        self.is_paused = False
-        self.start_time = datetime.now()
-
+        
         # Start trading loop in separate thread
-        self.trading_thread = threading.Thread(target=self._trading_loop, daemon=True)
-        self.trading_thread.start()
-
-        self.add_log("SISTEMA", "Trading bot iniciado com sucesso", "success")
-        logger.info("🚀 Trading bot iniciado")
+        trading_thread = threading.Thread(target=self.run_trading_loop, daemon=True)
+        trading_thread.start()
+        
+        logger.warning(f"✅ Trading bot iniciado com sucesso!")
 
     def stop(self):
         """Stop the trading bot"""
         self.is_running = False
-        self.is_paused = False
-
+        
         # Close any open positions
         if self.current_position:
+            logger.warning(f"🔄 Fechando posição aberta...")
             self.close_position()
-
-        self.add_log("SISTEMA", "Trading bot parado", "info")
-        logger.info("🛑 Trading bot parado")
-
-    def pause(self):
-        """Pause/Resume the trading bot"""
-        self.is_paused = not self.is_paused
-        status = "pausado" if self.is_paused else "retomado"
-        self.add_log("SISTEMA", f"Trading bot {status}", "warning" if self.is_paused else "success")
-        logger.info(f"⏸️ Trading bot {status}")
-
-    def emergency_stop(self):
-        """Emergency stop - close all positions immediately"""
-        logger.warning("🚨 PARADA DE EMERGÊNCIA ATIVADA")
-        self.stop()
-        self.add_log("EMERGÊNCIA", "Parada de emergência ativada - todas as posições fechadas", "error")
-
-    def close_position(self):
-        """Fechar posição atual manualmente"""
-        if not self.current_position:
-            return
         
-        try:
-            # Obter preço atual
-            market_data = self.bitget_api.get_market_data(self.symbol)
-            if market_data:
-                current_price = market_data.get('price', 0)
-                self._force_close_position(current_price, "FECHAMENTO_MANUAL")
-        except Exception as e:
-            logger.error(f"❌ Erro ao fechar posição: {e}")
-
-    def _trading_loop(self):
-        """Main trading loop - CORRIGIDO PARA SCALPING RÁPIDO"""
-        while self.is_running:
-            try:
-                if self.is_paused:
-                    time.sleep(2)
-                    continue
-
-                # Check if we've reached daily trade limit
-                if self.daily_trades >= self.target_trades_per_day:
-                    logger.info("📈 Meta diária de trades atingida")
-                    time.sleep(60)
-                    continue
-
-                # Get market analysis
-                analysis = self._get_market_analysis()
-
-                if analysis:
-                    # Execute trading logic based on analysis
-                    self._execute_trading_logic(analysis)
-
-                # CORREÇÃO: Sleep muito menor para scalping ultra rápido
-                time.sleep(1)  # 1 segundo entre verificações
-
-            except Exception as e:
-                logger.error(f"❌ Erro no loop de trading: {e}")
-                self.add_log("ERRO", f"Erro no sistema: {str(e)}", "error")
-                time.sleep(10)
-
-    def _get_market_analysis(self) -> Optional[Dict]:
-        """Get market analysis from Gemini AI and technical indicators"""
-        try:
-            # Get current price and market data
-            market_data = self.bitget_api.get_market_data(self.symbol)
-            if not market_data:
-                return None
-
-            # Get AI analysis if available
-            ai_analysis = {}
-            if self.gemini_ai:
-                try:
-                    ai_analysis = self.gemini_ai.analyze_market(
-                        symbol=self.symbol,
-                        market_data=market_data
-                    )
-                except Exception as e:
-                    logger.warning(f"⚠️ IA indisponível: {e}")
-                    ai_analysis = {'sentiment': 'neutral', 'confidence': 0.5}
-            else:
-                # Mock analysis if no AI
-                ai_analysis = {'sentiment': 'neutral', 'confidence': 0.5}
-
-            # Combine with technical analysis
-            technical_analysis = self._calculate_technical_indicators(market_data)
-
-            analysis = {
-                'timestamp': datetime.now(),
-                'price': market_data.get('price', 0),
-                'volume': market_data.get('volume', 0),
-                'ai_analysis': ai_analysis,
-                'technical': technical_analysis,
-                'signal': self._generate_signal(ai_analysis, technical_analysis)
-            }
-
-            return analysis
-
-        except Exception as e:
-            logger.error(f"❌ Erro na análise de mercado: {e}")
-            return None
-
-    def _calculate_technical_indicators(self, market_data: Dict) -> Dict:
-        """Calculate technical indicators (RSI, MACD, etc.)"""
-        price = market_data.get('price', 0)
-        volume = market_data.get('volume', 0)
-
-        # Mock technical indicators for demo
-        return {
-            'rsi': 32.5,  # Oversold
-            'macd_signal': 'bullish_crossover',
-            'volume_status': 'high' if volume > 1000000 else 'normal',
-            'support_level': price * 0.98,
-            'resistance_level': price * 1.02,
-            'trend': 'bullish'
-        }
-
-    def _generate_signal(self, ai_analysis: Dict, technical: Dict) -> str:
-        """Generate trading signal based on AI and technical analysis - CORRIGIDO PARA SCALPING"""
-        try:
-            # CORREÇÃO: Permitir novos sinais mesmo com posição (para scalping rápido)
-            
-            # AI sentiment
-            ai_sentiment = ai_analysis.get('sentiment', 'neutral')
-            ai_confidence = ai_analysis.get('confidence', 0)
-
-            # Technical indicators
-            rsi = technical.get('rsi', 50)
-            macd_signal = technical.get('macd_signal', 'neutral')
-            volume_status = technical.get('volume_status', 'normal')
-
-            # Generate signal
-            bullish_signals = 0
-            bearish_signals = 0
-
-            # AI analysis
-            if ai_sentiment == 'bullish' and ai_confidence > 0.7:
-                bullish_signals += 2
-            elif ai_sentiment == 'bearish' and ai_confidence > 0.7:
-                bearish_signals += 2
-
-            # RSI
-            if rsi < 35:  # Oversold
-                bullish_signals += 1
-            elif rsi > 65:  # Overbought
-                bearish_signals += 1
-
-            # MACD
-            if macd_signal == 'bullish_crossover':
-                bullish_signals += 1
-            elif macd_signal == 'bearish_crossover':
-                bearish_signals += 1
-
-            # Volume confirmation
-            if volume_status == 'high':
-                if bullish_signals > bearish_signals:
-                    bullish_signals += 1
-                elif bearish_signals > bullish_signals:
-                    bearish_signals += 1
-
-            # Decision logic
-            if bullish_signals >= 3 and bullish_signals > bearish_signals:
-                return 'buy'
-            elif bearish_signals >= 3 and bearish_signals > bullish_signals:
-                return 'sell'
-            else:
-                return 'hold'
-
-        except Exception as e:
-            logger.error(f"❌ Erro ao gerar sinal: {e}")
-            return 'hold'
-
-    def _execute_trading_logic(self, analysis: Dict):
-        """Execute trading based on analysis - CORRIGIDO"""
-        signal = analysis.get('signal', 'hold')
-        price = analysis.get('price', 0)
-
-        # CORREÇÃO: Verificar take profit/stop loss primeiro
-        if self.current_position:
-            self._check_stop_loss_take_profit(price)
-
-        # CORREÇÃO: Permitir novos trades após cooldown (scalping)
-        if signal == 'buy' and self.can_trade_now():
-            # Se já tem posição, fecha antes de abrir nova (para scalping)
-            if self.current_position:
-                self._force_close_position(price, "SCALPING_NOVA_ENTRADA")
-                time.sleep(0.5)  # Pequeno delay
-            
-            self._execute_buy_order(price, analysis)
-
-    def _execute_buy_order(self, price: float, analysis: Dict):
-        """Execute buy order - CORRIGIDO PARA 80% DO SALDO"""
-        try:
-            # Calculate position size
-            account_balance = self.bitget_api.get_account_balance()
-
-            # CORREÇÃO: Usar 80% do saldo em USDT
-            usdt_80_percent = account_balance * self.position_size_pct  # 80% do saldo
-
-            # Verificar valor mínimo
-            if not self.validate_min_order_value(usdt_80_percent):
-                self.add_log("ERRO", f"Valor insuficiente: ${usdt_80_percent:.2f} < ${self.MIN_ORDER_USDT} USDT", "error")
-                logger.warning(f"⏰ Aguardando saldo suficiente...")
-                return
-
-            # Calcular quantidade ETH (apenas para logs)
-            quantity = usdt_80_percent / price
-
-            # Logs detalhados
-            logger.warning(f"🚨 CÁLCULO DINÂMICO 80% DO SALDO:")
-            logger.warning(f"💰 Saldo Atual: ${account_balance:.2f} USDT")
-            logger.warning(f"🎯 80% Dinâmico: ${usdt_80_percent:.2f} USDT")
-            logger.warning(f"💎 Preço ETH: ${price:.2f}")
-            logger.warning(f"📊 ETH Calculado: {quantity:.6f} ETH")
-            logger.warning(f"🚨 Alavancagem: {self.leverage}x")
-            logger.warning(f"💥 Exposição Total: ${usdt_80_percent * self.leverage:.2f} USDT")
-            logger.warning(f"💰 EXECUTANDO ORDEM FUTURES!")
-
-            # Calculate stop loss and take profit
-            stop_loss = price * (1 - self.stop_loss_pct)
-            take_profit = price * (1 + self.take_profit_pct)
-
-            # Execute order com valor USDT
-            order_result = self.bitget_api.place_order(
-                symbol=self.symbol,
-                side='buy',
-                size=usdt_80_percent,  # USAR VALOR USDT
-                price=price,
-                leverage=self.leverage
-            )
-
-            if order_result and order_result.get('success'):
-                self.current_position = {
-                    'side': 'long',
-                    'entry_price': price,
-                    'quantity': quantity,
-                    'usdt_value': usdt_80_percent,
-                    'stop_loss': stop_loss,
-                    'take_profit': take_profit,
-                    'timestamp': datetime.now(),
-                    'order_id': order_result.get('order_id')
-                }
-
-                # Atualizar timestamp do último trade
-                self.last_trade_time = datetime.now()
-
-                self.daily_trades += 1
-                self.total_trades += 1
-                self.total_volume += usdt_80_percent
-
-                self.add_log(
-                    "COMPRA EXECUTADA",
-                    f"ETH/USDT - Valor: ${usdt_80_percent:.2f} - Preço: ${price:.2f}",
-                    "success",
-                    f"Stop Loss: ${stop_loss:.2f} | Take Profit: ${take_profit:.2f}"
-                )
-
-                logger.warning(f"✅ ORDEM COMPRA EXECUTADA: ${usdt_80_percent:.2f} USDT @ ${price:.2f}")
-                logger.warning(f"🎯 TAKE PROFIT: ${take_profit:.2f} (+1%)")
-                logger.warning(f"🛑 STOP LOSS: ${stop_loss:.2f} (-2%)")
-            else:
-                error_msg = order_result.get('error', 'Erro desconhecido') if order_result else 'Falha na comunicação'
-                logger.error(f"❌ ORDEM FUTURES FALHOU: bitget {error_msg}")
-
-        except Exception as e:
-            logger.error(f"❌ Erro ao executar ordem de compra: {e}")
-            self.add_log("ERRO", f"Falha na execução da compra: {str(e)}", "error")
-
-    def _check_stop_loss_take_profit(self, current_price: float):
-        """CORRIGIDO: Verificar stop loss e take profit"""
-        if not self.current_position:
-            return
-
-        try:
-            entry_price = self.current_position.get('entry_price', 0)
-            stop_loss = self.current_position.get('stop_loss', 0)
-            take_profit = self.current_position.get('take_profit', 0)
-            
-            # Calcular P&L atual
-            pnl_percent = ((current_price - entry_price) / entry_price) * 100
-            
-            logger.info(f"📊 MONITORAMENTO P&L: {pnl_percent:.2f}% | Preço: ${current_price:.2f}")
-            
-            # TAKE PROFIT: Fechar se atingiu 1% de lucro
-            if current_price >= take_profit:
-                logger.warning(f"🎯 TAKE PROFIT ATINGIDO! {pnl_percent:.2f}%")
-                self._force_close_position(current_price, "TAKE_PROFIT")
-                return
-            
-            # STOP LOSS: Fechar se perdeu 2%
-            if current_price <= stop_loss:
-                logger.warning(f"🛑 STOP LOSS ATINGIDO! {pnl_percent:.2f}%")
-                self._force_close_position(current_price, "STOP_LOSS")
-                return
-                
-        except Exception as e:
-            logger.error(f"❌ Erro ao verificar stop/take profit: {e}")
-
-    def _force_close_position(self, price: float, reason: str):
-        """Forçar fechamento da posição atual"""
-        try:
-            if not self.current_position:
-                return
-
-            quantity = self.current_position.get('quantity', 0)
-            entry_price = self.current_position.get('entry_price', 0)
-            usdt_value = self.current_position.get('usdt_value', 0)
-
-            # Executar ordem de venda
-            order_result = self.bitget_api.place_order(
-                symbol=self.symbol,
-                side='sell',
-                size=usdt_value,  # Mesmo valor da compra
-                price=price,
-                leverage=self.leverage
-            )
-
-            if order_result and order_result.get('success'):
-                # Calcular P&L
-                pnl_percent = ((price - entry_price) / entry_price) * 100
-                pnl_usdt = usdt_value * (pnl_percent / 100)
-
-                self.daily_pnl += pnl_usdt
-                if pnl_usdt > 0:
-                    self.successful_trades += 1
-
-                self.add_log(
-                    f"VENDA - {reason}",
-                    f"ETH/USDT - P&L: ${pnl_usdt:.2f} ({pnl_percent:.2f}%)",
-                    "success" if pnl_usdt > 0 else "warning",
-                    f"Entrada: ${entry_price:.2f} | Saída: ${price:.2f}"
-                )
-
-                logger.warning(f"✅ POSIÇÃO FECHADA - {reason}")
-                logger.warning(f"💰 P&L: ${pnl_usdt:.2f} USDT ({pnl_percent:.2f}%)")
-                
-                # Resetar posição
-                self.current_position = None
-                self.last_trade_time = datetime.now()
-
-            else:
-                error_msg = order_result.get('error', 'Erro desconhecido') if order_result else 'Falha na comunicação'
-                logger.error(f"❌ ERRO AO FECHAR POSIÇÃO: {error_msg}")
-
-        except Exception as e:
-            logger.error(f"❌ Erro ao fechar posição forçadamente: {e}")
+        logger.warning(f"🛑 Trading bot parado")
+        
+        # Print final statistics
+        current_balance = self.get_account_balance()
+        total_return = ((current_balance - self.start_balance) / self.start_balance) * 100 if self.start_balance > 0 else 0
+        
+        logger.warning(f"📊 ESTATÍSTICAS FINAIS:")
+        logger.warning(f"   💰 Saldo inicial: ${self.start_balance:.2f} USDT")
+        logger.warning(f"   💰 Saldo final: ${current_balance:.2f} USDT")
+        logger.warning(f"   📈 Retorno total: {total_return:.2f}%")
+        logger.warning(f"   🎯 Total de trades: {self.total_trades}")
+        logger.warning(f"   ✅ Trades lucrativos: {self.profitable_trades}")
+        logger.warning(f"   📊 Taxa de acerto: {(self.profitable_trades/self.total_trades)*100:.1f}%" if self.total_trades > 0 else "   📊 Taxa de acerto: 0%")
 
     def get_status(self) -> Dict:
         """Get current bot status"""
-        uptime = (datetime.now() - self.start_time).total_seconds() if self.start_time else 0
+        current_balance = self.get_account_balance()
         
         return {
             'is_running': self.is_running,
-            'is_paused': self.is_paused,
-            'uptime': uptime,
-            'current_position': self.current_position,
-            'daily_trades': self.daily_trades,
-            'daily_pnl': self.daily_pnl,
-            'total_volume': self.total_volume,
-            'win_rate': (self.successful_trades / self.total_trades * 100) if self.total_trades > 0 else 0,
-            'successful_trades': self.successful_trades,
+            'trades_today': self.trades_today,
+            'daily_target': self.daily_target,
             'total_trades': self.total_trades,
-            'activity_log': self.activity_log[-10:]  # Last 10 entries
+            'profitable_trades': self.profitable_trades,
+            'current_balance': current_balance,
+            'start_balance': self.start_balance,
+            'current_position': bool(self.current_position),
+            'position_side': self.position_side,
+            'entry_price': self.entry_price,
+            'profit_target': self.profit_target * 100  # Convert to percentage
         }
+
+    def update_config(self, **kwargs):
+        """Update bot configuration"""
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+                logger.warning(f"✅ Configuração atualizada: {key} = {value}")
