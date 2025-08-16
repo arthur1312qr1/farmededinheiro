@@ -4,13 +4,16 @@ import time
 from decimal import Decimal, ROUND_DOWN
 
 class BitgetAPI:
-    def __init__(self, api_key=None, secret_key=None, passphrase=None):
-        """Inicializa com nomes corretos das credenciais"""
+    def __init__(self, api_key=None, secret_key=None, passphrase=None, sandbox=None, **kwargs):
+        """Inicializa com todos os parâmetros possíveis"""
         
-        # Mapear nomes corretos
+        # Mapear nomes corretos das credenciais
         self.api_key = api_key or os.getenv('BITGET_API_KEY')
-        self.secret = secret_key or os.getenv('BITGET_SECRET')  # secret_key -> secret
+        self.secret = secret_key or os.getenv('BITGET_SECRET')
         self.passphrase = passphrase or os.getenv('BITGET_PASSPHRASE')
+        
+        # Modo sandbox (sempre False para trading real)
+        self.sandbox = False  # SEMPRE TRADING REAL
         
         if not all([self.api_key, self.secret, self.passphrase]):
             raise Exception("❌ Credenciais não encontradas")
@@ -20,7 +23,7 @@ class BitgetAPI:
             'apiKey': self.api_key,
             'secret': self.secret,
             'password': self.passphrase,
-            'sandbox': False,  # TRADING REAL
+            'sandbox': self.sandbox,  # TRADING REAL
             'enableRateLimit': True,
             'options': {
                 'defaultType': 'swap'  # Futures
@@ -79,7 +82,7 @@ class BitgetAPI:
         if eth_quantity < 0.01:
             eth_quantity = 0.01
             
-        print(f"💪 Cálculo DEFINITIVO:")
+        print(f"💪 Cálculo FINAL:")
         print(f"   Saldo: ${usdt_balance:.6f} USDT")
         print(f"   Alavancagem: {leverage}x")
         print(f"   Poder de compra: ${buying_power:.2f} USDT")
@@ -238,15 +241,18 @@ class BitgetAPI:
             print(f"❌ Erro de conexão: {e}")
             return False
 
-# Função para compatibilidade com código existente
+    # Métodos antigos para compatibilidade
+    def place_order(self, side='buy'):
+        """Compatibilidade com código antigo"""
+        if side == 'buy':
+            return self.place_buy_order()
+        else:
+            return self.place_sell_order()
+
+# Função para compatibilidade total
 def create_bitget_api():
     """Cria instância da BitgetAPI usando variáveis de ambiente"""
     return BitgetAPI()
-
-# Para compatibilidade com diferentes formas de chamada
-def BitgetAPI_old_style(api_key, secret_key, passphrase):
-    """Compatibilidade com estilo antigo de inicialização"""
-    return BitgetAPI(api_key=api_key, secret_key=secret_key, passphrase=passphrase)
 
 # Testar se executado diretamente
 if __name__ == "__main__":
