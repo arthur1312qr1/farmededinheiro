@@ -51,7 +51,6 @@ class BitgetAPI:
         try:
             if not self.exchange.markets:
                 self.exchange.load_markets()
-            
             futures_symbol = 'ETH/USDT:USDT'
             if futures_symbol not in self.exchange.markets:
                 errors.append(f"Símbolo inválido: {futures_symbol}")
@@ -94,7 +93,6 @@ class BitgetAPI:
             if 'USDT' in balance:
                 usdt_data = balance['USDT']
                 logger.warning(f"💰 Dados USDT: {usdt_data}")
-                
                 if isinstance(usdt_data, dict):
                     usdt_balance = usdt_data.get('free', 0) or usdt_data.get('available', 0) or usdt_data.get('total', 0)
                 else:
@@ -170,6 +168,17 @@ class BitgetAPI:
             # Cálculos
             quote_amount = size  # Valor em USDT (80% do saldo)
             base_amount = quote_amount / current_price  # Quantidade ETH
+            
+            # CORREÇÃO: Validar quantidade mínima antes de executar ordem
+            MIN_ETH_AMOUNT = 0.01  # Mínimo exigido pela Bitget
+            
+            if base_amount < MIN_ETH_AMOUNT:
+                # Ajustar para quantidade mínima
+                base_amount = MIN_ETH_AMOUNT
+                quote_amount = base_amount * current_price
+                logger.warning(f"⚡ AJUSTADO PARA QUANTIDADE MÍNIMA:")
+                logger.warning(f"📊 Nova Quantidade ETH: {base_amount:.6f}")
+                logger.warning(f"💰 Novo Valor USDT: ${quote_amount:.2f}")
             
             logger.warning(f"🚨 EXECUTANDO ORDEM FUTURES 10x:")
             logger.warning(f"💰 Valor USDT: ${quote_amount:.2f}")
