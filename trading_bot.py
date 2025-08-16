@@ -12,14 +12,12 @@ class TradingBot:
                  leverage: int = 10, balance_percentage: float = 100.0,
                  daily_target: int = 200, scalping_interval: int = 2, 
                  paper_trading: bool = False):
-        """
-        Initialize Trading Bot
-        """
-        # CORREÇÃO: Verificar se é uma instância válida
+        """Initialize Trading Bot"""
+        
         if not isinstance(bitget_api, BitgetAPI):
             raise TypeError(f"bitget_api deve ser uma instância de BitgetAPI, recebido: {type(bitget_api)}")
         
-        self.bitget_api = bitget_api  # ← Agora é uma instância válida
+        self.bitget_api = bitget_api
         self.symbol = symbol
         self.leverage = leverage
         self.balance_percentage = balance_percentage
@@ -33,7 +31,7 @@ class TradingBot:
         self.current_position = None
         self.entry_price = None
         self.position_side = None
-        self.profit_target = 0.01  # 1% profit target
+        self.profit_target = 0.01
         
         # Statistics
         self.total_trades = 0
@@ -41,8 +39,8 @@ class TradingBot:
         self.total_profit = 0.0
         self.start_balance = 0.0
         
-        logger.info("✅ APIs inicializadas com sucesso")
-        logger.info(f"🤖 Trading Bot configurado:")
+        logger.info("✅ Trading Bot inicializado")
+        logger.info(f"🤖 Configuração:")
         logger.info(f"   Símbolo: {self.symbol}")
         logger.info(f"   Alavancagem: {self.leverage}x")
         logger.info(f"   Uso do saldo: {self.balance_percentage}%")
@@ -72,21 +70,17 @@ class TradingBot:
             current_price = market_data['price']
             logger.warning(f"💎 Preço ETH atual: ${current_price:.2f}")
             
-            # Executar ordem com cálculo dinâmico
+            # Executar ordem
             result = self.bitget_api.place_order(
                 symbol=self.symbol,
                 side=side,
-                size=0,  # Será ignorado - usamos cálculo dinâmico
+                size=0,
                 price=current_price,
                 leverage=self.leverage
             )
             
             if result['success']:
                 logger.warning(f"✅ TRADE {side.upper()} EXECUTADO!")
-                logger.warning(f"💰 Valor USDT: ${result.get('usdt_amount', 0):.2f}")
-                logger.warning(f"📊 Quantidade ETH: {result.get('eth_quantity', 0):.8f}")
-                logger.warning(f"💎 Preço: ${result.get('price', 0):.2f}")
-                
                 return result
             else:
                 logger.error(f"❌ Erro no trade {side}: {result.get('error', 'Erro desconhecido')}")
@@ -102,34 +96,16 @@ class TradingBot:
             if not self.current_position:
                 return {'success': False, 'error': 'Nenhuma posição para fechar'}
             
-            # Determine opposite side
             close_side = 'sell' if self.position_side == 'buy' else 'buy'
-            
             logger.warning(f"🔄 FECHANDO POSIÇÃO {self.position_side.upper()}")
             
             result = self.execute_trade(close_side)
             
             if result['success']:
-                # Calculate profit
-                current_price = result.get('price', 0)
-                if self.entry_price and current_price:
-                    if self.position_side == 'buy':
-                        profit_pct = ((current_price - self.entry_price) / self.entry_price) * 100
-                    else:
-                        profit_pct = ((self.entry_price - current_price) / self.entry_price) * 100
-                    
-                    logger.warning(f"💰 LUCRO: {profit_pct:.2f}%")
-                    
-                    if profit_pct > 0:
-                        self.profitable_trades += 1
-                        self.total_profit += profit_pct
-                
-                # Reset position
                 self.current_position = None
                 self.entry_price = None
                 self.position_side = None
-                
-                logger.warning(f"✅ POSIÇÃO FECHADA COM SUCESSO!")
+                logger.warning(f"✅ POSIÇÃO FECHADA!")
                 
             return result
             
@@ -165,15 +141,10 @@ class TradingBot:
             return False
 
     def scalping_strategy(self):
-        """Rapid scalping strategy with 1% profit target"""
+        """Rapid scalping strategy"""
         try:
-            logger.warning(f"🔥 EXECUTANDO ESTRATÉGIA DE SCALPING")
-            
-            # If no position, open one
             if not self.current_position:
-                # Simple strategy: alternate buy/sell
                 side = 'buy' if self.trades_today % 2 == 0 else 'sell'
-                
                 logger.warning(f"🚀 ABRINDO POSIÇÃO {side.upper()}")
                 
                 result = self.execute_trade(side)
@@ -186,11 +157,8 @@ class TradingBot:
                     self.total_trades += 1
                     
                     logger.warning(f"✅ POSIÇÃO ABERTA: {side.upper()}")
-                    logger.warning(f"💰 Preço entrada: ${self.entry_price:.2f}")
                     logger.warning(f"📊 Trades hoje: {self.trades_today}/{self.daily_target}")
-                
             else:
-                # Check if profit target reached
                 if self.check_profit_target():
                     self.close_position()
                     
@@ -200,40 +168,26 @@ class TradingBot:
     def run_trading_loop(self):
         """Main trading loop"""
         logger.warning(f"🚀 Trading bot iniciado")
-        
-        # Get starting balance
         self.start_balance = self.get_account_balance()
-        logger.warning(f"💰 Saldo inicial: ${self.start_balance:.2f} USDT")
         
         while self.is_running:
             try:
-                # Check if daily target reached
                 if self.trades_today >= self.daily_target:
                     logger.warning(f"🎯 META DIÁRIA ATINGIDA: {self.trades_today} trades")
-                    logger.warning(f"😴 Aguardando próximo dia...")
-                    time.sleep(60)  # Check every minute
+                    time.sleep(60)
                     
-                    # Reset daily counter at midnight (simplified)
-                    current_hour = datetime.now().hour
-                    if current_hour == 0:
+                    if datetime.now().hour == 0:
                         self.trades_today = 0
                         logger.warning(f"🌅 NOVO DIA - Contador zerado")
-                    
                     continue
                 
-                # Execute scalping strategy
                 self.scalping_strategy()
-                
-                # Wait for next iteration
-                logger.warning(f"⏱️ Aguardando {self.scalping_interval}s para próximo trade...")
                 time.sleep(self.scalping_interval)
                 
             except Exception as e:
-                logger.error(f"❌ Erro no loop de trading: {e}")
-                time.sleep(5)  # Wait 5 seconds on error
-                
+                logger.error(f"❌ Erro no loop: {e}")
+                time.sleep(5)
             except KeyboardInterrupt:
-                logger.warning(f"🛑 Bot interrompido pelo usuário")
                 self.stop()
                 break
 
@@ -244,35 +198,18 @@ class TradingBot:
             return
         
         self.is_running = True
-        
-        # Start trading loop in separate thread
         trading_thread = threading.Thread(target=self.run_trading_loop, daemon=True)
         trading_thread.start()
-        
-        logger.warning(f"✅ Trading bot iniciado com sucesso!")
+        logger.warning(f"✅ Trading bot iniciado!")
 
     def stop(self):
         """Stop the trading bot"""
         self.is_running = False
         
-        # Close any open positions
         if self.current_position:
-            logger.warning(f"🔄 Fechando posição aberta...")
             self.close_position()
         
         logger.warning(f"🛑 Trading bot parado")
-        
-        # Print final statistics
-        current_balance = self.get_account_balance()
-        total_return = ((current_balance - self.start_balance) / self.start_balance) * 100 if self.start_balance > 0 else 0
-        
-        logger.warning(f"📊 ESTATÍSTICAS FINAIS:")
-        logger.warning(f"   💰 Saldo inicial: ${self.start_balance:.2f} USDT")
-        logger.warning(f"   💰 Saldo final: ${current_balance:.2f} USDT")
-        logger.warning(f"   📈 Retorno total: {total_return:.2f}%")
-        logger.warning(f"   🎯 Total de trades: {self.total_trades}")
-        logger.warning(f"   ✅ Trades lucrativos: {self.profitable_trades}")
-        logger.warning(f"   📊 Taxa de acerto: {(self.profitable_trades/self.total_trades)*100:.1f}%" if self.total_trades > 0 else "   📊 Taxa de acerto: 0%")
 
     def get_status(self) -> Dict:
         """Get current bot status"""
@@ -289,7 +226,8 @@ class TradingBot:
             'current_position': bool(self.current_position),
             'position_side': self.position_side,
             'entry_price': self.entry_price,
-            'profit_target': self.profit_target * 100  # Convert to percentage
+            'profit_target': self.profit_target * 100,
+            'test_mode': getattr(self.bitget_api, 'test_mode', False)
         }
 
     def update_config(self, **kwargs):
