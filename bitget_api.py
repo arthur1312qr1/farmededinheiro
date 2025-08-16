@@ -147,7 +147,7 @@ class BitgetAPI:
             return None
 
     def place_order(self, symbol: str, side: str, size: float, price: float = None, leverage: int = 10) -> Dict:
-        """Place FUTURES order usando 100% DINÂMICO do saldo atual"""
+        """Place FUTURES order com cálculo dinâmico da quantidade ETH"""
         try:
             futures_symbol = 'ETH/USDT:USDT'
             
@@ -158,45 +158,63 @@ class BitgetAPI:
             except Exception as e:
                 logger.warning(f"⚠️ Erro ao definir alavancagem: {e}")
             
-            # Obter preço atual
+            # Obter preço atual do mercado
             if price is None:
                 ticker = self.exchange.fetch_ticker(futures_symbol)
                 current_price = float(ticker['last'])
             else:
                 current_price = price
             
-            # CORREÇÃO PRINCIPAL: Buscar saldo ATUAL (100% dinâmico)
-            current_balance = self.get_account_balance()  # ← SEMPRE BUSCAR NOVO
-            quote_amount = current_balance  # ← 100% DO SALDO ATUAL
-            base_amount = quote_amount / current_price  # ← QUANTIDADE ETH CALCULADA
+            # CORREÇÃO: Buscar saldo atual (100% dinâmico)
+            current_balance = self.get_account_balance()
+            usdt_amount = current_balance  # 100% do saldo atual
             
-            logger.warning(f"🚨 USANDO 100% DINÂMICO DO SALDO:")
+            # CÁLCULO DINÂMICO: Calcular quantidade ETH baseada no valor USDT
+            eth_quantity = usdt_amount / current_price
+            
+            logger.warning(f"🚨 CÁLCULO DINÂMICO DA QUANTIDADE:")
             logger.warning(f"💰 Saldo Atual: ${current_balance:.2f} USDT")  
-            logger.warning(f"🎯 100% Dinâmico: ${quote_amount:.2f} USDT")  # ← MESMO VALOR
-            logger.warning(f"📊 Quantidade ETH: {base_amount:.6f}")
-            logger.warning(f"💎 Preço ETH: ${current_price:.2f}")
-            logger.warning(f"⚡ Alavancagem: 10x")
-            logger.warning(f"💥 Exposição: ${quote_amount * 10:.2f} USDT")
+            logger.warning(f"🎯 Valor a usar: ${usdt_amount:.2f} USDT (100%)")
+            logger.warning(f"💎 Preço ETH atual: ${current_price:.2f}")
+            logger.warning(f"📊 ETH calculado: {eth_quantity:.8f} ETH")
+            logger.warning(f"⚡ Alavancagem: {leverage}x")
+            logger.warning(f"💥 Exposição total: ${usdt_amount * leverage:.2f} USDT")
             
-            # Executar ordem usando 100% do saldo atual
+            # Validar se a quantidade é positiva
+            if eth_quantity <= 0:
+                logger.error(f"❌ Quantidade ETH inválida: {eth_quantity}")
+                return {
+                    'success': False,
+                    'error': f'Quantidade ETH calculada inválida: {eth_quantity:.8f}'
+                }
+            
+            # Executar ordem com quantidade ETH calculada dinamicamente
+            logger.warning(f"🚀 EXECUTANDO ORDEM COM VALORES DINÂMICOS:")
+            logger.warning(f"📊 Quantidade: {eth_quantity:.8f} ETH")
+            logger.warning(f"💰 Valor equivalente: ${usdt_amount:.2f} USDT")
+            
             order = self.exchange.create_order(
                 symbol=futures_symbol,
                 type='market',
                 side=side,
-                amount=base_amount  # ETH calculado com 100% do saldo
+                amount=eth_quantity  # Quantidade ETH calculada dinamicamente
             )
             
-            logger.warning(f"✅ ORDEM EXECUTADA COM 100% DINÂMICO!")
-            logger.warning(f"💰 Valor usado: ${quote_amount:.2f} USDT")
+            logger.warning(f"✅ ORDEM EXECUTADA COM CÁLCULO DINÂMICO!")
+            logger.warning(f"💰 Valor usado: ${usdt_amount:.2f} USDT")
+            logger.warning(f"📊 Quantidade: {eth_quantity:.8f} ETH")
             
             return {
                 'success': True,
                 'order_id': order['id'],
-                'order': order
+                'order': order,
+                'usdt_amount': usdt_amount,
+                'eth_quantity': eth_quantity,
+                'price': current_price
             }
             
         except Exception as e:
-            logger.error(f"❌ Erro ao executar ordem: {e}")
+            logger.error(f"❌ Erro ao executar ordem com cálculo dinâmico: {e}")
             return {
                 'success': False,
                 'error': str(e)
