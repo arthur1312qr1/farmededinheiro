@@ -21,21 +21,21 @@ CORS(app)
 # Initialize APIs and Bot
 def init_bot():
     try:
-        # Get API credentials from environment
+        # Get API credentials from environment - USAR NOMES CORRETOS DO RENDER
         api_key = os.getenv('BITGET_API_KEY')
-        secret_key = os.getenv('BITGET_SECRET_KEY')
+        secret_key = os.getenv('BITGET_SECRET')  # ← CORRIGIDO: usar BITGET_SECRET
         passphrase = os.getenv('BITGET_PASSPHRASE')
         
         # Debug: Log se as variáveis estão sendo carregadas
         logging.info(f"🔍 Verificando credenciais:")
         logging.info(f"   API_KEY: {'✅ OK' if api_key else '❌ VAZIO'}")
-        logging.info(f"   SECRET_KEY: {'✅ OK' if secret_key else '❌ VAZIO'}")
+        logging.info(f"   SECRET: {'✅ OK' if secret_key else '❌ VAZIO'}")
         logging.info(f"   PASSPHRASE: {'✅ OK' if passphrase else '❌ VAZIO'}")
         
-        # FAIL HARD if no credentials - NO FALLBACK TO TEST MODE
+        # FAIL HARD if no credentials
         if not all([api_key, secret_key, passphrase]):
             logging.error("❌ ERRO CRÍTICO: Credenciais obrigatórias não encontradas")
-            logging.error("❌ Variáveis necessárias: BITGET_API_KEY, BITGET_SECRET_KEY, BITGET_PASSPHRASE")
+            logging.error("❌ Variáveis necessárias: BITGET_API_KEY, BITGET_SECRET, BITGET_PASSPHRASE")
             raise Exception("Credenciais não configuradas no ambiente")
         
         # Validate that credentials are not test values
@@ -260,7 +260,7 @@ if __name__ == '__main__':
         logging.error("❌ FALHA CRÍTICA: Bot não pôde ser inicializado")
         logging.error("❌ Configure as variáveis no Render.com:")
         logging.error("❌   BITGET_API_KEY")
-        logging.error("❌   BITGET_SECRET_KEY") 
+        logging.error("❌   BITGET_SECRET") 
         logging.error("❌   BITGET_PASSPHRASE")
     
     port = int(os.environ.get('PORT', 5000))
