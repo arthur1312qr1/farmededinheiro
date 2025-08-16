@@ -14,9 +14,9 @@ def get_config() -> Dict[str, Any]:
         'TARGET_TRADES_PER_DAY': int(os.getenv('TARGET_TRADES_PER_DAY', 200)),
         'BASE_CURRENCY': os.getenv('BASE_CURRENCY', 'USDT'),
         
-        # API Keys
+        # API Keys - CORRIGIDO
         'BITGET_API_KEY': os.getenv('BITGET_API_KEY'),
-        'BITGET_SECRET_KEY': os.getenv('BITGET_SECRET_KEY'),
+        'BITGET_SECRET_KEY': os.getenv('BITGET_SECRET'),  # ← CORREÇÃO: BITGET_SECRET
         'BITGET_PASSPHRASE': os.getenv('BITGET_PASSPHRASE'),
         'GEMINI_API_KEY': os.getenv('GEMINI_API_KEY'),
         
