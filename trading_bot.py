@@ -10,9 +10,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import threading
 
-# CORREÇÃO: Imports absolutos
 from bitget_api import BitgetAPI
-from gemini_handler import GeminiHandler  # ou gemini_ai se for esse o nome
 
 logger = logging.getLogger(__name__)
 
@@ -42,19 +40,15 @@ class TradingBot:
                 sandbox=config.get('PAPER_TRADING', False)
             )
             
-            # CORREÇÃO: Verificar se existe gemini_ai ou gemini_handler
+            # Gemini AI optional
             gemini_key = config.get('GEMINI_API_KEY')
             if gemini_key:
                 try:
-                    from gemini_ai import GeminiAI
-                    self.gemini_ai = GeminiAI(api_key=gemini_key)
+                    from gemini_handler import GeminiHandler
+                    self.gemini_ai = GeminiHandler(api_key=gemini_key)
                 except ImportError:
-                    try:
-                        from gemini_handler import GeminiHandler
-                        self.gemini_ai = GeminiHandler(api_key=gemini_key)
-                    except ImportError:
-                        logger.warning("⚠️ Gemini AI não disponível - continuando sem IA")
-                        self.gemini_ai = None
+                    logger.warning("⚠️ Gemini AI não disponível - continuando sem IA")
+                    self.gemini_ai = None
             else:
                 self.gemini_ai = None
             
@@ -70,7 +64,7 @@ class TradingBot:
         self.target_trades_per_day = config.get('TARGET_TRADES_PER_DAY', 200)
         self.base_currency = config.get('BASE_CURRENCY', 'USDT')
         
-        # Risk management - CORREÇÃO: 80% do saldo
+        # Risk management - 80% do saldo
         self.stop_loss_pct = 0.02  # 2%
         self.take_profit_pct = 0.01  # 1%
         self.position_size_pct = 0.8  # 80% of balance per trade
@@ -364,7 +358,6 @@ class TradingBot:
             else:
                 error_msg = order_result.get('error', 'Erro desconhecido') if order_result else 'Falha na comunicação'
                 logger.error(f"❌ ORDEM FUTURES FALHOU: bitget {error_msg}")
-                logger.warning(f"❌ TRADE FUTURES FALHOU")
                 
         except Exception as e:
             logger.error(f"❌ Erro ao executar ordem de compra: {e}")
