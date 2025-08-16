@@ -4,20 +4,22 @@ import time
 from decimal import Decimal, ROUND_DOWN
 
 class BitgetAPI:
-    def __init__(self):
-        # Credenciais do ambiente (render.com)
-        api_key = os.getenv('BITGET_API_KEY')
-        secret = os.getenv('BITGET_SECRET')
-        passphrase = os.getenv('BITGET_PASSPHRASE')
+    def __init__(self, api_key=None, secret=None, passphrase=None):
+        """Inicializa com credenciais do ambiente ou parâmetros"""
         
-        if not all([api_key, secret, passphrase]):
-            raise Exception("❌ Credenciais não encontradas no ambiente")
+        # Usar credenciais do ambiente se não passadas como parâmetros
+        self.api_key = api_key or os.getenv('BITGET_API_KEY')
+        self.secret = secret or os.getenv('BITGET_SECRET') 
+        self.passphrase = passphrase or os.getenv('BITGET_PASSPHRASE')
+        
+        if not all([self.api_key, self.secret, self.passphrase]):
+            raise Exception("❌ Credenciais não encontradas")
         
         # Configurar exchange
         self.exchange = ccxt.bitget({
-            'apiKey': api_key,
-            'secret': secret,
-            'password': passphrase,
+            'apiKey': self.api_key,
+            'secret': self.secret,
+            'password': self.passphrase,
             'sandbox': False,  # TRADING REAL
             'enableRateLimit': True,
             'options': {
@@ -70,15 +72,15 @@ class BitgetAPI:
         # Quantidade ETH que pode comprar
         raw_quantity = buying_power / eth_price
         
-        # Precisão da Bitget: 2 casas decimais
+        # Precisão da Bitget: 2 casas decimais, mas sem perder precisão
         eth_quantity = float(Decimal(str(raw_quantity)).quantize(Decimal('0.01'), rounding=ROUND_DOWN))
         
         # Garantir mínimo 0.01 ETH
         if eth_quantity < 0.01:
             eth_quantity = 0.01
             
-        print(f"💪 Cálculo:")
-        print(f"   Saldo: ${usdt_balance:.4f} USDT")
+        print(f"💪 Cálculo CORRIGIDO:")
+        print(f"   Saldo: ${usdt_balance:.6f} USDT")
         print(f"   Alavancagem: {leverage}x")
         print(f"   Poder de compra: ${buying_power:.2f} USDT")
         print(f"   Preço ETH: ${eth_price:.2f}")
@@ -90,26 +92,32 @@ class BitgetAPI:
     def place_buy_order(self):
         """Comprar ETH com 100% do saldo + alavancagem"""
         try:
+            print("🚀 Iniciando compra...")
+            
             # Pegar saldo atual (sempre 100%)
             balance_info = self.get_balance()
             if not balance_info:
-                return None
+                return {"success": False, "error": "Erro ao pegar saldo"}
                 
             usdt_balance = balance_info['free']
             
             if usdt_balance < 1:  # Mínimo $1 para trading
-                print(f"❌ Saldo insuficiente: ${usdt_balance:.4f}")
-                return None
+                error_msg = f"❌ Saldo insuficiente: ${usdt_balance:.4f}"
+                print(error_msg)
+                return {"success": False, "error": error_msg}
             
             # Pegar preço atual
             eth_price = self.get_eth_price()
             if not eth_price:
-                return None
+                return {"success": False, "error": "Erro ao pegar preço ETH"}
                 
             # Calcular quantidade (CORREÇÃO APLICADA)
             eth_quantity = self.calculate_eth_quantity(usdt_balance, eth_price)
             
-            print(f"🚀 Executando compra...")
+            print(f"🎯 Executando ordem de compra...")
+            print(f"   Símbolo: ETH/USDT:USDT")
+            print(f"   Quantidade: {eth_quantity} ETH")
+            print(f"   Alavancagem: 10x")
             
             # Fazer ordem de compra
             order = self.exchange.create_market_buy_order(
@@ -120,16 +128,24 @@ class BitgetAPI:
                 }
             )
             
-            print(f"✅ Ordem de compra executada!")
-            print(f"   ID: {order['id']}")
+            success_msg = f"✅ COMPRA EXECUTADA! ID: {order['id']}"
+            print(success_msg)
             print(f"   Quantidade: {eth_quantity} ETH")
             print(f"   Preço: ${eth_price:.2f}")
+            print(f"   Valor total: ${eth_quantity * eth_price:.2f}")
             
-            return order
+            return {
+                "success": True,
+                "order": order,
+                "quantity": eth_quantity,
+                "price": eth_price,
+                "message": success_msg
+            }
             
         except Exception as e:
-            print(f"❌ Erro na compra: {e}")
-            return None
+            error_msg = f"❌ Erro na compra: {str(e)}"
+            print(error_msg)
+            return {"success": False, "error": error_msg}
 
     def place_sell_order(self, profit_target=0.01):  # 1% de lucro
         """Vender ETH quando atingir lucro"""
@@ -139,17 +155,19 @@ class BitgetAPI:
             eth_position = None
             
             for pos in positions:
-                if pos['symbol'] == 'ETH/USDT:USDT' and pos['size'] > 0:
+                if pos['symbol'] == 'ETH/USDT:USDT' and abs(pos['size']) > 0:
                     eth_position = pos
                     break
             
             if not eth_position:
-                print("❌ Nenhuma posição ETH encontrada")
-                return None
+                return {"success": False, "error": "Nenhuma posição ETH encontrada"}
             
             entry_price = eth_position['entryPrice']
-            quantity = eth_position['size']
+            quantity = abs(eth_position['size'])
             current_price = self.get_eth_price()
+            
+            if not current_price:
+                return {"success": False, "error": "Erro ao pegar preço atual"}
             
             # Calcular lucro atual
             profit_pct = (current_price - entry_price) / entry_price
@@ -169,18 +187,24 @@ class BitgetAPI:
                     amount=quantity
                 )
                 
-                print(f"✅ Ordem de venda executada!")
-                print(f"   ID: {order['id']}")
-                print(f"   Lucro: {profit_pct*100:.2f}%")
+                success_msg = f"✅ VENDA EXECUTADA! Lucro: {profit_pct*100:.2f}%"
+                print(success_msg)
                 
-                return order
+                return {
+                    "success": True,
+                    "order": order,
+                    "profit_pct": profit_pct * 100,
+                    "message": success_msg
+                }
             else:
-                print(f"⏳ Aguardando lucro de {profit_target*100}%...")
-                return None
+                waiting_msg = f"⏳ Aguardando lucro de {profit_target*100}%... Atual: {profit_pct*100:.2f}%"
+                print(waiting_msg)
+                return {"success": False, "waiting": True, "message": waiting_msg}
                 
         except Exception as e:
-            print(f"❌ Erro na venda: {e}")
-            return None
+            error_msg = f"❌ Erro na venda: {str(e)}"
+            print(error_msg)
+            return {"success": False, "error": error_msg}
 
     def get_position_info(self):
         """Informações da posição atual"""
@@ -190,7 +214,7 @@ class BitgetAPI:
             
             eth_position = None
             for pos in positions:
-                if pos['symbol'] == 'ETH/USDT:USDT' and pos['size'] > 0:
+                if pos['symbol'] == 'ETH/USDT:USDT' and abs(pos['size']) > 0:
                     eth_position = pos
                     break
             
@@ -204,11 +228,29 @@ class BitgetAPI:
             print(f"❌ Erro ao pegar informações: {e}")
             return None
 
-# Testar conexão
+    def test_connection(self):
+        """Testa conexão com a Bitget"""
+        try:
+            balance = self.exchange.fetch_balance()
+            print("✅ Conexão com Bitget OK")
+            return True
+        except Exception as e:
+            print(f"❌ Erro de conexão: {e}")
+            return False
+
+# Função para criar instância (compatibilidade)
+def create_bitget_api():
+    """Cria instância da BitgetAPI usando variáveis de ambiente"""
+    return BitgetAPI()
+
+# Testar se executado diretamente
 if __name__ == "__main__":
     try:
         api = BitgetAPI()
-        info = api.get_position_info()
-        print("🔥 Bot funcionando corretamente!")
+        if api.test_connection():
+            info = api.get_position_info()
+            print("🔥 Bot funcionando corretamente!")
+        else:
+            print("❌ Falha na conexão")
     except Exception as e:
         print(f"❌ Erro: {e}")
