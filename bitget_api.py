@@ -52,7 +52,11 @@ class BitgetAPI:
             }
         except Exception as e:
             print(f"❌ Erro ao pegar saldo: {e}")
-            return None
+            return {'free': 0, 'used': 0, 'total': 0}
+
+    def get_account_balance(self):
+        """Alias para get_balance - compatibilidade"""
+        return self.get_balance()
 
     def get_eth_price(self):
         """Pega preço atual do ETH em tempo real"""
@@ -63,10 +67,14 @@ class BitgetAPI:
             return price
         except Exception as e:
             print(f"❌ Erro ao pegar preço ETH: {e}")
-            return None
+            return 0
+
+    def get_current_price(self, symbol='ETH/USDT:USDT'):
+        """Alias para get_eth_price - compatibilidade"""
+        return self.get_eth_price()
 
     def get_market_data(self, symbol='ETH/USDT:USDT'):
-        """CORREÇÃO - Aceita parâmetro symbol"""
+        """Dados de mercado - CORRIGIDO para aceitar symbol"""
         try:
             ticker = self.exchange.fetch_ticker(symbol)
             
@@ -85,15 +93,16 @@ class BitgetAPI:
             
             print(f"📊 Dados de mercado {symbol}:")
             print(f"   Preço: ${market_data['price']:.2f}")
-            print(f"   Alta: ${market_data['high']:.2f}")
-            print(f"   Baixa: ${market_data['low']:.2f}")
-            print(f"   Mudança: {market_data['percentage']:.2f}%")
             
             return market_data
             
         except Exception as e:
             print(f"❌ Erro ao pegar dados de mercado: {e}")
-            return None
+            return {
+                'symbol': symbol, 'price': 0, 'bid': 0, 'ask': 0,
+                'high': 0, 'low': 0, 'volume': 0, 'change': 0,
+                'percentage': 0, 'timestamp': int(time.time() * 1000)
+            }
 
     def calculate_eth_quantity(self, usdt_balance, eth_price):
         """CORREÇÃO DEFINITIVA - Calcula quantidade ETH com alavancagem"""
@@ -261,6 +270,10 @@ class BitgetAPI:
             print(f"❌ Erro ao pegar informações: {e}")
             return None
 
+    def get_positions(self):
+        """Alias para get_position_info - compatibilidade"""
+        return self.get_position_info()
+
     def test_connection(self):
         """Testa conexão com a Bitget"""
         try:
@@ -271,8 +284,12 @@ class BitgetAPI:
             print(f"❌ Erro de conexão: {e}")
             return False
 
+    def is_connected(self):
+        """Alias para test_connection - compatibilidade"""
+        return self.test_connection()
+
     # Métodos antigos para compatibilidade TOTAL
-    def place_order(self, side='buy'):
+    def place_order(self, side='buy', **kwargs):
         """Compatibilidade com código antigo"""
         if side == 'buy':
             return self.place_buy_order()
@@ -289,7 +306,36 @@ class BitgetAPI:
 
     def fetch_ticker(self, symbol='ETH/USDT:USDT'):
         """Compatibilidade - acesso direto ao exchange"""
-        return self.exchange.fetch_ticker(symbol)
+        try:
+            return self.exchange.fetch_ticker(symbol)
+        except Exception as e:
+            print(f"❌ Erro fetch_ticker: {e}")
+            return {'last': 0, 'bid': 0, 'ask': 0}
+
+    def fetch_positions(self, symbols=None):
+        """Compatibilidade - acesso direto ao exchange"""
+        try:
+            if symbols:
+                return self.exchange.fetch_positions(symbols)
+            else:
+                return self.exchange.fetch_positions()
+        except Exception as e:
+            print(f"❌ Erro fetch_positions: {e}")
+            return []
+
+    def create_order(self, symbol, order_type, side, amount, price=None, params={}):
+        """Compatibilidade - acesso direto ao exchange"""
+        try:
+            if order_type == 'market':
+                if side == 'buy':
+                    return self.exchange.create_market_buy_order(symbol, amount, None, params)
+                else:
+                    return self.exchange.create_market_sell_order(symbol, amount, None, params)
+            else:
+                return self.exchange.create_order(symbol, order_type, side, amount, price, params)
+        except Exception as e:
+            print(f"❌ Erro create_order: {e}")
+            return None
 
 # Função para compatibilidade total
 def create_bitget_api():
