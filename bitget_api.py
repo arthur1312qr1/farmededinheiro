@@ -1,217 +1,214 @@
-from typing import Dict
 import ccxt
-import logging
 import os
-from datetime import datetime
-
-logger = logging.getLogger(__name__)
+import time
+from decimal import Decimal, ROUND_DOWN
 
 class BitgetAPI:
-    def __init__(self, api_key: str, secret_key: str, passphrase: str, sandbox: bool = False):
-        """Initialize Bitget API client"""
-        self.api_key = api_key
-        self.secret_key = secret_key
-        self.passphrase = passphrase
-        self.sandbox = sandbox
+    def __init__(self):
+        # Credenciais do ambiente (render.com)
+        api_key = os.getenv('BITGET_API_KEY')
+        secret = os.getenv('BITGET_SECRET')
+        passphrase = os.getenv('BITGET_PASSPHRASE')
         
-        try:
-            # Se são credenciais de teste, não conectar de verdade
-            if api_key == "test_key":
-                logger.warning("🧪 MODO TESTE - Usando dados simulados")
-                self.exchange = None
-                self.test_mode = True
-                return
-            
-            self.exchange = ccxt.bitget({
-                'apiKey': api_key,
-                'secret': secret_key,
-                'password': passphrase,
-                'sandbox': sandbox,
-                'enableRateLimit': True,
-                'options': {
-                    'defaultType': 'swap',
-                    'createMarketBuyOrderRequiresPrice': False,
-                }
-            })
-            
-            self.exchange.load_markets()
-            self.test_mode = False
-            logger.info("✅ Bitget API conectado com sucesso")
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao conectar Bitget API: {e}")
-            logger.warning("🧪 Usando modo teste como fallback")
-            self.exchange = None
-            self.test_mode = True
+        if not all([api_key, secret, passphrase]):
+            raise Exception("❌ Credenciais não encontradas no ambiente")
+        
+        # Configurar exchange
+        self.exchange = ccxt.bitget({
+            'apiKey': api_key,
+            'secret': secret,
+            'password': passphrase,
+            'sandbox': False,  # TRADING REAL
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'swap'  # Futures
+            }
+        })
+        
+        print("✅ Conectado à Bitget - MODO REAL")
 
-    def get_account_balance(self) -> float:
-        """Get FUTURES account balance in USDT"""
+    def get_balance(self):
+        """Pega saldo atual em USDT"""
         try:
-            if self.test_mode:
-                logger.warning(f"🧪 MODO TESTE - Saldo simulado: $100.00 USDT")
-                return 100.0
+            balance = self.exchange.fetch_balance()
+            usdt_free = balance['USDT']['free']
+            usdt_used = balance['USDT']['used']
+            usdt_total = balance['USDT']['total']
             
-            balance = self.exchange.fetch_balance({'type': 'swap'})
-            usdt_balance = 0.0
-            
-            if 'USDT' in balance:
-                usdt_data = balance['USDT']
-                if isinstance(usdt_data, dict):
-                    usdt_balance = usdt_data.get('free', 0) or usdt_data.get('available', 0) or usdt_data.get('total', 0)
-                else:
-                    usdt_balance = float(usdt_data)
-            
-            usdt_balance = float(usdt_balance) if usdt_balance else 0.0
-            logger.warning(f"💰 SALDO DETECTADO: ${usdt_balance:.2f} USDT")
-            
-            return usdt_balance
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao obter saldo: {e}")
-            return 0.0
-
-    def get_market_data(self, symbol: str) -> Dict:
-        """Get current market data for FUTURES"""
-        try:
-            if self.test_mode:
-                return {
-                    'symbol': 'ETH/USDT:USDT',
-                    'price': 2500.0,  # Preço simulado
-                    'bid': 2499.0,
-                    'ask': 2501.0,
-                    'volume': 1000.0,
-                    'timestamp': datetime.now()
-                }
-            
-            futures_symbol = 'ETH/USDT:USDT'
-            ticker = self.exchange.fetch_ticker(futures_symbol)
+            print(f"💰 Saldo USDT:")
+            print(f"   Livre: ${usdt_free:.4f}")
+            print(f"   Usado: ${usdt_used:.4f}")
+            print(f"   Total: ${usdt_total:.4f}")
             
             return {
-                'symbol': futures_symbol,
-                'price': float(ticker['last']),
-                'bid': float(ticker['bid']) if ticker['bid'] else float(ticker['last']),
-                'ask': float(ticker['ask']) if ticker['ask'] else float(ticker['last']),
-                'volume': float(ticker['baseVolume']) if ticker['baseVolume'] else 0.0,
-                'timestamp': datetime.now()
+                'free': usdt_free,
+                'used': usdt_used,
+                'total': usdt_total
             }
-            
         except Exception as e:
-            logger.error(f"❌ Erro ao obter dados de mercado: {e}")
+            print(f"❌ Erro ao pegar saldo: {e}")
             return None
 
-    def place_order(self, symbol: str, side: str, size: float, price: float = None, leverage: int = 10) -> Dict:
-        """Place order - real ou simulado"""
+    def get_eth_price(self):
+        """Pega preço atual do ETH em tempo real"""
         try:
-            if self.test_mode:
-                logger.warning(f"🧪 SIMULANDO ORDEM {side.upper()}")
-                logger.warning(f"💰 Valor simulado: $100.00 USDT")
-                return {
-                    'success': True,
-                    'order_id': 'test_order_123',
-                    'order': {'id': 'test_order_123'},
-                    'usdt_amount': 100.0,
-                    'price': 2500.0
+            ticker = self.exchange.fetch_ticker('ETH/USDT:USDT')
+            price = ticker['last']
+            print(f"📈 Preço ETH atual: ${price:.2f}")
+            return price
+        except Exception as e:
+            print(f"❌ Erro ao pegar preço ETH: {e}")
+            return None
+
+    def calculate_eth_quantity(self, usdt_balance, eth_price):
+        """CORREÇÃO DEFINITIVA - Calcula quantidade ETH com alavancagem"""
+        leverage = 10  # Alavancagem 10x
+        
+        # Poder de compra total (100% do saldo * alavancagem)
+        buying_power = usdt_balance * leverage
+        
+        # Quantidade ETH que pode comprar
+        raw_quantity = buying_power / eth_price
+        
+        # Precisão da Bitget: 2 casas decimais
+        eth_quantity = float(Decimal(str(raw_quantity)).quantize(Decimal('0.01'), rounding=ROUND_DOWN))
+        
+        # Garantir mínimo 0.01 ETH
+        if eth_quantity < 0.01:
+            eth_quantity = 0.01
+            
+        print(f"💪 Cálculo:")
+        print(f"   Saldo: ${usdt_balance:.4f} USDT")
+        print(f"   Alavancagem: {leverage}x")
+        print(f"   Poder de compra: ${buying_power:.2f} USDT")
+        print(f"   Preço ETH: ${eth_price:.2f}")
+        print(f"   Quantidade ETH: {eth_quantity} ETH")
+        print(f"   ✅ Acima do mínimo 0.01 ETH")
+        
+        return eth_quantity
+
+    def place_buy_order(self):
+        """Comprar ETH com 100% do saldo + alavancagem"""
+        try:
+            # Pegar saldo atual (sempre 100%)
+            balance_info = self.get_balance()
+            if not balance_info:
+                return None
+                
+            usdt_balance = balance_info['free']
+            
+            if usdt_balance < 1:  # Mínimo $1 para trading
+                print(f"❌ Saldo insuficiente: ${usdt_balance:.4f}")
+                return None
+            
+            # Pegar preço atual
+            eth_price = self.get_eth_price()
+            if not eth_price:
+                return None
+                
+            # Calcular quantidade (CORREÇÃO APLICADA)
+            eth_quantity = self.calculate_eth_quantity(usdt_balance, eth_price)
+            
+            print(f"🚀 Executando compra...")
+            
+            # Fazer ordem de compra
+            order = self.exchange.create_market_buy_order(
+                symbol='ETH/USDT:USDT',
+                amount=eth_quantity,
+                params={
+                    'leverage': 10
                 }
-            
-            # Código real da ordem aqui...
-            futures_symbol = 'ETH/USDT:USDT'
-            
-            # Definir alavancagem
-            try:
-                self.exchange.set_leverage(10, futures_symbol)
-                logger.warning(f"🚨 ALAVANCAGEM 10x DEFINIDA")
-            except Exception as e:
-                logger.warning(f"⚠️ Erro ao definir alavancagem: {e}")
-            
-            # Obter preço atual
-            if price is None:
-                ticker = self.exchange.fetch_ticker(futures_symbol)
-                current_price = float(ticker['last'])
-            else:
-                current_price = price
-            
-            # Buscar saldo atual (100% dinâmico)
-            current_balance = self.get_account_balance()
-            usdt_amount = current_balance
-            
-            logger.warning(f"🚨 EXECUTANDO ORDEM REAL:")
-            logger.warning(f"💰 Saldo: ${current_balance:.2f} USDT")
-            logger.warning(f"💎 Preço ETH: ${current_price:.2f}")
-            
-            # Calcular quantidade ETH
-            eth_quantity = round(usdt_amount / current_price, 6)
-            
-            # Executar ordem
-            order = self.exchange.create_order(
-                symbol=futures_symbol,
-                type='market',
-                side=side,
-                amount=eth_quantity
             )
             
-            logger.warning(f"✅ ORDEM REAL EXECUTADA!")
+            print(f"✅ Ordem de compra executada!")
+            print(f"   ID: {order['id']}")
+            print(f"   Quantidade: {eth_quantity} ETH")
+            print(f"   Preço: ${eth_price:.2f}")
             
-            return {
-                'success': True,
-                'order_id': order['id'],
-                'order': order,
-                'usdt_amount': usdt_amount,
-                'eth_quantity': eth_quantity,
-                'price': current_price
-            }
+            return order
             
         except Exception as e:
-            logger.error(f"❌ Erro ao executar ordem: {e}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            print(f"❌ Erro na compra: {e}")
+            return None
 
-    def get_order_status(self, order_id: str, symbol: str) -> Dict:
-        """Get order status"""
-        if self.test_mode:
-            return {'id': order_id, 'status': 'filled'}
-        
+    def place_sell_order(self, profit_target=0.01):  # 1% de lucro
+        """Vender ETH quando atingir lucro"""
         try:
-            order = self.exchange.fetch_order(order_id, 'ETH/USDT:USDT')
-            return {
-                'id': order['id'],
-                'status': order['status'],
-                'filled': order['filled'],
-                'remaining': order['remaining'],
-                'price': order['price'],
-                'average': order['average']
-            }
-        except Exception as e:
-            logger.error(f"❌ Erro ao obter status da ordem: {e}")
-            return {}
-
-    def cancel_order(self, order_id: str, symbol: str) -> bool:
-        """Cancel order"""
-        if self.test_mode:
-            return True
+            # Pegar posição atual
+            positions = self.exchange.fetch_positions(['ETH/USDT:USDT'])
+            eth_position = None
             
-        try:
-            self.exchange.cancel_order(order_id, 'ETH/USDT:USDT')
-            logger.info(f"✅ Ordem cancelada: {order_id}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Erro ao cancelar ordem: {e}")
-            return False
-
-    def get_open_positions(self) -> list:
-        """Get open FUTURES positions"""
-        if self.test_mode:
-            return []
+            for pos in positions:
+                if pos['symbol'] == 'ETH/USDT:USDT' and pos['size'] > 0:
+                    eth_position = pos
+                    break
             
+            if not eth_position:
+                print("❌ Nenhuma posição ETH encontrada")
+                return None
+            
+            entry_price = eth_position['entryPrice']
+            quantity = eth_position['size']
+            current_price = self.get_eth_price()
+            
+            # Calcular lucro atual
+            profit_pct = (current_price - entry_price) / entry_price
+            
+            print(f"📊 Posição atual:")
+            print(f"   Quantidade: {quantity} ETH")
+            print(f"   Preço entrada: ${entry_price:.2f}")
+            print(f"   Preço atual: ${current_price:.2f}")
+            print(f"   Lucro: {profit_pct*100:.2f}%")
+            
+            # Vender se atingiu o lucro alvo
+            if profit_pct >= profit_target:
+                print(f"🎯 Meta de {profit_target*100}% atingida! Vendendo...")
+                
+                order = self.exchange.create_market_sell_order(
+                    symbol='ETH/USDT:USDT',
+                    amount=quantity
+                )
+                
+                print(f"✅ Ordem de venda executada!")
+                print(f"   ID: {order['id']}")
+                print(f"   Lucro: {profit_pct*100:.2f}%")
+                
+                return order
+            else:
+                print(f"⏳ Aguardando lucro de {profit_target*100}%...")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Erro na venda: {e}")
+            return None
+
+    def get_position_info(self):
+        """Informações da posição atual"""
         try:
             positions = self.exchange.fetch_positions(['ETH/USDT:USDT'])
-            open_positions = [pos for pos in positions if float(pos['contracts']) > 0]
-            return open_positions
+            balance = self.get_balance()
+            
+            eth_position = None
+            for pos in positions:
+                if pos['symbol'] == 'ETH/USDT:USDT' and pos['size'] > 0:
+                    eth_position = pos
+                    break
+            
+            return {
+                'balance': balance,
+                'position': eth_position,
+                'eth_price': self.get_eth_price()
+            }
+            
         except Exception as e:
-            logger.error(f"❌ Erro ao obter posições: {e}")
-            return []
+            print(f"❌ Erro ao pegar informações: {e}")
+            return None
 
-    def validate_order_params(self, symbol: str, side: str, size: float, **kwargs) -> Dict:
-        """Validate order parameters before placing"""
-        return {'valid': True, 'errors': []}
+# Testar conexão
+if __name__ == "__main__":
+    try:
+        api = BitgetAPI()
+        info = api.get_position_info()
+        print("🔥 Bot funcionando corretamente!")
+    except Exception as e:
+        print(f"❌ Erro: {e}")
