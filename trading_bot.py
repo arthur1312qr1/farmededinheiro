@@ -3,17 +3,17 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, List
 import threading
+
 from bitget_api import BitgetAPI
 
 logger = logging.getLogger(__name__)
 
 class TradingBot:
-    def __init__(self, bitget_api: BitgetAPI, symbol: str = 'ethusdt_UMCBL', 
-                 leverage: int = 10, balance_percentage: float = 100.0,
-                 daily_target: int = 200, scalping_interval: int = 2, 
-                 paper_trading: bool = False):
+    def __init__(self, bitget_api: BitgetAPI, symbol: str='ETH/USDT:USDT',
+                 leverage: int=10, balance_percentage: float=100.0,
+                 daily_target: int=200, scalping_interval: int=2,
+                 paper_trading: bool=False):
         """Initialize Trading Bot"""
-        
         if not isinstance(bitget_api, BitgetAPI):
             raise TypeError(f"bitget_api deve ser uma instância de BitgetAPI, recebido: {type(bitget_api)}")
         
@@ -100,13 +100,12 @@ class TradingBot:
             logger.warning(f"🔄 FECHANDO POSIÇÃO {self.position_side.upper()}")
             
             result = self.execute_trade(close_side)
-            
             if result['success']:
                 self.current_position = None
                 self.entry_price = None
                 self.position_side = None
                 logger.warning(f"✅ POSIÇÃO FECHADA!")
-                
+            
             return result
             
         except Exception as e:
@@ -148,14 +147,12 @@ class TradingBot:
                 logger.warning(f"🚀 ABRINDO POSIÇÃO {side.upper()}")
                 
                 result = self.execute_trade(side)
-                
                 if result['success']:
                     self.current_position = result['order_id']
                     self.entry_price = result.get('price', 0)
                     self.position_side = side
                     self.trades_today += 1
                     self.total_trades += 1
-                    
                     logger.warning(f"✅ POSIÇÃO ABERTA: {side.upper()}")
                     logger.warning(f"📊 Trades hoje: {self.trades_today}/{self.daily_target}")
             else:
@@ -175,7 +172,6 @@ class TradingBot:
                 if self.trades_today >= self.daily_target:
                     logger.warning(f"🎯 META DIÁRIA ATINGIDA: {self.trades_today} trades")
                     time.sleep(60)
-                    
                     if datetime.now().hour == 0:
                         self.trades_today = 0
                         logger.warning(f"🌅 NOVO DIA - Contador zerado")
@@ -196,7 +192,7 @@ class TradingBot:
         if self.is_running:
             logger.warning(f"⚠️ Bot já está rodando")
             return
-        
+            
         self.is_running = True
         trading_thread = threading.Thread(target=self.run_trading_loop, daemon=True)
         trading_thread.start()
@@ -205,10 +201,8 @@ class TradingBot:
     def stop(self):
         """Stop the trading bot"""
         self.is_running = False
-        
         if self.current_position:
             self.close_position()
-        
         logger.warning(f"🛑 Trading bot parado")
 
     def get_status(self) -> Dict:
