@@ -31,7 +31,7 @@ passphrase = os.environ.get('BITGET_PASSPHRASE', '').strip()
 
 logger.warning("🚨 ⚠️ MODO TRADING REAL FUTURES ATIVADO ⚠️ 🚨")
 logger.warning("💰 ESTE BOT VAI USAR SEU DINHEIRO REAL!")
-logger.warning(f"🎯 QUANTIDADE FIXA + ALAVANCAGEM {LEVERAGE}x!")
+logger.warning(f"🎯 80% DINÂMICO + ALAVANCAGEM {LEVERAGE}x!")
 logger.warning("⚠️ RISCO DE LIQUIDAÇÃO ALTO!")
 logger.info(f"🔍 Credenciais REAL: API={bool(api_key)} SECRET={bool(secret_key)} PASS={bool(passphrase)}")
 
@@ -62,7 +62,10 @@ bot_state = {
     'verified_real_trades': 0,
     'last_error': None,
     'leverage': LEVERAGE,
-    'trading_type': 'futures'
+    'trading_type': 'futures',
+    'calculated_order_value': 0.0,
+    'last_usdt_used': 0.0,
+    'last_eth_calculated': 0.0
 }
 
 class ETHBotFutures80Percent:
@@ -124,6 +127,7 @@ class ETHBotFutures80Percent:
             logger.warning("✅ CONECTADO AO FUTURES REAL!")
             logger.warning(f"💰 SALDO FUTURES: ${usdt_balance:.2f} USDT")
             logger.warning(f"💎 PREÇO ETH: ${ticker['last']:.2f}")
+            logger.warning(f"🎯 80% DINÂMICO: ${usdt_balance * 0.8:.2f} USDT")
             logger.warning(f"🚨 ALAVANCAGEM: {self.leverage}x")
             logger.warning("🚨 PRÓXIMO TRADE USARÁ DINHEIRO REAL!")
 
@@ -150,6 +154,7 @@ class ETHBotFutures80Percent:
             logger.info(f"💰 Saldo Livre: ${usdt_free:.2f}")
             logger.info(f"🔒 Saldo Usado: ${usdt_used:.2f}")
             logger.info(f"📊 Saldo Total: ${usdt_total:.2f}")
+            logger.info(f"🎯 80% Dinâmico: ${usdt_free * 0.8:.2f}")
 
             return usdt_free
         except Exception as e:
@@ -157,11 +162,11 @@ class ETHBotFutures80Percent:
             return bot_state['balance']
 
     def execute_FUTURES_trade_with_leverage(self):
-        """🚨 EXECUTAR TRADE FUTURES COM QUANTIDADE FIXA 🚨"""
+        """🚨 EXECUTAR TRADE FUTURES COM 80% DINÂMICO DO SALDO 🚨"""
         try:
-            logger.warning("🚨 INICIANDO TRADE FUTURES COM QUANTIDADE FIXA!")
+            logger.warning("🚨 INICIANDO TRADE FUTURES COM 80% DINÂMICO!")
 
-            # ✅ BUSCAR SALDO REAL ATUAL
+            # ✅ BUSCAR SALDO REAL ATUAL (sempre atualizado)
             current_balance = self.get_real_futures_balance()
 
             # 🚨 VERIFICAR SALDO MÍNIMO
@@ -170,32 +175,41 @@ class ETHBotFutures80Percent:
                 bot_state['last_error'] = f"Saldo insuficiente: ${current_balance:.2f} USDT"
                 return False
 
-            # ✅ USAR QUANTIDADE FIXA DE ETH QUE ATENDE AOS MÍNIMOS
-            eth_quantity = 0.01  # QUANTIDADE FIXA 0.01 ETH (mínimo da Bitget)
-            
             # ✅ PREÇO ETH ATUAL
             ticker = self.exchange.fetch_ticker(self.symbol)
             current_price = ticker['last']
             bot_state['eth_price'] = current_price
 
-            # ✅ CALCULAR VALOR EM USDT DA ORDEM
-            order_value_usdt = eth_quantity * current_price
+            # 🎯 CALCULAR 80% DO SALDO ATUAL EM USDT (DINÂMICO)
+            usdt_to_use = current_balance * 0.80  # 80% do saldo ATUAL
+            
+            # ✅ CONVERTER USDT PARA QUANTIDADE ETH
+            eth_quantity = usdt_to_use / current_price
+            
+            # ✅ ARREDONDAR PARA 6 CASAS DECIMAIS (padrão Bitget)
+            eth_quantity = round(eth_quantity, 6)
 
-            logger.warning("🚨 DETALHES DO TRADE FUTURES:")
+            # 📊 ATUALIZAR ESTADO COM CÁLCULOS
+            bot_state['calculated_order_value'] = usdt_to_use
+            bot_state['last_usdt_used'] = usdt_to_use
+            bot_state['last_eth_calculated'] = eth_quantity
+
+            logger.warning("🚨 CÁLCULO DINÂMICO 80% DO SALDO:")
             logger.warning(f"💰 Saldo Atual: ${current_balance:.2f} USDT")
-            logger.warning(f"📊 ETH Fixo: {eth_quantity:.2f} ETH")
+            logger.warning(f"🎯 80% Dinâmico: ${usdt_to_use:.2f} USDT")
             logger.warning(f"💎 Preço ETH: ${current_price:.2f}")
-            logger.warning(f"💲 Valor da Ordem: ${order_value_usdt:.2f} USDT")
+            logger.warning(f"📊 ETH Calculado: {eth_quantity:.6f} ETH")
             logger.warning(f"🚨 Alavancagem: {self.leverage}x")
+            logger.warning(f"💥 Exposição Total: ${usdt_to_use * self.leverage:.2f} USDT")
 
-            # ✅ EXECUTAR ORDEM FUTURES COM QUANTIDADE FIXA
+            # ✅ EXECUTAR ORDEM FUTURES COM QUANTIDADE CALCULADA
             logger.warning("💰 EXECUTANDO ORDEM FUTURES!")
 
             try:
-                # MÉTODO SIMPLES: Usar quantidade fixa de ETH
+                # USAR QUANTIDADE CALCULADA BASEADA EM 80% DO SALDO ATUAL
                 order = self.exchange.create_market_buy_order(
                     symbol=self.symbol,
-                    amount=eth_quantity,  # QUANTIDADE FIXA 0.01 ETH
+                    amount=eth_quantity,  # QUANTIDADE BASEADA EM 80% DO SALDO ATUAL
                     params={
                         'type': 'swap',
                         'marginCoin': 'USDT'
@@ -220,7 +234,7 @@ class ETHBotFutures80Percent:
                 order_status = self.exchange.fetch_order(order_id, self.symbol)
 
                 logger.warning(f"📊 Status: {order_status.get('status')}")
-                logger.warning(f"💰 Filled: {order_status.get('filled', 0):.4f} ETH")
+                logger.warning(f"💰 Filled: {order_status.get('filled', 0):.6f} ETH")
                 logger.warning(f"💲 Cost: ${order_status.get('cost', 0):.2f} USDT")
 
                 if order_status.get('status') == 'closed' and order_status.get('filled', 0) > 0:
@@ -228,7 +242,7 @@ class ETHBotFutures80Percent:
                     filled_amount = order_status.get('filled', 0)
                     cost_usd = order_status.get('cost', 0)
 
-                    # ✅ BUSCAR NOVO SALDO
+                    # ✅ BUSCAR NOVO SALDO (PARA PRÓXIMO CÁLCULO DE 80%)
                     time.sleep(3)
                     new_balance = self.get_real_futures_balance()
                     margin_used = current_balance - new_balance
@@ -251,7 +265,10 @@ class ETHBotFutures80Percent:
                         'real_trade': True,
                         'trading_type': 'futures',
                         'exchange_status': order_status.get('status'),
-                        'method': 'fixed_quantity'
+                        'method': '80_percent_dynamic',
+                        'usdt_used': usdt_to_use,
+                        'eth_calculated': eth_quantity,
+                        'percentage_used': 80.0
                     }
 
                     # ✅ ATUALIZAR CONTADORES
@@ -266,14 +283,16 @@ class ETHBotFutures80Percent:
                     bot_state['error_count'] = 0
                     bot_state['last_error'] = None
 
-                    logger.warning("✅ TRADE FUTURES EXECUTADO!")
+                    logger.warning("✅ TRADE FUTURES EXECUTADO COM 80% DINÂMICO!")
                     logger.warning(f"📊 Order ID: {order_id}")
-                    logger.warning(f"💰 Margem Usada: ${margin_used:.2f} USDT")
-                    logger.warning(f"💥 Exposição Total: ${cost_usd:.2f} USDT")
-                    logger.warning(f"💎 ETH: {filled_amount:.4f}")
-                    logger.warning(f"🎯 Alavancagem: {self.leverage}x")
+                    logger.warning(f"🎯 USDT Usado (80%): ${usdt_to_use:.2f}")
+                    logger.warning(f"💰 Margem Real: ${margin_used:.2f} USDT")
+                    logger.warning(f"💥 Exposição: ${cost_usd:.2f} USDT")
+                    logger.warning(f"💎 ETH Executado: {filled_amount:.6f}")
+                    logger.warning(f"🚨 Alavancagem: {self.leverage}x")
+                    logger.warning(f"💰 Saldo Anterior: ${current_balance:.2f} USDT")
                     logger.warning(f"💰 Novo Saldo: ${new_balance:.2f} USDT")
-                    logger.warning(f"🎯 Total Trades: {bot_state['verified_real_trades']}")
+                    logger.warning(f"🔄 Próximo trade usará 80% de ${new_balance:.2f}")
 
                     return True
 
@@ -315,12 +334,11 @@ class ETHBotFutures80Percent:
                 time.sleep(60)
 
     def run_futures_trading_loop(self):
-        """🚨 LOOP PRINCIPAL FUTURES 🚨"""
+        """🚨 LOOP PRINCIPAL FUTURES - 80% DINÂMICO 🚨"""
         logger.warning("🚨 LOOP FUTURES TRADING INICIADO!")
-        logger.warning("🚨 INICIANDO FUTURES TRADING!")
+        logger.warning("🎯 80% DINÂMICO - REINVESTIMENTO AUTOMÁTICO!")
         logger.warning("💰 ESTE BOT VAI USAR SEU DINHEIRO REAL!")
         logger.warning(f"💥 COM ALAVANCAGEM {self.leverage}x!")
-        logger.warning("📊 USANDO QUANTIDADE FIXA 0.01 ETH!")
 
         bot_state['start_time'] = datetime.now()
 
@@ -331,13 +349,13 @@ class ETHBotFutures80Percent:
 
         try:
             while self.running:
-                logger.warning("🎯 TENTANDO TRADE FUTURES...")
+                logger.warning("🎯 CALCULANDO 80% DO SALDO ATUAL...")
 
-                # ✅ EXECUTAR TRADE
+                # ✅ EXECUTAR TRADE COM 80% DINÂMICO
                 success = self.execute_FUTURES_trade_with_leverage()
 
                 if success:
-                    logger.warning("✅ TRADE EXECUTADO COM SUCESSO!")
+                    logger.warning("✅ TRADE EXECUTADO! SALDO ATUALIZADO PARA PRÓXIMO 80%!")
                 else:
                     logger.warning("❌ TRADE FUTURES FALHOU")
 
@@ -370,7 +388,7 @@ class ETHBotFutures80Percent:
         self.thread.daemon = True
         self.thread.start()
 
-        logger.warning("🚀 BOT FUTURES INICIADO!")
+        logger.warning("🚀 BOT FUTURES (80% DINÂMICO) INICIADO!")
         return True
 
     def stop(self):
@@ -387,7 +405,7 @@ bot = ETHBotFutures80Percent()
 app = Flask(__name__)
 CORS(app)
 
-logger.warning("🚨 INICIANDO SERVIDOR FUTURES!")
+logger.warning("🚨 INICIANDO SERVIDOR FUTURES (80% DINÂMICO)!")
 
 @app.route('/')
 def index():
@@ -398,7 +416,7 @@ def index():
         <!DOCTYPE html>
         <html>
         <head>
-            <title>🚀 BOT FUTURES - QUANTIDADE FIXA</title>
+            <title>🚀 BOT FUTURES - 80% DINÂMICO</title>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
@@ -452,6 +470,12 @@ def index():
                     padding: 15px; 
                     margin: 20px 0;
                 }}
+                .success {{ 
+                    background: rgba(40,167,69,0.2); 
+                    border-left: 4px solid #28a745; 
+                    padding: 15px; 
+                    margin: 20px 0;
+                }}
                 h1 {{ text-align: center; font-size: 2.5em; margin-bottom: 30px; }}
                 h2 {{ color: #ffc107; }}
                 .metric {{ font-size: 1.5em; font-weight: bold; }}
@@ -460,13 +484,22 @@ def index():
         </head>
         <body>
             <div class="container">
-                <h1>🚀 BOT FUTURES - QUANTIDADE FIXA</h1>
+                <h1>🚀 BOT FUTURES - 80% DINÂMICO</h1>
                 
                 <div class="danger">
                     <h3>⚠️ AVISO IMPORTANTE - TRADING REAL ⚠️</h3>
                     <p>🚨 Este bot está configurado para TRADING REAL com ALAVANCAGEM {LEVERAGE}x</p>
-                    <p>📊 O bot usa quantidade fixa de 0.01 ETH por trade</p>
+                    <p>🎯 O bot usa SEMPRE 80% do saldo ATUAL (reinvestimento automático)</p>
                     <p>⚠️ RISCO DE LIQUIDAÇÃO MUITO ALTO!</p>
+                </div>
+
+                <div class="success">
+                    <h3>🎯 CÁLCULO DINÂMICO 80%</h3>
+                    <p>💰 Saldo Atual: <span class="metric">${bot_state['balance']:.2f} USDT</span></p>
+                    <p>🎯 80% Atual: <span class="metric">${bot_state['balance'] * 0.8:.2f} USDT</span></p>
+                    <p>📊 ETH Calculado: <span class="metric">{bot_state['last_eth_calculated']:.6f} ETH</span></p>
+                    <p>💎 Preço ETH: <span class="metric">${bot_state['eth_price']:.2f}</span></p>
+                    <p>🔄 <strong>Próximo trade usará 80% do saldo ATUALIZADO</strong></p>
                 </div>
 
                 <div class="grid">
@@ -474,17 +507,17 @@ def index():
                         <h2>📊 Status do Bot</h2>
                         <p>Status: <span class="{'status-active' if bot_state['active'] else 'status-inactive'}">{'🟢 ATIVO' if bot_state['active'] else '🔴 INATIVO'}</span></p>
                         <p>Conexão: {bot_state['connection_status']}</p>
-                        <p>Modo: {bot_state['mode']}</p>
+                        <p>Modo: 80% Dinâmico + Reinvestimento</p>
                         <p>Alavancagem: {bot_state['leverage']}x</p>
                         <p>Tipo: Futures Real Money</p>
                     </div>
 
                     <div class="card">
-                        <h2>💰 Saldo & Trading</h2>
-                        <p>Saldo: <span class="metric">${bot_state['balance']:.2f} USDT</span></p>
-                        <p>Quantidade Fixa: <span class="metric">0.01 ETH</span></p>
-                        <p>Preço ETH: <span class="metric">${bot_state['eth_price']:.2f}</span></p>
-                        <p>Valor por Trade: <span class="metric">${bot_state['eth_price'] * 0.01:.2f} USDT</span></p>
+                        <h2>💰 Saldo & Cálculos</h2>
+                        <p>Saldo Atual: <span class="metric">${bot_state['balance']:.2f} USDT</span></p>
+                        <p>80% Dinâmico: <span class="metric">${bot_state['balance'] * 0.8:.2f} USDT</span></p>
+                        <p>ETH Calculado: <span class="metric">{bot_state['last_eth_calculated']:.6f}</span></p>
+                        <p>Último USDT Usado: <span class="metric">${bot_state['last_usdt_used']:.2f}</span></p>
                     </div>
 
                     <div class="card">
@@ -496,17 +529,18 @@ def index():
                     </div>
 
                     <div class="card">
-                        <h2>⚠️ Últimos Eventos</h2>
+                        <h2>⚠️ Status & Erros</h2>
                         <p>Último Erro: {bot_state['last_error'] or 'Nenhum'}</p>
                         <p>Contagem Erros: {bot_state['error_count']}</p>
                         <p>Último Trade: ${bot_state['last_trade_amount']:.2f} USDT</p>
+                        <p>Preço Atualizado: {bot_state['last_price_update'].strftime('%H:%M:%S') if bot_state['last_price_update'] else 'Nunca'}</p>
                     </div>
                 </div>
 
                 <div class="card">
                     <h2>🎮 Controles</h2>
                     <div style="text-align: center;">
-                        <button class="btn btn-success" onclick="startBot()">🚀 INICIAR BOT</button>
+                        <button class="btn btn-success" onclick="startBot()">🚀 INICIAR BOT (80% DINÂMICO)</button>
                         <button class="btn" onclick="stopBot()">🛑 PARAR BOT</button>
                         <button class="btn" onclick="location.reload()">🔄 ATUALIZAR</button>
                     </div>
@@ -552,13 +586,13 @@ def index():
 def start_bot():
     """Iniciar trading"""
     try:
-        logger.warning("🚨 RECEBIDO COMANDO PARA INICIAR FUTURES!")
+        logger.warning("🚨 RECEBIDO COMANDO PARA INICIAR FUTURES 80% DINÂMICO!")
         logger.warning("🚨 VERIFICANDO CREDENCIAIS PARA FUTURES...")
 
         if bot.start():
             return jsonify({
                 'success': True,
-                'message': '🚀 Bot Futures iniciado com TRADING REAL!'
+                'message': '🚀 Bot Futures (80% dinâmico + reinvestimento) iniciado!'
             })
         else:
             return jsonify({
