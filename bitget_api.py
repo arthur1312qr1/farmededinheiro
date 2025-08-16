@@ -4,12 +4,12 @@ import time
 from decimal import Decimal, ROUND_DOWN
 
 class BitgetAPI:
-    def __init__(self, api_key=None, secret=None, passphrase=None):
-        """Inicializa com credenciais do ambiente ou parâmetros"""
+    def __init__(self, api_key=None, secret_key=None, passphrase=None):
+        """Inicializa com nomes corretos das credenciais"""
         
-        # Usar credenciais do ambiente se não passadas como parâmetros
+        # Mapear nomes corretos
         self.api_key = api_key or os.getenv('BITGET_API_KEY')
-        self.secret = secret or os.getenv('BITGET_SECRET') 
+        self.secret = secret_key or os.getenv('BITGET_SECRET')  # secret_key -> secret
         self.passphrase = passphrase or os.getenv('BITGET_PASSPHRASE')
         
         if not all([self.api_key, self.secret, self.passphrase]):
@@ -72,14 +72,14 @@ class BitgetAPI:
         # Quantidade ETH que pode comprar
         raw_quantity = buying_power / eth_price
         
-        # Precisão da Bitget: 2 casas decimais, mas sem perder precisão
+        # Precisão da Bitget: 2 casas decimais
         eth_quantity = float(Decimal(str(raw_quantity)).quantize(Decimal('0.01'), rounding=ROUND_DOWN))
         
         # Garantir mínimo 0.01 ETH
         if eth_quantity < 0.01:
             eth_quantity = 0.01
             
-        print(f"💪 Cálculo CORRIGIDO:")
+        print(f"💪 Cálculo DEFINITIVO:")
         print(f"   Saldo: ${usdt_balance:.6f} USDT")
         print(f"   Alavancagem: {leverage}x")
         print(f"   Poder de compra: ${buying_power:.2f} USDT")
@@ -238,10 +238,15 @@ class BitgetAPI:
             print(f"❌ Erro de conexão: {e}")
             return False
 
-# Função para criar instância (compatibilidade)
+# Função para compatibilidade com código existente
 def create_bitget_api():
     """Cria instância da BitgetAPI usando variáveis de ambiente"""
     return BitgetAPI()
+
+# Para compatibilidade com diferentes formas de chamada
+def BitgetAPI_old_style(api_key, secret_key, passphrase):
+    """Compatibilidade com estilo antigo de inicialização"""
+    return BitgetAPI(api_key=api_key, secret_key=secret_key, passphrase=passphrase)
 
 # Testar se executado diretamente
 if __name__ == "__main__":
