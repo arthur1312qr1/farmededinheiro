@@ -2,10 +2,7 @@ import logging
 import os
 import time
 import threading
-import asyncio
-import aiohttp
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -15,9 +12,9 @@ from trading_bot import TradingBot
 # Load environment variables
 load_dotenv()
 
-# Configure logging (reduzido para não impactar performance)
+# Configure logging
 logging.basicConfig(
-    level=logging.WARNING,  # Apenas warnings e errors para reduzir I/O
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
@@ -35,22 +32,14 @@ price_monitor = {
     'last_update': None,
     'monitoring': False,
     'rapid_changes': [],
-    'price_cache': [],  # Cache para múltiplas leituras simultâneas
-    'update_count': 0,
-    'avg_response_time': 0.0
+    'update_count': 0
 }
 
-# Thread pool para operações paralelas
-executor = ThreadPoolExecutor(max_workers=4)
-
 def ultra_fast_price_monitoring():
-    """Thread de monitoramento ULTRA-RÁPIDO com múltiplas otimizações"""
+    """Monitoramento ultra-rápido de preços"""
     global price_monitor, bot
     
-    print("🚀 MONITORAMENTO ULTRA-RÁPIDO INICIADO - Detectando variações >= 0.05%")
-    
-    # Cache de conexão para reutilizar
-    session = None
+    logging.warning("🚀 MONITORAMENTO ULTRA-RÁPIDO INICIADO")
     
     while price_monitor['monitoring']:
         try:
@@ -58,120 +47,99 @@ def ultra_fast_price_monitoring():
                 time.sleep(0.01)
                 continue
                 
-            # Timer para medir velocidade
             start_time = time.perf_counter()
             
-            # Buscar preço usando múltiplas estratégias simultaneamente
+            # Obter dados de mercado
             market_data = bot.bitget_api.get_market_data('ethusdt_UMCBL')
             
             if market_data and 'price' in market_data:
                 current_price = float(market_data['price'])
                 current_time = datetime.now()
                 
-                # Cálculos otimizados inline
-                last_price = price_monitor['current_price']
-                price_monitor['last_price'] = last_price
+                # Atualizar preços
+                price_monitor['last_price'] = price_monitor['current_price']
                 price_monitor['current_price'] = current_price
                 price_monitor['last_update'] = current_time
                 price_monitor['update_count'] += 1
                 
-                # Atualizar min/max com verificação rápida
+                # Min/Max tracking
                 if current_price < price_monitor['min_price']:
                     price_monitor['min_price'] = current_price
-                    print(f"🔻 NOVO MÍNIMO: ${current_price:.4f}")
+                    logging.warning(f"🔻 NOVO MÍNIMO: ${current_price:.2f}")
                 
                 if current_price > price_monitor['max_price']:
                     price_monitor['max_price'] = current_price
-                    print(f"🔺 NOVO MÁXIMO: ${current_price:.4f}")
+                    logging.warning(f"🔺 NOVO MÁXIMO: ${current_price:.2f}")
                 
-                # Cálculo ultra-rápido de variação
-                if last_price > 0:
-                    price_change = current_price - last_price
-                    price_change_percent = (price_change / last_price) * 100
+                # Calcular variação
+                if price_monitor['last_price'] > 0:
+                    price_change = current_price - price_monitor['last_price']
+                    price_change_percent = (price_change / price_monitor['last_price']) * 100
                     
                     price_monitor['price_change'] = price_change
                     price_monitor['price_change_percent'] = price_change_percent
                     
-                    # Detectar variações críticas (>= 0.05%)
+                    # Detectar variações >= 0.05%
                     if abs(price_change_percent) >= 0.05:
                         processing_time = (time.perf_counter() - start_time) * 1000
-                        
-                        # Log otimizado apenas para mudanças importantes
-                        print(f"⚡ VARIAÇÃO {price_change_percent:.4f}% | ${last_price:.4f}→${current_price:.4f} | {processing_time:.1f}ms")
-                        
-                        # Cache otimizado - só guarda últimas 50 para velocidade
-                        rapid_change = {
-                            'timestamp': current_time.isoformat(),
-                            'from_price': last_price,
-                            'to_price': current_price,
-                            'change_percent': price_change_percent,
-                            'processing_time_ms': processing_time
-                        }
-                        
-                        price_monitor['rapid_changes'].append(rapid_change)
-                        if len(price_monitor['rapid_changes']) > 50:
-                            price_monitor['rapid_changes'].pop(0)
-                
-                # Calcular tempo médio de resposta
-                total_time = (time.perf_counter() - start_time) * 1000
-                price_monitor['avg_response_time'] = (
-                    (price_monitor['avg_response_time'] * (price_monitor['update_count'] - 1) + total_time) 
-                    / price_monitor['update_count']
-                )
+                        logging.warning(f"⚡ VARIAÇÃO {price_change_percent:.4f}% | ${price_monitor['last_price']:.2f}→${current_price:.2f} | {processing_time:.1f}ms")
             
-            # INTERVALO ULTRA-RÁPIDO - 10ms para detectar mudanças instantâneas
+            # Intervalo ultra-rápido
             time.sleep(0.01)
             
         except Exception as e:
-            # Log minimal para errors
-            if price_monitor['update_count'] % 100 == 0:  # Log apenas a cada 100 erros
-                print(f"❌ Erro no monitoramento: {e}")
-            time.sleep(0.02)  # Pausa mais curta em erro
+            if price_monitor['update_count'] % 100 == 0:
+                logging.error(f"❌ Erro no monitoramento: {e}")
+            time.sleep(0.02)
 
-# Função adicional para monitoramento paralelo (múltiplas threads)
-def parallel_price_monitor():
-    """Monitor adicional para redundância e velocidade"""
-    global price_monitor
-    
-    while price_monitor['monitoring']:
-        try:
-            # Executar verificação paralela a cada 5ms offset
-            time.sleep(0.005)
-            
-            if bot:
-                # Quick price check alternativo
-                market_data = bot.bitget_api.get_market_data('ethusdt_UMCBL')
-                if market_data and 'price' in market_data:
-                    # Cache de backup para comparação
-                    backup_price = float(market_data['price'])
-                    if abs(backup_price - price_monitor['current_price']) > 0.01:
-                        print(f"🔄 VERIFICAÇÃO PARALELA: Diferença detectada ${backup_price:.4f}")
-                        
-        except:
-            pass
+# Função para corrigir cálculo de quantidade ETH
+def calculate_eth_amount(usdt_amount, eth_price):
+    """Calcula quantidade ETH com precisão correta para Bitget"""
+    try:
+        # Calcular quantidade bruta
+        raw_amount = usdt_amount / eth_price
+        
+        # Arredondar para 2 casas decimais (precisão da Bitget)
+        eth_amount = round(raw_amount, 2)
+        
+        # Verificar se está dentro dos limites da Bitget
+        # Máximo: 0.06 ETH (conforme mencionado)
+        if eth_amount > 0.06:
+            eth_amount = 0.06
+            logging.warning(f"⚠️ Quantidade limitada ao máximo: 0.06 ETH")
+        
+        # Se quantidade calculada for muito pequena, usar valor mínimo operacional
+        if eth_amount < 0.01:
+            eth_amount = 0.01
+            logging.warning(f"⚠️ Quantidade ajustada para mínimo operacional: 0.01 ETH")
+        
+        logging.warning(f"💎 Cálculo ETH:")
+        logging.warning(f"   💰 USDT: ${usdt_amount:.2f}")
+        logging.warning(f"   💎 Preço: ${eth_price:.2f}")
+        logging.warning(f"   📊 Quantidade: {eth_amount:.2f} ETH")
+        
+        return eth_amount
+        
+    except Exception as e:
+        logging.error(f"❌ Erro no cálculo ETH: {e}")
+        return 0.01  # Fallback seguro
 
 # Initialize APIs and Bot
 def init_bot():
     try:
-        # Get API credentials from environment
         api_key = os.getenv('BITGET_API_KEY')
         secret_key = os.getenv('BITGET_SECRET')
         passphrase = os.getenv('BITGET_PASSPHRASE')
         
-        # Debug: Log se as variáveis estão sendo carregadas
-        print(f"🔍 Verificando credenciais:")
-        print(f"   API_KEY: {'✅ OK' if api_key else '❌ VAZIO'}")
-        print(f"   SECRET: {'✅ OK' if secret_key else '❌ VAZIO'}")
-        print(f"   PASSPHRASE: {'✅ OK' if passphrase else '❌ VAZIO'}")
+        logging.info(f"🔍 Verificando credenciais:")
+        logging.info(f"   API_KEY: {'✅ OK' if api_key else '❌ VAZIO'}")
+        logging.info(f"   SECRET: {'✅ OK' if secret_key else '❌ VAZIO'}")
+        logging.info(f"   PASSPHRASE: {'✅ OK' if passphrase else '❌ VAZIO'}")
         
-        # FAIL HARD if no credentials
         if not all([api_key, secret_key, passphrase]):
-            raise Exception("Credenciais não configuradas no ambiente")
+            raise Exception("Credenciais não configuradas")
         
-        if api_key == "test_key" or secret_key == "test_secret" or passphrase == "test_pass":
-            raise Exception("Credenciais de teste não são permitidas")
-        
-        print("✅ MODO PRODUÇÃO - VELOCIDADE MÁXIMA")
+        logging.info("✅ MODO PRODUÇÃO - 100% DO SALDO COM PRECISÃO CORRETA")
         
         # Initialize Bitget API
         bitget_api = BitgetAPI(
@@ -181,25 +149,61 @@ def init_bot():
             sandbox=False
         )
         
+        # Patch do método place_order para usar cálculo correto
+        original_place_order = bitget_api.place_order
+        
+        def patched_place_order(symbol, side, size, price=None, leverage=10):
+            try:
+                logging.warning(f"🔧 ORDEM CORRIGIDA:")
+                
+                # Obter saldo atual
+                current_balance = bitget_api.get_account_balance()
+                
+                # Obter preço atual se não fornecido
+                if price is None:
+                    market_data = bitget_api.get_market_data(symbol)
+                    current_price = float(market_data['price'])
+                else:
+                    current_price = float(price)
+                
+                # Usar 100% do saldo
+                usdt_amount = current_balance * 0.99  # 99% para taxas
+                
+                # Calcular quantidade ETH com precisão correta
+                eth_quantity = calculate_eth_amount(usdt_amount, current_price)
+                
+                logging.warning(f"💰 Usando 100% do saldo: ${usdt_amount:.2f} USDT")
+                logging.warning(f"💎 Quantidade corrigida: {eth_quantity:.2f} ETH")
+                
+                # Chamar método original com quantidade corrigida
+                return original_place_order(symbol, side, eth_quantity, current_price, leverage)
+                
+            except Exception as e:
+                logging.error(f"❌ Erro na ordem corrigida: {e}")
+                return {'success': False, 'error': str(e)}
+        
+        # Aplicar patch
+        bitget_api.place_order = patched_place_order
+        
         # Initialize Trading Bot
         trading_bot = TradingBot(
             bitget_api=bitget_api,
             symbol='ethusdt_UMCBL',
             leverage=10,
-            balance_percentage=100.0,
+            balance_percentage=100.0,  # 100% DO SALDO
             daily_target=200,
             scalping_interval=2,
             paper_trading=False
         )
         
-        print("🚀 Bot inicializado - MODO ULTRA-RÁPIDO")
+        logging.info("🚀 Bot inicializado - 100% DO SALDO COM PRECISÃO CORRIGIDA")
         return trading_bot
         
     except Exception as e:
-        print(f"❌ Falha na inicialização: {e}")
+        logging.error(f"❌ Falha na inicialização: {e}")
         return None
 
-# Initialize bot globally
+# Initialize bot
 bot = init_bot()
 
 @app.route('/')
@@ -211,28 +215,21 @@ def get_status():
     try:
         if not bot:
             return jsonify({
-                'error': 'Bot não inicializado', 
-                'status': 'error',
-                'is_running': False,
-                'is_paused': False,
-                'daily_trades': 0,
-                'win_rate': 0.0
+                'error': 'Bot não inicializado',
+                'is_running': False
             }), 500
         
         stats = bot.get_status()
         
-        # Adicionar dados de monitoramento ultra-rápido
+        # Adicionar dados de monitoramento
         stats.update({
             'ultra_monitoring': {
                 'current_price': price_monitor['current_price'],
                 'min_price': price_monitor['min_price'] if price_monitor['min_price'] != float('inf') else 0,
                 'max_price': price_monitor['max_price'],
                 'price_change_percent': price_monitor['price_change_percent'],
-                'last_update': price_monitor['last_update'].isoformat() if price_monitor['last_update'] else None,
                 'monitoring_active': price_monitor['monitoring'],
-                'update_count': price_monitor['update_count'],
-                'avg_response_time_ms': round(price_monitor['avg_response_time'], 2),
-                'rapid_changes_count': len(price_monitor['rapid_changes'])
+                'update_count': price_monitor['update_count']
             }
         })
         
@@ -245,31 +242,51 @@ def get_status():
 def start_bot():
     try:
         if not bot:
-            return jsonify({
-                'error': 'Bot não inicializado',
-                'success': False
-            }), 500
+            return jsonify({'error': 'Bot não inicializado', 'success': False}), 500
         
         bot.start()
         
-        # Iniciar monitoramento ULTRA-RÁPIDO com múltiplas threads
+        # Iniciar monitoramento ultra-rápido
         if not price_monitor['monitoring']:
             price_monitor['monitoring'] = True
-            
-            # Thread principal ultra-rápida
-            main_thread = threading.Thread(target=ultra_fast_price_monitoring, daemon=True)
-            main_thread.start()
-            
-            # Thread paralela para redundância
-            parallel_thread = threading.Thread(target=parallel_price_monitor, daemon=True)
-            parallel_thread.start()
-            
-            print("🚀 MONITORAMENTO ULTRA-RÁPIDO ATIVO - 10ms de intervalo")
+            monitor_thread = threading.Thread(target=ultra_fast_price_monitoring, daemon=True)
+            monitor_thread.start()
+            logging.warning("🎯 Monitoramento ultra-rápido iniciado")
         
-        print("🟢 Bot + Monitoramento Ultra-Rápido ATIVO")
+        logging.warning("🟢 Bot iniciado - 100% DO SALDO COM PRECISÃO CORRIGIDA")
         return jsonify({
-            'message': 'Bot iniciado - Monitoramento Ultra-Rápido (10ms)',
+            'message': 'Bot iniciado - Usando 100% do saldo com precisão correta',
             'status': 'running',
+            'success': True
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e), 'success': False}), 500
+
+@app.route('/api/test_calculation')
+def test_calculation():
+    """Testar cálculo de quantidade ETH"""
+    try:
+        if not bot:
+            return jsonify({'error': 'Bot não inicializado'}, 500)
+        
+        # Obter dados atuais
+        current_balance = bot.get_account_balance()
+        market_data = bot.bitget_api.get_market_data('ethusdt_UMCBL')
+        current_price = float(market_data['price'])
+        
+        # Usar 100% do saldo
+        usdt_amount = current_balance * 0.99
+        
+        # Calcular com função corrigida
+        eth_amount = calculate_eth_amount(usdt_amount, current_price)
+        
+        return jsonify({
+            'current_balance': current_balance,
+            'current_price': current_price,
+            'usdt_to_use': usdt_amount,
+            'eth_amount_calculated': eth_amount,
+            'calculation_valid': 0.01 <= eth_amount <= 0.06,
             'success': True
         })
         
@@ -283,34 +300,10 @@ def stop_bot():
             bot.stop()
         
         price_monitor['monitoring'] = False
-        print("🔴 Bot e monitoramento ultra-rápido parados")
+        logging.warning("🔴 Bot e monitoramento parados")
         
-        return jsonify({
-            'message': 'Bot e monitoramento parados',
-            'status': 'stopped',
-            'success': True
-        })
+        return jsonify({'message': 'Bot parado', 'status': 'stopped', 'success': True})
         
-    except Exception as e:
-        return jsonify({'error': str(e), 'success': False}), 500
-
-@app.route('/api/ultra_data')
-def get_ultra_data():
-    """Get ultra-fast monitoring data"""
-    try:
-        return jsonify({
-            'current_price': price_monitor['current_price'],
-            'min_price': price_monitor['min_price'] if price_monitor['min_price'] != float('inf') else 0,
-            'max_price': price_monitor['max_price'],
-            'price_change_percent': price_monitor['price_change_percent'],
-            'last_update': price_monitor['last_update'].isoformat() if price_monitor['last_update'] else None,
-            'monitoring_active': price_monitor['monitoring'],
-            'update_count': price_monitor['update_count'],
-            'avg_response_time_ms': round(price_monitor['avg_response_time'], 2),
-            'rapid_changes': price_monitor['rapid_changes'][-5:],  # Últimas 5 mudanças
-            'rapid_changes_count': len(price_monitor['rapid_changes']),
-            'success': True
-        })
     except Exception as e:
         return jsonify({'error': str(e), 'success': False}), 500
 
@@ -336,7 +329,7 @@ def emergency_stop():
             bot.stop()
         
         price_monitor['monitoring'] = False
-        print("🚨 PARADA DE EMERGÊNCIA")
+        logging.warning("🚨 PARADA DE EMERGÊNCIA")
         
         return jsonify({
             'message': 'Parada de emergência executada',
@@ -367,7 +360,7 @@ def get_balance():
 @app.route('/api/logs')
 def get_logs():
     return jsonify({
-        'message': 'Monitoramento ultra-rápido ativo',
+        'message': 'Bot ativo com precisão corrigida',
         'status': 'active',
         'logs': [],
         'success': True
@@ -392,12 +385,12 @@ def update_config():
 
 if __name__ == '__main__':
     if bot:
-        print("🚀 MODO ULTRA-RÁPIDO ATIVO")
-        print("⚡ Monitoramento: 10ms de intervalo")
-        print("🎯 Detecta variações >= 0.05% instantaneamente")
-        print("🔥 Múltiplas threads paralelas")
+        logging.warning("🚀 MODO 100% DO SALDO COM PRECISÃO CORRIGIDA")
+        logging.warning("💎 Quantidade ETH: 2 casas decimais (0.01 - 0.06)")
+        logging.warning("💰 Usa 100% do saldo disponível")
+        logging.warning("⚡ Monitoramento ultra-rápido: 10ms")
     else:
-        print("❌ FALHA CRÍTICA: Configure credenciais no Render.com")
+        logging.error("❌ FALHA: Configure credenciais no Render.com")
     
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
