@@ -147,7 +147,7 @@ class BitgetAPI:
             return None
 
     def place_order(self, symbol: str, side: str, size: float, price: float = None, leverage: int = 10) -> Dict:
-        """Place FUTURES order with 10x leverage - CORRIGIDO PARA 80% DINÂMICO"""
+        """Place FUTURES order usando 100% DINÂMICO do saldo atual"""
         try:
             futures_symbol = 'ETH/USDT:USDT'
             
@@ -165,48 +165,29 @@ class BitgetAPI:
             else:
                 current_price = price
             
-            # CORREÇÃO PRINCIPAL: Usar 80% do saldo ATUAL (dinâmico)
-            quote_amount = size  # Este é o valor em USDT (já calculado como 80% no trading_bot.py)
-            base_amount = quote_amount / current_price  # Quantidade ETH necessária
+            # CORREÇÃO PRINCIPAL: Buscar saldo ATUAL (100% dinâmico)
+            current_balance = self.get_account_balance()  # ← SEMPRE BUSCAR NOVO
+            quote_amount = current_balance  # ← 100% DO SALDO ATUAL
+            base_amount = quote_amount / current_price  # ← QUANTIDADE ETH CALCULADA
             
-            # CORREÇÃO: Validar quantidade mínima SEM forçar uso fixo
-            MIN_ETH_AMOUNT = 0.01  # Mínimo exigido pela Bitget
-            
-            logger.warning(f"🎯 USANDO 80% DINÂMICO DO SALDO:")
-            logger.warning(f"💰 Valor USDT (80%): ${quote_amount:.2f}")
+            logger.warning(f"🚨 USANDO 100% DINÂMICO DO SALDO:")
+            logger.warning(f"💰 Saldo Atual: ${current_balance:.2f} USDT")  
+            logger.warning(f"🎯 100% Dinâmico: ${quote_amount:.2f} USDT")  # ← MESMO VALOR
             logger.warning(f"📊 Quantidade ETH: {base_amount:.6f}")
-            logger.warning(f"📊 Mínimo Exchange: {MIN_ETH_AMOUNT:.6f} ETH")
-            
-            # Se a quantidade for menor que o mínimo, retornar erro
-            if base_amount < MIN_ETH_AMOUNT:
-                min_usdt_needed = MIN_ETH_AMOUNT * current_price
-                logger.error(f"❌ SALDO INSUFICIENTE PARA MÍNIMO DA EXCHANGE")
-                logger.error(f"💰 Necessário: ${min_usdt_needed:.2f} USDT")
-                logger.error(f"💰 Tentando usar: ${quote_amount:.2f} USDT")
-                logger.error(f"💡 SOLUÇÃO: Aguarde saldo atingir ${min_usdt_needed:.2f} USDT")
-                
-                return {
-                    'success': False,
-                    'error': f'Saldo insuficiente para mínimo da exchange. Necessário: ${min_usdt_needed:.2f} USDT'
-                }
-            
-            logger.warning(f"✅ QUANTIDADE APROVADA - EXECUTANDO ORDEM:")
-            logger.warning(f"🚨 EXECUTANDO ORDEM FUTURES 10x:")
-            logger.warning(f"💰 Valor USDT: ${quote_amount:.2f}")
-            logger.warning(f"📊 Quantidade ETH: {base_amount:.6f}")
-            logger.warning(f"💎 Preço: ${current_price:.2f}")
+            logger.warning(f"💎 Preço ETH: ${current_price:.2f}")
             logger.warning(f"⚡ Alavancagem: 10x")
             logger.warning(f"💥 Exposição: ${quote_amount * 10:.2f} USDT")
             
-            # Executar ordem com a quantidade calculada (80% do saldo)
+            # Executar ordem usando 100% do saldo atual
             order = self.exchange.create_order(
                 symbol=futures_symbol,
                 type='market',
                 side=side,
-                amount=base_amount  # Usar quantidade ETH calculada
+                amount=base_amount  # ETH calculado com 100% do saldo
             )
             
-            logger.warning(f"✅ ORDEM FUTURES EXECUTADA COM 80% DO SALDO!")
+            logger.warning(f"✅ ORDEM EXECUTADA COM 100% DINÂMICO!")
+            logger.warning(f"💰 Valor usado: ${quote_amount:.2f} USDT")
             
             return {
                 'success': True,
@@ -215,7 +196,7 @@ class BitgetAPI:
             }
             
         except Exception as e:
-            logger.error(f"❌ Erro ao executar ordem FUTURES: {e}")
+            logger.error(f"❌ Erro ao executar ordem: {e}")
             return {
                 'success': False,
                 'error': str(e)
