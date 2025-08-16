@@ -169,16 +169,35 @@ class BitgetAPI:
             quote_amount = size  # Valor em USDT (80% do saldo)
             base_amount = quote_amount / current_price  # Quantidade ETH
             
-            # CORREÇÃO: Validar quantidade mínima antes de executar ordem
+            # CORREÇÃO: Validar quantidade mínima APENAS se o valor calculado for insuficiente
             MIN_ETH_AMOUNT = 0.01  # Mínimo exigido pela Bitget
             
             if base_amount < MIN_ETH_AMOUNT:
-                # Ajustar para quantidade mínima
+                logger.warning(f"⚠️ QUANTIDADE CALCULADA ABAIXO DO MÍNIMO:")
+                logger.warning(f"📊 Calculado: {base_amount:.6f} ETH")
+                logger.warning(f"📊 Mínimo: {MIN_ETH_AMOUNT:.6f} ETH")
+                
+                # Verificar se temos saldo suficiente para a quantidade mínima
+                min_usdt_needed = MIN_ETH_AMOUNT * current_price
+                current_balance = self.get_account_balance()
+                
+                if current_balance < min_usdt_needed:
+                    logger.error(f"❌ SALDO INSUFICIENTE PARA QUANTIDADE MÍNIMA")
+                    logger.error(f"💰 Necessário: ${min_usdt_needed:.2f} USDT")
+                    logger.error(f"💰 Disponível: ${current_balance:.2f} USDT")
+                    return {
+                        'success': False,
+                        'error': f'Saldo insuficiente. Necessário: ${min_usdt_needed:.2f} USDT'
+                    }
+                
+                # Usar quantidade mínima apenas se necessário
                 base_amount = MIN_ETH_AMOUNT
                 quote_amount = base_amount * current_price
                 logger.warning(f"⚡ AJUSTADO PARA QUANTIDADE MÍNIMA:")
                 logger.warning(f"📊 Nova Quantidade ETH: {base_amount:.6f}")
                 logger.warning(f"💰 Novo Valor USDT: ${quote_amount:.2f}")
+            else:
+                logger.warning(f"✅ USANDO QUANTIDADE CALCULADA (80% DO SALDO)")
             
             logger.warning(f"🚨 EXECUTANDO ORDEM FUTURES 10x:")
             logger.warning(f"💰 Valor USDT: ${quote_amount:.2f}")
