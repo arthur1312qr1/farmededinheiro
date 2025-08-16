@@ -57,10 +57,13 @@ class TradingBot:
         self.target_trades_per_day = config.get('TARGET_TRADES_PER_DAY', 200)
         self.base_currency = config.get('BASE_CURRENCY', 'USDT')
         
-        # Risk management
+        # Risk management - CORREÇÃO: Mudança de 10% para 80%
         self.stop_loss_pct = 0.02  # 2%
         self.take_profit_pct = 0.01  # 1%
-        self.position_size_pct = 0.1  # 10% of balance per trade
+        self.position_size_pct = 0.8  # 80% of balance per trade (CORRIGIDO)
+        
+        # ADIÇÃO: Valor mínimo da exchange
+        self.MIN_ORDER_USDT = 1.0
         
         # Activity log
         self.activity_log = []
@@ -69,8 +72,17 @@ class TradingBot:
         logger.info(f"🤖 Trading Bot configurado:")
         logger.info(f"   Símbolo: {self.symbol}")
         logger.info(f"   Alavancagem: {self.leverage}x")
+        logger.info(f"   Uso do saldo: {self.position_size_pct*100}% (CORRIGIDO)")  # ADIÇÃO
         logger.info(f"   Meta diária: {self.target_trades_per_day} trades")
         logger.info(f"   Paper Trading: {config.get('PAPER_TRADING', False)}")
+    
+    # ADIÇÃO: Método de validação
+    def validate_min_order_value(self, usdt_amount: float) -> bool:
+        """Valida se o valor da ordem atende ao mínimo da exchange"""
+        if usdt_amount < self.MIN_ORDER_USDT:
+            logger.warning(f"❌ Valor {usdt_amount:.2f} USDT abaixo do mínimo {self.MIN_ORDER_USDT} USDT")
+            return False
+        return True
     
     def start(self):
         """Start the trading bot"""
@@ -264,22 +276,41 @@ class TradingBot:
             self._check_stop_loss_take_profit(price)
     
     def _execute_buy_order(self, price: float, analysis: Dict):
-        """Execute buy order"""
+        """Execute buy order - CORRIGIDO APENAS O CÁLCULO"""
         try:
             # Calculate position size
             account_balance = self.bitget_api.get_account_balance()
-            position_size = account_balance * self.position_size_pct
-            quantity = position_size / price
+            
+            # CORREÇÃO: Usar 80% do saldo em USDT
+            usdt_80_percent = account_balance * self.position_size_pct  # 80% do saldo
+            
+            # ADIÇÃO: Verificar valor mínimo
+            if not self.validate_min_order_value(usdt_80_percent):
+                self.add_log("ERRO", f"Valor insuficiente: ${usdt_80_percent:.2f} < ${self.MIN_ORDER_USDT} USDT", "error")
+                return
+                
+            # Calcular quantidade ETH (apenas para logs)
+            quantity = usdt_80_percent / price
+            
+            # ADIÇÃO: Logs detalhados
+            logger.warning(f"🚨 CÁLCULO DINÂMICO 80% DO SALDO:")
+            logger.warning(f"💰 Saldo Atual: ${account_balance:.2f} USDT")
+            logger.warning(f"🎯 80% Dinâmico: ${usdt_80_percent:.2f} USDT")
+            logger.warning(f"💎 Preço ETH: ${price:.2f}")
+            logger.warning(f"📊 ETH Calculado: {quantity:.6f} ETH")
+            logger.warning(f"🚨 Alavancagem: {self.leverage}x")
+            logger.warning(f"💥 Exposição Total: ${usdt_80_percent * self.leverage:.2f} USDT")
+            logger.warning(f"💰 EXECUTANDO ORDEM FUTURES!")
             
             # Calculate stop loss and take profit
             stop_loss = price * (1 - self.stop_loss_pct)
             take_profit = price * (1 + self.take_profit_pct)
             
-            # Execute order
+            # CORREÇÃO: Executar ordem com valor USDT
             order_result = self.bitget_api.place_order(
                 symbol=self.symbol,
                 side='buy',
-                size=quantity,
+                size=usdt_80_percent,  # USAR VALOR USDT, NÃO QUANTITY
                 price=price,
                 leverage=self.leverage
             )
@@ -289,6 +320,7 @@ class TradingBot:
                     'side': 'long',
                     'entry_price': price,
                     'quantity': quantity,
+                    'usdt_value': usdt_80_percent,  # ADIÇÃO: Guardar valor USDT
                     'stop_loss': stop_loss,
                     'take_profit': take_profit,
                     'timestamp': datetime.now(),
@@ -297,16 +329,21 @@ class TradingBot:
                 
                 self.daily_trades += 1
                 self.total_trades += 1
-                self.total_volume += position_size
+                self.total_volume += usdt_80_percent  # CORREÇÃO: Usar valor USDT
                 
                 self.add_log(
                     "COMPRA EXECUTADA",
-                    f"ETH/USDT - Quantidade: {quantity:.4f} - Preço: ${price:.2f}",
+                    f"ETH/USDT - Valor: ${usdt_80_percent:.2f} - Preço: ${price:.2f}",  # CORREÇÃO
                     "success",
                     f"Stop Loss: ${stop_loss:.2f} | Take Profit: ${take_profit:.2f}"
                 )
                 
-                logger.info(f"✅ Ordem de compra executada: {quantity:.4f} @ ${price:.2f}")
+                logger.info(f"✅ Ordem de compra executada: ${usdt_80_percent:.2f} USDT @ ${price:.2f}")
+            else:
+                # ADIÇÃO: Log de erro detalhado
+                error_msg = order_result.get('error', 'Erro desconhecido') if order_result else 'Falha na comunicação'
+                logger.error(f"❌ ORDEM FUTURES FALHOU: bitget {error_msg}")
+                logger.warning(f"❌ TRADE FUTURES FALHOU")
                 
         except Exception as e:
             logger.error(f"❌ Erro ao executar ordem de compra: {e}")
@@ -318,6 +355,8 @@ class TradingBot:
             if not self.current_position:
                 return
             
+            # CORREÇÃO: Usar valor USDT salvo
+            usdt_value = self.current_position.get('usdt_value', 0)
             quantity = self.current_position['quantity']
             entry_price = self.current_position['entry_price']
             
@@ -325,7 +364,7 @@ class TradingBot:
             order_result = self.bitget_api.place_order(
                 symbol=self.symbol,
                 side='sell',
-                size=quantity,
+                size=usdt_value if usdt_value > 0 else quantity,  # Priorizar valor USDT
                 price=price,
                 leverage=self.leverage
             )
@@ -373,23 +412,24 @@ class TradingBot:
             self._execute_sell_order(current_price, {'trigger': 'take_profit'})
     
     def close_position(self):
-        """Manually close current position"""
+        """Close current position manually"""
         if not self.current_position:
-            return False
+            logger.info("ℹ️ Nenhuma posição aberta para fechar")
+            return
         
         try:
             # Get current market price
             market_data = self.bitget_api.get_market_data(self.symbol)
-            current_price = market_data.get('price', 0)
-            
-            self._execute_sell_order(current_price, {'trigger': 'manual'})
-            return True
-            
+            if market_data:
+                current_price = market_data.get('price', 0)
+                self._execute_sell_order(current_price, {'trigger': 'manual_close'})
+            else:
+                logger.error("❌ Não foi possível obter preço atual para fechamento")
+        
         except Exception as e:
             logger.error(f"❌ Erro ao fechar posição: {e}")
-            return False
     
-    def add_log(self, action: str, message: str, log_type: str = "info", details: str = ""):
+    def add_log(self, action: str, message: str, log_type: str, details: str = ""):
         """Add entry to activity log"""
         log_entry = {
             'timestamp': datetime.now(),
@@ -399,31 +439,52 @@ class TradingBot:
             'details': details
         }
         
-        self.activity_log.insert(0, log_entry)
+        self.activity_log.append(log_entry)
         
         # Keep only recent entries
         if len(self.activity_log) > self.max_log_entries:
-            self.activity_log = self.activity_log[:self.max_log_entries]
+            self.activity_log = self.activity_log[-self.max_log_entries:]
     
-    def get_status(self) -> Dict:
-        """Get current bot status and statistics"""
-        uptime = datetime.now() - self.start_time
+    def get_stats(self) -> Dict:
+        """Get trading statistics"""
+        uptime = datetime.now() - self.start_time if self.start_time else timedelta(0)
         
         return {
             'is_running': self.is_running,
             'is_paused': self.is_paused,
-            'uptime': str(uptime).split('.')[0],  # Remove microseconds
+            'uptime': str(uptime),
             'daily_trades': self.daily_trades,
-            'target_trades': self.target_trades_per_day,
+            'total_trades': self.total_trades,
+            'successful_trades': self.successful_trades,
+            'win_rate': self.win_rate,
             'daily_pnl': self.daily_pnl,
             'total_volume': self.total_volume,
-            'win_rate': self.win_rate,
             'current_position': self.current_position,
-            'activity_log': self.activity_log[:10],  # Last 10 entries
-            'config': {
-                'symbol': self.symbol,
-                'leverage': self.leverage,
-                'paper_trading': self.config.get('PAPER_TRADING', False),
-                'strategy': 'Scalping'
-            }
+            'activity_log': self.activity_log[-10:]  # Last 10 entries
         }
+    
+    def update_config(self, new_config: Dict):
+        """Update bot configuration"""
+        try:
+            # Update basic parameters
+            if 'LEVERAGE' in new_config:
+                self.leverage = new_config['LEVERAGE']
+            
+            if 'TARGET_TRADES_PER_DAY' in new_config:
+                self.target_trades_per_day = new_config['TARGET_TRADES_PER_DAY']
+            
+            # Update risk management
+            if 'STOP_LOSS_PCT' in new_config:
+                self.stop_loss_pct = new_config['STOP_LOSS_PCT']
+            
+            if 'TAKE_PROFIT_PCT' in new_config:
+                self.take_profit_pct = new_config['TAKE_PROFIT_PCT']
+            
+            if 'POSITION_SIZE_PCT' in new_config:
+                self.position_size_pct = new_config['POSITION_SIZE_PCT']
+            
+            logger.info("✅ Configuração atualizada")
+            self.add_log("CONFIG", "Configurações atualizadas", "info")
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao atualizar configuração: {e}")
