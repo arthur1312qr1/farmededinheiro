@@ -33,7 +33,8 @@ def create_app():
     @app.route('/api/status')
     def get_status():
         """Get bot status and statistics"""
-        stats = bot.get_stats()
+        # CORREÇÃO: Mudou de get_stats() para get_status()
+        stats = bot.get_status()
         return jsonify(stats)
     
     @app.route('/api/start', methods=['POST'])
@@ -86,7 +87,8 @@ def create_app():
     def get_logs():
         """Get recent activity logs"""
         try:
-            stats = bot.get_stats()
+            # CORREÇÃO: Mudou de get_stats() para get_status()
+            stats = bot.get_status()
             return jsonify({'logs': stats['activity_log']})
         except Exception as e:
             return jsonify({'error': str(e)})
