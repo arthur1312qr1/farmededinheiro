@@ -1,71 +1,181 @@
-import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Bot Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .status-running { color: #28a745; }
+        .status-stopped { color: #dc3545; }
+        .status-paused { color: #ffc107; }
+        .log-success { border-left: 4px solid #28a745; }
+        .log-error { border-left: 4px solid #dc3545; }
+        .log-warning { border-left: 4px solid #ffc107; }
+        .log-info { border-left: 4px solid #17a2b8; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-12">
+                <h1 class="mt-4 mb-4">🤖 Trading Bot Dashboard</h1>
+                
+                <!-- Status Cards -->
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Status</h5>
+                                <h3 id="bot-status" class="status-stopped">PARADO</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Saldo</h5>
+                                <h3 id="account-balance">$0.00</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Trades Hoje</h5>
+                                <h3 id="daily-trades">0</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Win Rate</h5>
+                                <h3 id="win-rate">0%</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Controls -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Controles</h5>
+                                <button id="start-btn" class="btn btn-success me-2">▶️ Iniciar</button>
+                                <button id="pause-btn" class="btn btn-warning me-2">⏸️ Pausar</button>
+                                <button id="stop-btn" class="btn btn-danger me-2">⏹️ Parar</button>
+                                <button id="emergency-btn" class="btn btn-dark">🚨 Emergência</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Activity Log -->
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Log de Atividades</h5>
+                                <div id="activity-log" style="max-height: 400px; overflow-y: auto;">
+                                    <!-- Logs will be loaded here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
-const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Update dashboard every 5 seconds
+        setInterval(updateDashboard, 5000);
+        updateDashboard();
 
-// Enhanced logging middleware
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+        // Button event listeners
+        document.getElementById('start-btn').addEventListener('click', () => controlBot('start'));
+        document.getElementById('pause-btn').addEventListener('click', () => controlBot('pause'));
+        document.getElementById('stop-btn').addEventListener('click', () => controlBot('stop'));
+        document.getElementById('emergency-btn').addEventListener('click', () => controlBot('emergency_stop'));
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+        function updateDashboard() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    // Update status
+                    const statusEl = document.getElementById('bot-status');
+                    if (data.is_running && !data.is_paused) {
+                        statusEl.textContent = 'RODANDO';
+                        statusEl.className = 'status-running';
+                    } else if (data.is_running && data.is_paused) {
+                        statusEl.textContent = 'PAUSADO';
+                        statusEl.className = 'status-paused';
+                    } else {
+                        statusEl.textContent = 'PARADO';
+                        statusEl.className = 'status-stopped';
+                    }
 
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
+                    // Update stats
+                    document.getElementById('daily-trades').textContent = data.daily_trades || 0;
+                    document.getElementById('win-rate').textContent = (data.win_rate || 0).toFixed(1) + '%';
+                });
 
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
+            // Update balance
+            fetch('/api/balance')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.balance !== undefined) {
+                        document.getElementById('account-balance').textContent = '$' + data.balance.toFixed(2);
+                    }
+                });
 
-      log(logLine);
-    }
-  });
+            // Update logs
+            fetch('/api/logs')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.logs) {
+                        updateActivityLog(data.logs);
+                    }
+                });
+        }
 
-  next();
-});
+        function updateActivityLog(logs) {
+            const logContainer = document.getElementById('activity-log');
+            logContainer.innerHTML = '';
 
-(async () => {
-  const server = await registerRoutes(app);
+            logs.reverse().forEach(log => {
+                const logEntry = document.createElement('div');
+                logEntry.className = `p-2 mb-2 border-start log-${log.type}`;
+                logEntry.innerHTML = `
+                    <div class="d-flex justify-content-between">
+                        <strong>${log.action}</strong>
+                        <small class="text-muted">${new Date(log.timestamp).toLocaleTimeString()}</small>
+                    </div>
+                    <div>${log.message}</div>
+                    ${log.details ? `<small class="text-muted">${log.details}</small>` : ''}
+                `;
+                logContainer.appendChild(logEntry);
+            });
+        }
 
-  // Global error handler
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    log(`Error ${status}: ${message}`);
-    res.status(status).json({ message });
-  });
-
-  // Setup Vite in development, serve static files in production
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
-  }
-
-  // Use port 5000 for compatibility with frontend and Render
-  const port = parseInt(process.env.PORT || '5000', 10);
-  
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
-    log(`🚀 Farme de Dinheiro server running on port ${port}`);
-    log(`📈 Trading dashboard: http://0.0.0.0:${port}`);
-    log(`🔗 Health check: http://0.0.0.0:${port}/api/health`);
-  });
-})();
+        function controlBot(action) {
+            fetch(`/api/${action}`, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        console.log(data.message);
+                        updateDashboard();
+                    } else {
+                        alert('Erro: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('Erro: ' + error);
+                });
+        }
+    </script>
+</body>
+</html>
