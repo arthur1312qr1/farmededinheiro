@@ -147,7 +147,7 @@ class BitgetAPI:
             return None
 
     def place_order(self, symbol: str, side: str, size: float, price: float = None, leverage: int = 10) -> Dict:
-        """Place FUTURES order with 10x leverage"""
+        """Place FUTURES order with 10x leverage - CORRIGIDO PARA 80% DINÂMICO"""
         try:
             futures_symbol = 'ETH/USDT:USDT'
             
@@ -165,40 +165,32 @@ class BitgetAPI:
             else:
                 current_price = price
             
-            # Cálculos
-            quote_amount = size  # Valor em USDT (80% do saldo)
-            base_amount = quote_amount / current_price  # Quantidade ETH
+            # CORREÇÃO PRINCIPAL: Usar 80% do saldo ATUAL (dinâmico)
+            quote_amount = size  # Este é o valor em USDT (já calculado como 80% no trading_bot.py)
+            base_amount = quote_amount / current_price  # Quantidade ETH necessária
             
-            # CORREÇÃO: Validar quantidade mínima APENAS se o valor calculado for insuficiente
+            # CORREÇÃO: Validar quantidade mínima SEM forçar uso fixo
             MIN_ETH_AMOUNT = 0.01  # Mínimo exigido pela Bitget
             
-            if base_amount < MIN_ETH_AMOUNT:
-                logger.warning(f"⚠️ QUANTIDADE CALCULADA ABAIXO DO MÍNIMO:")
-                logger.warning(f"📊 Calculado: {base_amount:.6f} ETH")
-                logger.warning(f"📊 Mínimo: {MIN_ETH_AMOUNT:.6f} ETH")
-                
-                # Verificar se temos saldo suficiente para a quantidade mínima
-                min_usdt_needed = MIN_ETH_AMOUNT * current_price
-                current_balance = self.get_account_balance()
-                
-                if current_balance < min_usdt_needed:
-                    logger.error(f"❌ SALDO INSUFICIENTE PARA QUANTIDADE MÍNIMA")
-                    logger.error(f"💰 Necessário: ${min_usdt_needed:.2f} USDT")
-                    logger.error(f"💰 Disponível: ${current_balance:.2f} USDT")
-                    return {
-                        'success': False,
-                        'error': f'Saldo insuficiente. Necessário: ${min_usdt_needed:.2f} USDT'
-                    }
-                
-                # Usar quantidade mínima apenas se necessário
-                base_amount = MIN_ETH_AMOUNT
-                quote_amount = base_amount * current_price
-                logger.warning(f"⚡ AJUSTADO PARA QUANTIDADE MÍNIMA:")
-                logger.warning(f"📊 Nova Quantidade ETH: {base_amount:.6f}")
-                logger.warning(f"💰 Novo Valor USDT: ${quote_amount:.2f}")
-            else:
-                logger.warning(f"✅ USANDO QUANTIDADE CALCULADA (80% DO SALDO)")
+            logger.warning(f"🎯 USANDO 80% DINÂMICO DO SALDO:")
+            logger.warning(f"💰 Valor USDT (80%): ${quote_amount:.2f}")
+            logger.warning(f"📊 Quantidade ETH: {base_amount:.6f}")
+            logger.warning(f"📊 Mínimo Exchange: {MIN_ETH_AMOUNT:.6f} ETH")
             
+            # Se a quantidade for menor que o mínimo, retornar erro
+            if base_amount < MIN_ETH_AMOUNT:
+                min_usdt_needed = MIN_ETH_AMOUNT * current_price
+                logger.error(f"❌ SALDO INSUFICIENTE PARA MÍNIMO DA EXCHANGE")
+                logger.error(f"💰 Necessário: ${min_usdt_needed:.2f} USDT")
+                logger.error(f"💰 Tentando usar: ${quote_amount:.2f} USDT")
+                logger.error(f"💡 SOLUÇÃO: Aguarde saldo atingir ${min_usdt_needed:.2f} USDT")
+                
+                return {
+                    'success': False,
+                    'error': f'Saldo insuficiente para mínimo da exchange. Necessário: ${min_usdt_needed:.2f} USDT'
+                }
+            
+            logger.warning(f"✅ QUANTIDADE APROVADA - EXECUTANDO ORDEM:")
             logger.warning(f"🚨 EXECUTANDO ORDEM FUTURES 10x:")
             logger.warning(f"💰 Valor USDT: ${quote_amount:.2f}")
             logger.warning(f"📊 Quantidade ETH: {base_amount:.6f}")
@@ -206,15 +198,15 @@ class BitgetAPI:
             logger.warning(f"⚡ Alavancagem: 10x")
             logger.warning(f"💥 Exposição: ${quote_amount * 10:.2f} USDT")
             
-            # Executar ordem
+            # Executar ordem com a quantidade calculada (80% do saldo)
             order = self.exchange.create_order(
                 symbol=futures_symbol,
                 type='market',
                 side=side,
-                amount=base_amount
+                amount=base_amount  # Usar quantidade ETH calculada
             )
             
-            logger.warning(f"✅ ORDEM FUTURES EXECUTADA!")
+            logger.warning(f"✅ ORDEM FUTURES EXECUTADA COM 80% DO SALDO!")
             
             return {
                 'success': True,
