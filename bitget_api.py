@@ -17,12 +17,12 @@ class BitgetAPI:
         try:
             self.exchange = ccxt.bitget({
                 'apiKey': api_key,
-                'secret': secret_key,  # CORREÇÃO: estava 'secret_key'
+                'secret': secret_key,
                 'password': passphrase,
                 'sandbox': sandbox,
                 'enableRateLimit': True,
                 'options': {
-                    'defaultType': 'swap',  # for futures trading
+                    'defaultType': 'swap',  # FUTURES com alavancagem
                 }
             })
             
@@ -38,18 +38,15 @@ class BitgetAPI:
         """Validate order parameters before placing"""
         errors = []
         
-        # Check symbol - CORREÇÃO: Verificar se mercados foram carregados
+        # Check symbol - Para futures
         try:
             if not self.exchange.markets:
                 self.exchange.load_markets()
             
-            if symbol not in self.exchange.markets:
-                # CORREÇÃO: Tentar símbolo alternativo
-                alt_symbol = symbol.replace('_UMCBL', '/USDT:USDT')
-                if alt_symbol in self.exchange.markets:
-                    logger.info(f"🔄 Usando símbolo alternativo: {alt_symbol}")
-                else:
-                    errors.append(f"Símbolo inválido: {symbol}")
+            # Usar símbolo de futures
+            futures_symbol = symbol.replace('_UMCBL', '/USDT:USDT')
+            if futures_symbol not in self.exchange.markets:
+                errors.append(f"Símbolo inválido: {futures_symbol}")
         except:
             logger.warning("⚠️ Não foi possível validar símbolo")
         
@@ -73,62 +70,73 @@ class BitgetAPI:
         }
 
     def get_account_balance(self) -> float:
-        """Get account balance in USDT"""
+        """Get FUTURES account balance in USDT with 10x leverage"""
         try:
-            balance = self.exchange.fetch_balance()
+            # CORREÇÃO: Forçar tipo de conta para FUTURES
+            balance = self.exchange.fetch_balance({'type': 'swap'})  # FUTURES/SWAP
             
-            # CORREÇÃO: Múltiplas tentativas de obter saldo USDT
+            logger.info(f"🔍 Estrutura do saldo: {balance}")
+            
             usdt_balance = 0.0
             
-            # Tentar diferentes formas de obter o saldo
-            if 'USDT' in balance and 'free' in balance['USDT']:
-                usdt_balance = balance['USDT']['free']
-            elif 'USDT' in balance:
-                usdt_balance = balance['USDT'].get('available', 0.0)
+            # Tentar diferentes formas de obter o saldo de FUTURES
+            if 'USDT' in balance and isinstance(balance['USDT'], dict):
+                if 'free' in balance['USDT']:
+                    usdt_balance = balance['USDT']['free']
+                elif 'available' in balance['USDT']:
+                    usdt_balance = balance['USDT']['available']
+                elif 'total' in balance['USDT']:
+                    usdt_balance = balance['USDT']['total']
             elif 'free' in balance and 'USDT' in balance['free']:
                 usdt_balance = balance['free']['USDT']
             elif 'total' in balance and 'USDT' in balance['total']:
                 usdt_balance = balance['total']['USDT']
+            elif 'USDT' in balance:
+                usdt_balance = balance['USDT']
+            
+            # Se for dict, pegar valor numérico
+            if isinstance(usdt_balance, dict):
+                usdt_balance = usdt_balance.get('available', usdt_balance.get('free', usdt_balance.get('total', 0)))
             
             usdt_balance = float(usdt_balance) if usdt_balance else 0.0
             
-            logger.info(f"💰 Saldo atual: ${usdt_balance:.2f} USDT")
+            logger.warning(f"💰 Saldo FUTURES: ${usdt_balance:.2f} USDT")
+            logger.warning(f"🚨 Alavancagem 10x: Poder de compra ${usdt_balance * 10:.2f} USDT")
+            
             return usdt_balance
             
         except Exception as e:
-            logger.error(f"❌ Erro ao obter saldo: {e}")
-            return 0.0
+            logger.error(f"❌ Erro ao obter saldo de FUTURES: {e}")
+            # FALLBACK: Tentar sem especificar tipo
+            try:
+                balance = self.exchange.fetch_balance()
+                usdt_balance = 0.0
+                
+                if 'USDT' in balance:
+                    if isinstance(balance['USDT'], dict):
+                        usdt_balance = balance['USDT'].get('free', balance['USDT'].get('total', 0))
+                    else:
+                        usdt_balance = balance['USDT']
+                
+                usdt_balance = float(usdt_balance) if usdt_balance else 0.0
+                logger.warning(f"💰 Saldo GERAL: ${usdt_balance:.2f} USDT")
+                return usdt_balance
+                
+            except Exception as e2:
+                logger.error(f"❌ Erro total ao obter saldo: {e2}")
+                return 0.0
 
     def get_market_data(self, symbol: str) -> Dict:
-        """Get current market data for symbol"""
+        """Get current market data for FUTURES symbol"""
         try:
-            # CORREÇÃO: Tentar diferentes formatos de símbolo
-            symbols_to_try = [
-                symbol,                           # ethusdt_UMCBL
-                symbol.replace('_UMCBL', '/USDT:USDT'),  # ETH/USDT:USDT
-                symbol.replace('_UMCBL', '/USDT'),       # ETH/USDT
-                'ETH/USDT:USDT',                         # Direto
-                'ETH/USDT'                               # Spot
-            ]
+            # Usar símbolo de FUTURES
+            futures_symbol = 'ETH/USDT:USDT'
             
-            ticker = None
-            used_symbol = None
-            
-            for test_symbol in symbols_to_try:
-                try:
-                    ticker = self.exchange.fetch_ticker(test_symbol)
-                    used_symbol = test_symbol
-                    logger.info(f"✅ Símbolo funcional: {used_symbol}")
-                    break
-                except Exception as e:
-                    logger.debug(f"❌ Símbolo {test_symbol} falhou: {e}")
-                    continue
-            
-            if not ticker:
-                raise Exception(f"Nenhum símbolo funcional encontrado para {symbol}")
+            ticker = self.exchange.fetch_ticker(futures_symbol)
+            logger.info(f"✅ Dados de mercado FUTURES obtidos: ETH @ ${ticker['last']:.2f}")
             
             return {
-                'symbol': used_symbol,
+                'symbol': futures_symbol,
                 'price': float(ticker['last']),
                 'bid': float(ticker['bid']) if ticker['bid'] else float(ticker['last']),
                 'ask': float(ticker['ask']) if ticker['ask'] else float(ticker['last']),
@@ -137,71 +145,50 @@ class BitgetAPI:
             }
             
         except Exception as e:
-            logger.error(f"❌ Erro ao obter dados de mercado para {symbol}: {e}")
+            logger.error(f"❌ Erro ao obter dados de mercado FUTURES: {e}")
             return None
 
-    def place_order(self, symbol: str, side: str, size: float, price: float = None, leverage: int = 1) -> Dict:
-        """Place trading order"""
+    def place_order(self, symbol: str, side: str, size: float, price: float = None, leverage: int = 10) -> Dict:
+        """Place FUTURES order with 10x leverage"""
         try:
-            # CORREÇÃO: Usar símbolo correto primeiro
-            corrected_symbol = symbol.replace('_UMCBL', '/USDT:USDT')
+            futures_symbol = 'ETH/USDT:USDT'  # Símbolo fixo para FUTURES
             
-            # Validate parameters first
-            validation = self.validate_order_params(corrected_symbol, side, size, price=price)
-            if not validation['valid']:
-                return {
-                    'success': False,
-                    'error': '; '.join(validation['errors'])
-                }
+            # Definir alavancagem 10x
+            try:
+                self.exchange.set_leverage(10, futures_symbol)
+                logger.warning(f"🚨 ALAVANCAGEM 10x DEFINIDA para {futures_symbol}")
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao definir alavancagem: {e}")
             
-            # Set leverage if futures
-            if ':USDT' in corrected_symbol:
-                try:
-                    self.exchange.set_leverage(leverage, corrected_symbol)
-                    logger.info(f"🚨 Alavancagem definida: {leverage}x para {corrected_symbol}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Não foi possível definir alavancagem: {e}")
-            
-            # Place order
-            order_type = 'market' if price is None else 'limit'
-            
-            # For futures, size should be in USDT
-            if ':USDT' in corrected_symbol:
-                # Convert size to quote currency amount for futures
-                if price is None:
-                    ticker = self.exchange.fetch_ticker(corrected_symbol)
-                    current_price = float(ticker['last'])
-                else:
-                    current_price = price
-                
-                # Size is already in USDT for futures
-                quote_amount = size  # size já é em USDT
-                base_amount = quote_amount / current_price
-                
-                logger.warning(f"🚨 ORDEM FUTURES:")
-                logger.warning(f"💰 Valor USDT: ${quote_amount:.2f}")
-                logger.warning(f"📊 Quantidade ETH: {base_amount:.6f}")
-                logger.warning(f"💎 Preço: ${current_price:.2f}")
-                logger.warning(f"🎯 Símbolo: {corrected_symbol}")
-                
-                order = self.exchange.create_order(
-                    symbol=corrected_symbol,  # USAR SÍMBOLO CORRIGIDO
-                    type=order_type,
-                    side=side,
-                    amount=base_amount,  # Use base amount for futures
-                    price=current_price if order_type == 'limit' else None
-                )
+            # Obter preço atual se não especificado
+            if price is None:
+                ticker = self.exchange.fetch_ticker(futures_symbol)
+                current_price = float(ticker['last'])
             else:
-                # Spot trading
-                order = self.exchange.create_order(
-                    symbol=corrected_symbol,  # USAR SÍMBOLO CORRIGIDO
-                    type=order_type,
-                    side=side,
-                    amount=size,
-                    price=price if order_type == 'limit' else None
-                )
+                current_price = price
             
-            logger.info(f"✅ Ordem executada: {side} {size} {corrected_symbol}")
+            # Size já vem em USDT (80% do saldo)
+            quote_amount = size  # Valor em USDT
+            base_amount = quote_amount / current_price  # Quantidade ETH
+            
+            logger.warning(f"🚨 ORDEM FUTURES 10x:")
+            logger.warning(f"💰 Valor USDT: ${quote_amount:.2f}")
+            logger.warning(f"📊 Quantidade ETH: {base_amount:.6f}")
+            logger.warning(f"💎 Preço ETH: ${current_price:.2f}")
+            logger.warning(f"🎯 Símbolo: {futures_symbol}")
+            logger.warning(f"⚡ Alavancagem: 10x")
+            logger.warning(f"💥 Exposição Total: ${quote_amount * 10:.2f} USDT")
+            
+            # Executar ordem FUTURES
+            order = self.exchange.create_order(
+                symbol=futures_symbol,
+                type='market',  # Ordem de mercado
+                side=side,
+                amount=base_amount,  # Quantidade em ETH
+                price=None  # Market order não precisa de preço
+            )
+            
+            logger.warning(f"✅ ORDEM FUTURES EXECUTADA: {side} {base_amount:.6f} ETH")
             
             return {
                 'success': True,
@@ -210,7 +197,7 @@ class BitgetAPI:
             }
             
         except Exception as e:
-            logger.error(f"❌ Erro ao executar ordem: {e}")
+            logger.error(f"❌ Erro ao executar ordem FUTURES: {e}")
             return {
                 'success': False,
                 'error': str(e)
@@ -219,8 +206,8 @@ class BitgetAPI:
     def get_order_status(self, order_id: str, symbol: str) -> Dict:
         """Get order status"""
         try:
-            corrected_symbol = symbol.replace('_UMCBL', '/USDT:USDT')
-            order = self.exchange.fetch_order(order_id, corrected_symbol)
+            futures_symbol = 'ETH/USDT:USDT'
+            order = self.exchange.fetch_order(order_id, futures_symbol)
             
             return {
                 'id': order['id'],
@@ -238,8 +225,8 @@ class BitgetAPI:
     def cancel_order(self, order_id: str, symbol: str) -> bool:
         """Cancel order"""
         try:
-            corrected_symbol = symbol.replace('_UMCBL', '/USDT:USDT')
-            self.exchange.cancel_order(order_id, corrected_symbol)
+            futures_symbol = 'ETH/USDT:USDT'
+            self.exchange.cancel_order(order_id, futures_symbol)
             logger.info(f"✅ Ordem cancelada: {order_id}")
             return True
             
@@ -248,13 +235,14 @@ class BitgetAPI:
             return False
 
     def get_open_positions(self) -> list:
-        """Get open positions"""
+        """Get open FUTURES positions"""
         try:
-            positions = self.exchange.fetch_positions()
+            positions = self.exchange.fetch_positions(['ETH/USDT:USDT'])
             open_positions = [pos for pos in positions if float(pos['contracts']) > 0]
             
+            logger.info(f"📊 Posições abertas: {len(open_positions)}")
             return open_positions
             
         except Exception as e:
-            logger.error(f"❌ Erro ao obter posições: {e}")
+            logger.error(f"❌ Erro ao obter posições FUTURES: {e}")
             return []
