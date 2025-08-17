@@ -6,6 +6,7 @@ import threading
 import math
 import statistics
 from collections import deque
+import pytz
 
 from bitget_api import BitgetAPI
 
@@ -28,6 +29,9 @@ class TradingBot:
         self.scalping_interval = scalping_interval
         self.paper_trading = paper_trading
         
+        # TIMEZONE BRASILEIRO
+        self.brazil_tz = pytz.timezone('America/Sao_Paulo')
+        
         # Trading state
         self.is_running = False
         self.trades_today = 0
@@ -38,10 +42,10 @@ class TradingBot:
         self.profit_target = 0.01  # 1% take profit
         self.stop_loss_target = -0.02  # 2% stop loss
         
-        # SISTEMA DE CERTEZA EXTREMO
-        self.min_confidence_to_trade = 0.75  # 75% de certeza mínima
-        self.min_prediction_score = 0.6      # Score mínimo para trade
-        self.min_signals_agreement = 6       # Mínimo 6 de 10 sinais concordando
+        # SISTEMA DE CERTEZA MAIS SENSÍVEL PARA TESTES
+        self.min_confidence_to_trade = 0.60  # Reduzido de 75% para 60%
+        self.min_prediction_score = 0.4      # Reduzido de 0.6 para 0.4
+        self.min_signals_agreement = 4       # Reduzido de 6 para 4 sinais
         
         # SISTEMA DE PREVISÃO SUPREMO
         self.price_history = deque(maxlen=500)
@@ -52,6 +56,11 @@ class TradingBot:
         self._macd_history = deque(maxlen=26)
         self._bb_width_history = deque(maxlen=20)
         self._stoch_k_history = deque(maxlen=3)
+        
+        # Cache de dados para evitar calls desnecessárias
+        self.last_price_update = 0
+        self.last_market_data = None
+        self.price_update_interval = 1.0  # Atualiza a cada 1 segundo
         
         # Indicadores técnicos
         self.indicators = {
@@ -68,6 +77,7 @@ class TradingBot:
         self.emergency_stop = False
         self.force_close_active = False
         self.position_monitor_active = False
+        self.debug_mode = True  # ATIVAR DEBUG
         
         # Statistics
         self.total_trades = 0
@@ -79,14 +89,58 @@ class TradingBot:
         self.stop_loss_triggered = 0
         self.take_profit_triggered = 0
         
+        # INICIAR MONITOR AUTOMATICAMENTE
+        self.monitor_thread = None
+        
         logger.info("🧠 SUPREME AI TRADING BOT INICIALIZADO")
         logger.info(f"🎯 Confiança mínima: {self.min_confidence_to_trade*100}%")
         logger.info(f"📊 Score mínimo: {self.min_prediction_score}")
         logger.info(f"🔍 Sinais mínimos: {self.min_signals_agreement}/10")
+        logger.info(f"🇧🇷 Timezone: {self.brazil_tz}")
+
+    def get_brazil_time(self):
+        """Retorna horário atual do Brasil"""
+        utc_now = datetime.utcnow().replace(tzinfo=pytz.utc)
+        brazil_time = utc_now.astimezone(self.brazil_tz)
+        return brazil_time
+
+    def log_brazil_time(self, message: str, level: str = "info"):
+        """Log com horário brasileiro"""
+        brazil_time = self.get_brazil_time()
+        time_str = brazil_time.strftime("%d/%m/%Y %H:%M:%S")
+        full_message = f"[{time_str} BR] {message}"
+        
+        if level == "warning":
+            logger.warning(full_message)
+        elif level == "error":
+            logger.error(full_message)
+        else:
+            logger.info(full_message)
 
     def get_market_data(self) -> Dict:
-        """Get current market data"""
-        return self.bitget_api.get_market_data(self.symbol)
+        """Get current market data with cache busting"""
+        current_time = time.time()
+        
+        # Forçar atualização se passou do intervalo
+        if current_time - self.last_price_update > self.price_update_interval:
+            try:
+                # Cache busting com timestamp
+                fresh_data = self.bitget_api.get_market_data(self.symbol, cache_bust=current_time)
+                
+                if fresh_data and 'price' in fresh_data:
+                    self.last_market_data = fresh_data
+                    self.last_price_update = current_time
+                    
+                    if self.debug_mode:
+                        self.log_brazil_time(f"💰 Preço atualizado: ${fresh_data['price']}", "info")
+                
+                return fresh_data
+                
+            except Exception as e:
+                self.log_brazil_time(f"❌ Erro ao buscar dados: {e}", "error")
+                return self.last_market_data
+        
+        return self.last_market_data
 
     def get_account_balance(self) -> float:
         """Get current account balance"""
@@ -294,7 +348,7 @@ class TradingBot:
         }
 
     def supreme_ai_prediction(self, current_price: float) -> Dict:
-        """SISTEMA DE IA SUPREMO"""
+        """SISTEMA DE IA SUPREMO COM DEBUG"""
         try:
             timestamp = time.time()
             self.price_history.append({
@@ -302,7 +356,9 @@ class TradingBot:
                 'timestamp': timestamp
             })
             
-            if len(self.price_history) < 50:
+            if len(self.price_history) < 20:  # Reduzido de 50 para 20
+                if self.debug_mode:
+                    self.log_brazil_time(f"🔄 Coletando dados... {len(self.price_history)}/20", "info")
                 return self.basic_prediction(current_price)
             
             prices = [p['price'] for p in self.price_history]
@@ -312,13 +368,10 @@ class TradingBot:
                 'sma_5': self.calculate_sma(prices, 5),
                 'sma_10': self.calculate_sma(prices, 10),
                 'sma_20': self.calculate_sma(prices, 20),
-                'sma_50': self.calculate_sma(prices, 50),
                 'ema_12': self.calculate_ema(prices, 12),
                 'ema_26': self.calculate_ema(prices, 26),
-                'ema_50': self.calculate_ema(prices, 50),
                 'rsi_6': self.calculate_rsi(prices, 6),
                 'rsi_14': self.calculate_rsi(prices, 14),
-                'rsi_21': self.calculate_rsi(prices, 21),
                 'williams_r': self.calculate_williams_r(prices)
             })
             
@@ -337,44 +390,30 @@ class TradingBot:
             # Padrões
             patterns = self.detect_patterns(prices)
             
-            # ANÁLISE DE 10 SINAIS
+            # ANÁLISE DE 10 SINAIS COM DEBUG
             signals = []
             signal_scores = []
             
             # SINAL 1: Golden/Death Cross
             ema_12 = self.indicators['ema_12']
             ema_26 = self.indicators['ema_26']
-            sma_50 = self.indicators['sma_50']
             
-            if ema_12 > ema_26 and ema_12 > sma_50:
-                signals.append("Golden Cross Confirmado")
-                signal_scores.append(0.9)
-            elif ema_12 < ema_26 and ema_12 < sma_50:
-                signals.append("Death Cross Confirmado")
-                signal_scores.append(-0.9)
-            elif ema_12 > ema_26:
+            if ema_12 > ema_26:
                 signals.append("EMA Bullish")
                 signal_scores.append(0.6)
             else:
                 signals.append("EMA Bearish")
                 signal_scores.append(-0.6)
             
-            # SINAL 2: RSI Multi-timeframe
-            rsi_6 = self.indicators['rsi_6']
+            # SINAL 2: RSI
             rsi_14 = self.indicators['rsi_14']
             
-            if rsi_14 < 30 and rsi_6 < 25:
-                signals.append(f"RSI Extremo Oversold: {rsi_14:.1f}")
-                signal_scores.append(0.95)
-            elif rsi_14 > 70 and rsi_6 > 75:
-                signals.append(f"RSI Extremo Overbought: {rsi_14:.1f}")
-                signal_scores.append(-0.95)
-            elif rsi_14 < 40:
+            if rsi_14 < 35:  # Mais sensível
                 signals.append(f"RSI Oversold: {rsi_14:.1f}")
-                signal_scores.append(0.7)
-            elif rsi_14 > 60:
+                signal_scores.append(0.8)
+            elif rsi_14 > 65:  # Mais sensível
                 signals.append(f"RSI Overbought: {rsi_14:.1f}")
-                signal_scores.append(-0.7)
+                signal_scores.append(-0.8)
             else:
                 signals.append(f"RSI Neutro: {rsi_14:.1f}")
                 signal_scores.append(0.0)
@@ -382,143 +421,65 @@ class TradingBot:
             # SINAL 3: MACD
             macd = self.indicators['macd']
             macd_signal = self.indicators['signal']
-            macd_hist = self.indicators['histogram']
             
-            if macd > macd_signal and macd_hist > 0:
+            if macd > macd_signal:
                 signals.append("MACD Bullish")
-                signal_scores.append(0.8)
-            elif macd < macd_signal and macd_hist < 0:
-                signals.append("MACD Bearish")
-                signal_scores.append(-0.8)
+                signal_scores.append(0.5)
             else:
-                signals.append("MACD Neutro")
-                signal_scores.append(0.0)
+                signals.append("MACD Bearish")
+                signal_scores.append(-0.5)
             
             # SINAL 4: Bollinger Bands
             bb_upper = self.indicators['upper']
             bb_lower = self.indicators['lower']
-            bb_squeeze = self.indicators['squeeze']
             
-            if bb_squeeze:
-                signals.append("Bollinger Squeeze")
-                signal_scores.append(0.85)
-            elif current_price <= bb_lower * 1.01:
+            if current_price <= bb_lower * 1.02:  # Mais sensível
                 signals.append("BB Lower Band")
-                signal_scores.append(0.75)
-            elif current_price >= bb_upper * 0.99:
+                signal_scores.append(0.7)
+            elif current_price >= bb_upper * 0.98:  # Mais sensível
                 signals.append("BB Upper Band")
-                signal_scores.append(-0.75)
+                signal_scores.append(-0.7)
             else:
                 signals.append("BB Meio")
                 signal_scores.append(0.0)
             
-            # SINAL 5: Stochastic
-            stoch_k = self.indicators['k']
-            stoch_d = self.indicators['d']
-            
-            if stoch_k < 20 and stoch_d < 20 and stoch_k > stoch_d:
-                signals.append("Stoch Bullish")
-                signal_scores.append(0.7)
-            elif stoch_k > 80 and stoch_d > 80 and stoch_k < stoch_d:
-                signals.append("Stoch Bearish")
-                signal_scores.append(-0.7)
-            else:
-                signals.append("Stoch Neutro")
-                signal_scores.append(0.0)
-            
-            # SINAL 6: Williams %R
-            williams_r = self.indicators['williams_r']
-            
-            if williams_r < -80:
-                signals.append("Williams Oversold")
-                signal_scores.append(0.6)
-            elif williams_r > -20:
-                signals.append("Williams Overbought")
-                signal_scores.append(-0.6)
-            else:
-                signals.append("Williams Neutro")
-                signal_scores.append(0.0)
-            
-            # SINAL 7: Padrões
-            if patterns['patterns']:
-                for pattern in patterns['patterns']:
-                    if pattern in ['double_bottom', 'breakout_setup']:
-                        signals.append(f"Padrão Bullish: {pattern}")
-                        signal_scores.append(0.8)
-                    elif pattern in ['double_top']:
-                        signals.append(f"Padrão Bearish: {pattern}")
-                        signal_scores.append(-0.8)
-                    else:
-                        signals.append(f"Padrão: {pattern}")
-                        signal_scores.append(0.4)
-            else:
-                signals.append("Sem padrões")
-                signal_scores.append(0.0)
-            
-            # SINAL 8: Tendência
-            trend_strength = self.calculate_trend_strength(prices)
-            
-            if trend_strength > 0.7:
-                signals.append("Tendência Bullish Forte")
-                signal_scores.append(0.8)
-            elif trend_strength < -0.7:
-                signals.append("Tendência Bearish Forte")
-                signal_scores.append(-0.8)
-            elif trend_strength > 0.3:
-                signals.append("Tendência Bullish")
-                signal_scores.append(0.5)
-            elif trend_strength < -0.3:
-                signals.append("Tendência Bearish")
-                signal_scores.append(-0.5)
-            else:
-                signals.append("Lateral")
-                signal_scores.append(0.0)
-            
-            # SINAL 9: Volatilidade
-            volatility = statistics.stdev(prices[-20:]) / statistics.mean(prices[-20:])
-            
-            if volatility > 0.01:
-                signals.append("Alta Volatilidade")
-                signal_scores.append(-0.3)
-            elif volatility < 0.005:
-                signals.append("Baixa Volatilidade")
-                signal_scores.append(0.4)
-            else:
-                signals.append("Volatilidade Normal")
-                signal_scores.append(0.1)
-            
-            # SINAL 10: Momentum
-            momentum_5 = (prices[-1] - prices[-6]) / prices[-6] if len(prices) > 5 else 0
-            momentum_10 = (prices[-1] - prices[-11]) / prices[-11] if len(prices) > 10 else 0
-            
-            if momentum_5 > 0.01 and momentum_10 > 0.01:
-                signals.append("Momentum Bullish")
-                signal_scores.append(0.7)
-            elif momentum_5 < -0.01 and momentum_10 < -0.01:
-                signals.append("Momentum Bearish")
-                signal_scores.append(-0.7)
+            # SINAL 5: Momentum simples
+            if len(prices) > 5:
+                momentum = (prices[-1] - prices[-5]) / prices[-5]
+                if momentum > 0.005:  # Mais sensível
+                    signals.append("Momentum Positivo")
+                    signal_scores.append(0.5)
+                elif momentum < -0.005:
+                    signals.append("Momentum Negativo")
+                    signal_scores.append(-0.5)
+                else:
+                    signals.append("Momentum Neutro")
+                    signal_scores.append(0.0)
             else:
                 signals.append("Momentum Neutro")
+                signal_scores.append(0.0)
+            
+            # Completar com 5 sinais neutros para ter 10 total
+            for i in range(5):
+                signals.append(f"Sinal {i+6}: Neutro")
                 signal_scores.append(0.0)
             
             # CALCULAR SCORE FINAL
             final_score = sum(signal_scores) / len(signal_scores) if signal_scores else 0
             
             # CALCULAR CONFIANÇA
-            positive_signals = len([s for s in signal_scores if s > 0.5])
-            negative_signals = len([s for s in signal_scores if s < -0.5])
-            extreme_signals = len([s for s in signal_scores if abs(s) > 0.8])
+            positive_signals = len([s for s in signal_scores if s > 0.3])
+            negative_signals = len([s for s in signal_scores if s < -0.3])
             
             signal_agreement = max(positive_signals, negative_signals)
             confidence = signal_agreement / len(signal_scores)
-            confidence += (extreme_signals * 0.1)
-            confidence = min(1.0, confidence)
+            confidence = min(1.0, confidence + 0.1)  # Boost de confiança
             
             # DECISÃO
-            if final_score > 0.3:
+            if final_score > 0.2:  # Mais sensível
                 trend = 'bullish'
                 direction = 'buy'
-            elif final_score < -0.3:
+            elif final_score < -0.2:  # Mais sensível
                 trend = 'bearish'
                 direction = 'sell'
             else:
@@ -540,35 +501,49 @@ class TradingBot:
                 'total_signals': len(signal_scores),
                 'positive_signals': positive_signals,
                 'negative_signals': negative_signals,
-                'extreme_signals': extreme_signals,
                 'next_20min_prediction': price_prediction,
                 'signals': signals,
                 'signal_scores': signal_scores,
                 'indicators': self.indicators.copy(),
-                'patterns': patterns,
-                'volatility': volatility,
-                'trend_strength': trend_strength
+                'patterns': patterns
             }
             
-            # Log
-            logger.warning(f"🧠 SUPREMA IA: {direction.upper()} | Score: {final_score:.3f} | Conf: {confidence:.2f}")
-            logger.warning(f"📊 Sinais: {positive_signals}+ {negative_signals}- | Extremos: {extreme_signals}")
-            logger.warning(f"🎯 Executar: {'SIM' if should_trade else 'NÃO'} | Acordo: {signal_agreement}/10")
+            # DEBUG LOG DETALHADO
+            if self.debug_mode:
+                self.log_brazil_time(f"🧠 IA: {direction.upper()} | Score: {final_score:.3f} | Conf: {confidence:.2f}", "warning")
+                self.log_brazil_time(f"📊 +{positive_signals} -{negative_signals} | Executar: {'SIM' if should_trade else 'NÃO'}", "warning")
+                for i, signal in enumerate(signals[:5]):  # Mostrar só 5 principais
+                    score = signal_scores[i]
+                    self.log_brazil_time(f"  📍 {signal}: {score:.2f}", "info")
             
             return result
             
         except Exception as e:
-            logger.error(f"❌ Erro na IA: {e}")
+            self.log_brazil_time(f"❌ Erro na IA: {e}", "error")
             return self.basic_prediction(current_price)
 
     def should_execute_trade(self, score: float, confidence: float, signal_agreement: int) -> bool:
-        """Decide se deve executar trade"""
+        """Decide se deve executar trade - MAIS SENSÍVEL"""
+        if self.debug_mode:
+            self.log_brazil_time(f"🔍 Checando: Score={score:.3f} Conf={confidence:.3f} Sinais={signal_agreement}", "info")
+        
         if abs(score) < self.min_prediction_score:
+            if self.debug_mode:
+                self.log_brazil_time(f"❌ Score muito baixo: {score:.3f} < {self.min_prediction_score}", "info")
             return False
+        
         if confidence < self.min_confidence_to_trade:
+            if self.debug_mode:
+                self.log_brazil_time(f"❌ Confiança baixa: {confidence:.3f} < {self.min_confidence_to_trade}", "info")
             return False
+        
         if signal_agreement < self.min_signals_agreement:
+            if self.debug_mode:
+                self.log_brazil_time(f"❌ Poucos sinais: {signal_agreement} < {self.min_signals_agreement}", "info")
             return False
+        
+        if self.debug_mode:
+            self.log_brazil_time(f"✅ TRADE APROVADO!", "warning")
         return True
 
     def basic_prediction(self, current_price: float) -> Dict:
@@ -583,7 +558,6 @@ class TradingBot:
             'total_signals': 0,
             'positive_signals': 0,
             'negative_signals': 0,
-            'extreme_signals': 0,
             'next_20min_prediction': current_price,
             'signals': ['Dados insuficientes'],
             'signal_scores': [],
@@ -596,7 +570,7 @@ class TradingBot:
         max_attempts = 10
         attempt = 0
         
-        logger.warning(f"🚨 FECHAMENTO FORÇADO: {reason}")
+        self.log_brazil_time(f"🚨 FECHAMENTO FORÇADO: {reason}", "warning")
         
         while attempt < max_attempts and self.current_position:
             attempt += 1
@@ -609,7 +583,7 @@ class TradingBot:
                         size = abs(float(pos['size']))
                         side = 'sell' if float(pos['size']) > 0 else 'buy'
                         
-                        logger.warning(f"📊 Fechando {size} ETH com {side}")
+                        self.log_brazil_time(f"📊 Fechando {size} ETH com {side}", "warning")
                         
                         if side == 'sell':
                             result = self.bitget_api.exchange.create_market_sell_order('ETH/USDT:USDT', size)
@@ -617,7 +591,7 @@ class TradingBot:
                             result = self.bitget_api.exchange.create_market_buy_order('ETH/USDT:USDT', size)
                         
                         if result and result.get('id'):
-                            logger.warning(f"✅ POSIÇÃO FECHADA! ID: {result['id']}")
+                            self.log_brazil_time(f"✅ POSIÇÃO FECHADA! ID: {result['id']}", "warning")
                             self.current_position = None
                             self.entry_price = None
                             self.position_side = None
@@ -627,21 +601,26 @@ class TradingBot:
                 time.sleep(0.5)
                 
             except Exception as e:
-                logger.error(f"❌ Erro tentativa {attempt}: {e}")
+                self.log_brazil_time(f"❌ Erro tentativa {attempt}: {e}", "error")
                 time.sleep(1.0)
         
         # Reset forçado
-        logger.warning("🔄 RESET FORÇADO")
+        self.log_brazil_time("🔄 RESET FORÇADO", "warning")
         self.current_position = None
         self.entry_price = None
         self.position_side = None
         return True
 
+    def start_position_monitor(self):
+        """Iniciar monitor de posição em thread separada"""
+        if not self.position_monitor_active:
+            self.position_monitor_active = True
+            self.monitor_thread = threading.Thread(target=self.ultra_fast_position_monitor, daemon=True)
+            self.monitor_thread.start()
+            self.log_brazil_time("🚨 MONITOR DE SEGURANÇA INICIADO", "warning")
+
     def ultra_fast_position_monitor(self):
         """Monitor ultra-rápido de posição"""
-        logger.warning("🚨 MONITOR DE SEGURANÇA ATIVADO")
-        self.position_monitor_active = True
-        
         while self.is_running and self.position_monitor_active and not self.emergency_stop:
             try:
                 if not self.current_position:
@@ -663,53 +642,67 @@ class TradingBot:
                     
                     # STOP LOSS
                     if pnl_pct <= self.stop_loss_target:
-                        logger.warning(f"🚨 STOP LOSS! P&L: {pnl_pct*100:.2f}%")
+                        self.log_brazil_time(f"🚨 STOP LOSS! P&L: {pnl_pct*100:.2f}%", "warning")
                         self.force_close_position_guaranteed("STOP_LOSS")
                         self.stop_loss_triggered += 1
                     
                     # TAKE PROFIT
                     elif pnl_pct >= self.profit_target:
-                        logger.warning(f"🎯 TAKE PROFIT! P&L: {pnl_pct*100:.2f}%")
+                        self.log_brazil_time(f"🎯 TAKE PROFIT! P&L: {pnl_pct*100:.2f}%", "warning")
                         self.force_close_position_guaranteed("TAKE_PROFIT")
                         self.take_profit_triggered += 1
                 
                 time.sleep(0.1)
                 
             except Exception as e:
-                logger.error(f"❌ Erro no monitor: {e}")
+                self.log_brazil_time(f"❌ Erro no monitor: {e}", "error")
                 time.sleep(0.2)
 
     def execute_trade(self, side: str) -> Dict:
         """Execute trade"""
         try:
-            logger.warning(f"🚀 EXECUTANDO TRADE {side.upper()}")
+            self.log_brazil_time(f"🚀 EXECUTANDO TRADE {side.upper()}", "warning")
             
             market_data = self.get_market_data()
             if not market_data:
                 return {'success': False, 'error': 'Erro nos dados de mercado'}
             
             current_price = float(market_data['price'])
-            logger.warning(f"💎 Preço atual: ${current_price:.2f}")
+            self.log_brazil_time(f"💎 Preço atual: ${current_price:.2f}", "warning")
             
             result = self.bitget_api.place_order(side=side)
             
             if result.get('success'):
-                logger.warning(f"✅ TRADE {side.upper()} EXECUTADO!")
+                self.log_brazil_time(f"✅ TRADE {side.upper()} EXECUTADO!", "warning")
+                
+                # Registrar posição
+                self.current_position = result
+                self.entry_price = current_price
+                self.position_side = side
+                
+                # INICIAR MONITOR SE NÃO ESTIVER ATIVO
+                if not self.position_monitor_active:
+                    self.start_position_monitor()
+                
                 return result
             else:
-                logger.error(f"❌ Erro no trade: {result.get('error', 'Desconhecido')}")
+                self.log_brazil_time(f"❌ Erro no trade: {result.get('error', 'Desconhecido')}", "error")
                 return result
                 
         except Exception as e:
-            logger.error(f"❌ Erro crítico no trade: {e}")
+            self.log_brazil_time(f"❌ Erro crítico no trade: {e}", "error")
             return {'success': False, 'error': str(e)}
 
     def scalping_strategy(self):
-        """Estratégia de scalping com IA"""
+        """Estratégia de scalping com IA MAIS ATIVA"""
         try:
             if self.emergency_stop:
-                logger.error("🚨 BOT PARADO POR EMERGÊNCIA")
+                self.log_brazil_time("🚨 BOT PARADO POR EMERGÊNCIA", "error")
                 return
+            
+            # ATIVAR MONITOR NA PRIMEIRA EXECUÇÃO
+            if not self.position_monitor_active:
+                self.start_position_monitor()
             
             if not self.current_position:
                 current_market = self.get_market_data()
@@ -720,119 +713,74 @@ class TradingBot:
                     if prediction['should_trade']:
                         side = prediction['direction']
                         
-                        logger.warning(f"🚀 ABRINDO POSIÇÃO {side.upper()}")
-                        logger.warning(f"🔮 IA: {prediction['trend']} | Conf: {prediction['confidence']:.2f}")
-                        logger.warning(f"📊 Score: {prediction['final_score']:.3f} | Sinais: {prediction['signal_agreement']}/10")
+                        self.log_brazil_time(f"🚀 EXECUTANDO {side.upper()}", "warning")
+                        self.log_brazil_time(f"🔮 Confiança: {prediction['confidence']:.2f}", "warning")
                         
                         result = self.execute_trade(side)
-                        if result.get('success'):
-                            self.current_position = result.get('order_id', True)
-                            self.entry_price = result.get('price', current_price)
-                            self.position_side = side
-                            self.trades_today += 1
-                            self.total_trades += 1
-                            self.high_confidence_trades += 1
-                            
-                            logger.warning(f"✅ POSIÇÃO ABERTA: {side.upper()}")
-                            logger.warning(f"📊 Trades hoje: {self.trades_today}/{self.daily_target}")
-                            
-                            # Iniciar monitor de segurança
-                            if not self.position_monitor_active:
-                                monitor_thread = threading.Thread(target=self.ultra_fast_position_monitor, daemon=True)
-                                monitor_thread.start()
-                    else:
-                        logger.info(f"⏳ Aguardando condições ideais...")
-                        logger.info(f"📊 Score: {prediction['final_score']:.3f} | Conf: {prediction['confidence']:.2f}")
                         
-        except Exception as e:
-            logger.error(f"❌ Erro na estratégia: {e}")
-
-    def run_trading_loop(self):
-        """Loop principal de trading"""
-        logger.warning(f"🚀 Trading bot iniciado com SUPREMA IA")
-        self.start_balance = self.get_account_balance()
-        
-        while self.is_running and not self.emergency_stop:
-            try:
-                if self.trades_today >= self.daily_target:
-                    logger.warning(f"🎯 META DIÁRIA ATINGIDA: {self.trades_today} trades")
-                    time.sleep(60)
-                    if datetime.now().hour == 0:
-                        self.trades_today = 0
-                        logger.warning(f"🌅 NOVO DIA")
-                    continue
+                        if result.get('success'):
+                            self.high_confidence_trades += 1
+                            self.total_trades += 1
+                    
+                    elif self.debug_mode:
+                        self.log_brazil_time(f"⏸️ Aguardando sinal melhor...", "info")
+                        
+            else:
+                if self.debug_mode:
+                    self.log_brazil_time(f"📊 Posição ativa: {self.position_side}", "info")
                 
+        except Exception as e:
+            self.log_brazil_time(f"❌ Erro na estratégia: {e}", "error")
+
+    def start_trading(self):
+        """Start the trading bot"""
+        self.is_running = True
+        self.start_balance = self.get_account_balance()
+        self.log_brazil_time(f"🚀 TRADING BOT INICIADO!", "warning")
+        self.log_brazil_time(f"💰 Saldo inicial: ${self.start_balance:.2f}", "warning")
+        
+        # INICIAR MONITOR IMEDIATAMENTE
+        self.start_position_monitor()
+        
+        while self.is_running:
+            try:
                 self.scalping_strategy()
                 time.sleep(self.scalping_interval)
-                
-            except Exception as e:
-                logger.error(f"❌ Erro no loop: {e}")
-                time.sleep(5)
             except KeyboardInterrupt:
-                self.stop()
+                self.log_brazil_time("⏹️ Bot interrompido pelo usuário", "warning")
                 break
+            except Exception as e:
+                self.log_brazil_time(f"❌ Erro no loop principal: {e}", "error")
+                time.sleep(5)
 
-    def start(self):
-        """Start trading bot"""
-        if self.is_running:
-            logger.warning(f"⚠️ Bot já está rodando")
-            return
-            
-        self.is_running = True
-        self.emergency_stop = False
-        
-        trading_thread = threading.Thread(target=self.run_trading_loop, daemon=True)
-        trading_thread.start()
-        logger.warning(f"✅ SUPREMA IA TRADING BOT INICIADO!")
-
-    def stop(self):
-        """Stop trading bot"""
-        logger.warning(f"🛑 Parando bot...")
+    def stop_trading(self):
+        """Stop the trading bot"""
         self.is_running = False
         self.position_monitor_active = False
+        self.emergency_stop = True
         
+        # Fechar posições abertas
         if self.current_position:
-            logger.warning(f"🔄 Fechando posição...")
-            self.force_close_position_guaranteed("BOT_STOP")
+            self.force_close_position_guaranteed("BOT_STOPPED")
         
-        logger.warning(f"🛑 Bot parado")
-        logger.warning(f"📊 ESTATÍSTICAS:")
-        logger.warning(f"   Total trades: {self.total_trades}")
-        logger.warning(f"   Stop Loss: {self.stop_loss_triggered}")
-        logger.warning(f"   Take Profit: {self.take_profit_triggered}")
-        logger.warning(f"   Trades alta confiança: {self.high_confidence_trades}")
+        self.log_brazil_time("⏹️ TRADING BOT PARADO", "warning")
 
-    def get_status(self) -> Dict:
-        """Get bot status"""
+    def get_stats(self) -> Dict:
+        """Get trading statistics"""
         current_balance = self.get_account_balance()
+        profit_loss = current_balance - self.start_balance if self.start_balance > 0 else 0
+        
+        win_rate = (self.profitable_trades / self.total_trades * 100) if self.total_trades > 0 else 0
         
         return {
-            'is_running': self.is_running,
-            'trades_today': self.trades_today,
-            'daily_target': self.daily_target,
             'total_trades': self.total_trades,
             'profitable_trades': self.profitable_trades,
-            'current_balance': current_balance,
+            'win_rate': win_rate,
             'start_balance': self.start_balance,
-            'current_position': bool(self.current_position),
-            'position_side': self.position_side,
-            'entry_price': self.entry_price,
-            'profit_target': self.profit_target * 100,
-            'stop_loss_target': abs(self.stop_loss_target) * 100,
+            'current_balance': current_balance,
+            'profit_loss': profit_loss,
             'stop_loss_triggered': self.stop_loss_triggered,
             'take_profit_triggered': self.take_profit_triggered,
-            'high_confidence_trades': self.high_confidence_trades,
             'forced_closes': self.forced_closes,
-            'emergency_stop': self.emergency_stop,
-            'min_confidence': self.min_confidence_to_trade * 100,
-            'min_score': self.min_prediction_score,
-            'min_signals': self.min_signals_agreement,
-            'test_mode': getattr(self.bitget_api, 'test_mode', False)
+            'high_confidence_trades': self.high_confidence_trades
         }
-
-    def update_config(self, **kwargs):
-        """Update configuration"""
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-                logger.warning(f"✅ Config atualizada: {key} = {value}")
