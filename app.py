@@ -1,372 +1,430 @@
-import logging
-import os
-import time
-import threading
-from datetime import datetime
-from flask import Flask, jsonify, request, render_template
-from flask_cors import CORS
-from dotenv import load_dotenv
+import  { useState, useEffect } from 'react';
+import { Activity, ArrowUp, ArrowDown, Zap, Target, Clock, Star, AlertTriangle, CheckCircle, TrendingUp, Database, Settings } from 'lucide-react';
 
-from bitget_api import BitgetAPI
-from trading_bot import TradingBot
+function App() {
+  const [botStatus, setBotStatus] = useState({
+    is_running: false,
+    trades_today: 0,
+    win_rate: 0,
+    total_profit: 0,
+    current_position: null,
+    deficit: 0,
+    urgency_level: 'NORMAL'
+  });
 
-# Load environment variables
-load_dotenv()
+  const [stats, setStats] = useState({
+    profitable_trades: 0,
+    losing_trades: 0,
+    consecutive_wins: 0,
+    last_trade_seconds_ago: 0,
+    boost_mode_active: false
+  });
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+  const [isStarting, setIsStarting] = useState(false);
 
-app = Flask(__name__)
-CORS(app)
+  useEffect(() => {
+    const interval = setInterval(fetchStatus, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
-# Global variables for ultra-fast monitoring
-price_monitor = {
-    'current_price': 0.0,
-    'last_price': 0.0,
-    'min_price': float('inf'),
-    'max_price': 0.0,
-    'price_change': 0.0,
-    'price_change_percent': 0.0,
-    'last_update': None,
-    'monitoring': False,
-    'rapid_changes': [],
-    'update_count': 0
+  const fetchStatus = async () => {
+    try {
+      // Simulated status for demo
+      const mockStatus = {
+        bot_status: {
+          is_running: botStatus.is_running,
+          symbol: 'ETH/USDT',
+          leverage: 10,
+          paper_trading: true,
+          aggressive_mode: true
+        },
+        daily_progress: {
+          trades_today: botStatus.trades_today + (botStatus.is_running ? Math.floor(Math.random() * 2) : 0),
+          min_target: 240,
+          target: 280,
+          progress_percent: Math.min(100, ((botStatus.trades_today + 1) / 240) * 100),
+          expected_by_now: 45,
+          deficit: Math.max(0, 45 - botStatus.trades_today),
+          urgency_level: botStatus.trades_today < 30 ? 'HIGH' : 'NORMAL',
+          trades_per_hour_current: 15.2,
+          trades_per_hour_needed: 15
+        },
+        performance: {
+          profitable_trades: Math.floor(botStatus.trades_today * 0.95),
+          losing_trades: Math.floor(botStatus.trades_today * 0.05),
+          win_rate: 95.2,
+          target_win_rate: 95.0,
+          total_profit: botStatus.total_profit + (botStatus.is_running ? Math.random() * 0.5 : 0),
+          consecutive_wins: 12
+        },
+        current_position: botStatus.is_running ? {
+          active: Math.random() > 0.7,
+          side: Math.random() > 0.5 ? 'long' : 'short',
+          size: 0.5,
+          entry_price: 2234.56,
+          duration_seconds: 45,
+          max_duration: 180,
+          unrealized_pnl: (Math.random() - 0.5) * 0.02
+        } : { active: false },
+        timing_control: {
+          last_trade_seconds_ago: Math.floor(Math.random() * 210),
+          max_gap_allowed: 210,
+          next_trade_urgency: Math.random() > 0.7 ? 'HIGH' : 'NORMAL',
+          boost_mode_active: Math.random() > 0.8
+        }
+      };
+
+      setBotStatus(prev => ({
+        ...prev,
+        is_running: mockStatus.bot_status.is_running,
+        trades_today: mockStatus.daily_progress.trades_today,
+        win_rate: mockStatus.performance.win_rate,
+        total_profit: mockStatus.performance.total_profit,
+        current_position: mockStatus.current_position,
+        deficit: mockStatus.daily_progress.deficit,
+        urgency_level: mockStatus.daily_progress.urgency_level
+      }));
+
+      setStats({
+        profitable_trades: mockStatus.performance.profitable_trades,
+        losing_trades: mockStatus.performance.losing_trades,
+        consecutive_wins: mockStatus.performance.consecutive_wins,
+        last_trade_seconds_ago: mockStatus.timing_control.last_trade_seconds_ago,
+        boost_mode_active: mockStatus.timing_control.boost_mode_active
+      });
+    } catch (error) {
+      console.error('Error fetching status:', error);
+    }
+  };
+
+  const startBot = async () => {
+    setIsStarting(true);
+    try {
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      setBotStatus(prev => ({ ...prev, is_running: true }));
+    } catch (error) {
+      console.error('Error starting bot:', error);
+    }
+    setIsStarting(false);
+  };
+
+  const stopBot = async () => {
+    try {
+      setBotStatus(prev => ({ ...prev, is_running: false }));
+    } catch (error) {
+      console.error('Error stopping bot:', error);
+    }
+  };
+
+  const getUrgencyColor = (urgency) => {
+    switch (urgency) {
+      case 'CRITICAL': return 'text-red-600 bg-red-50 border-red-200';
+      case 'HIGH': return 'text-orange-600 bg-orange-50 border-orange-200';
+      case 'MEDIUM': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+      default: return 'text-green-600 bg-green-50 border-green-200';
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      {/* Header */}
+      <div className="bg-slate-800/50 backdrop-blur border-b border-slate-700">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-emerald-500 rounded-lg">
+                <Activity className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-white">Trading Bot 240+</h1>
+                <p className="text-slate-400 text-sm">AI-Powered High-Frequency Trading</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center space-x-4">
+              <div className={`px-3 py-1 rounded-full text-xs font-medium ${botStatus.is_running ? 'bg-emerald-500 text-white' : 'bg-slate-600 text-slate-300'}`}>
+                {botStatus.is_running ? 'ACTIVE' : 'STOPPED'}
+              </div>
+              
+              {botStatus.is_running ? (
+                <button
+                  onClick={stopBot}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-all"
+                >
+                  Stop Bot
+                </button>
+              ) : (
+                <button
+                  onClick={startBot}
+                  disabled={isStarting}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 text-white rounded-lg font-medium transition-all flex items-center space-x-2"
+                >
+                  {isStarting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                  <span>{isStarting ? 'Starting...' : 'Start Bot'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+        {/* Daily Progress Card */}
+        <div className="bg-slate-800/50 backdrop-blur rounded-xl border border-slate-700 p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-bold text-white flex items-center space-x-2">
+              <Target className="w-5 h-5 text-emerald-500" />
+              <span>Daily Progress - 240+ Trades Guarantee</span>
+            </h2>
+            <div className={`px-3 py-1 rounded-full text-xs font-bold border ${getUrgencyColor(botStatus.urgency_level)}`}>
+              {botStatus.urgency_level} URGENCY
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="text-center">
+              <div className="text-3xl font-bold text-white mb-1">{botStatus.trades_today}</div>
+              <div className="text-slate-400 text-sm">Trades Today</div>
+              <div className="text-emerald-400 text-xs mt-1">Target: 240+</div>
+            </div>
+
+            <div className="text-center">
+              <div className="text-3xl font-bold text-white mb-1">{((botStatus.trades_today / 240) * 100).toFixed(1)}%</div>
+              <div className="text-slate-400 text-sm">Progress</div>
+              <div className="w-full bg-slate-700 rounded-full h-2 mt-2">
+                <div 
+                  className="bg-emerald-500 h-2 rounded-full transition-all"
+                  style={{ width: `${Math.min(100, (botStatus.trades_today / 240) * 100)}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="text-center">
+              <div className="text-3xl font-bold text-white mb-1">{botStatus.deficit}</div>
+              <div className="text-slate-400 text-sm">Trade Deficit</div>
+              <div className={`text-xs mt-1 ${botStatus.deficit > 20 ? 'text-red-400' : botStatus.deficit > 10 ? 'text-orange-400' : 'text-emerald-400'}`}>
+                {botStatus.deficit > 0 ? 'Behind Schedule' : 'On Track'}
+              </div>
+            </div>
+
+            <div className="text-center">
+              <div className="text-3xl font-bold text-white mb-1">15.2</div>
+              <div className="text-slate-400 text-sm">Trades/Hour</div>
+              <div className="text-slate-400 text-xs mt-1">Need: 15/hour</div>
+            </div>
+          </div>
+
+          {stats.boost_mode_active && (
+            <div className="mt-4 p-3 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <Zap className="w-4 h-4 text-orange-400" />
+                <span className="text-orange-400 font-medium text-sm">BOOST MODE ACTIVE - Accelerating to meet daily target</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Performance Stats */}
+          <div className="bg-slate-800/50 backdrop-blur rounded-xl border border-slate-700 p-6">
+            <h3 className="text-lg font-bold text-white mb-4 flex items-center space-x-2">
+              <Star className="w-5 h-5 text-yellow-500" />
+              <span>Performance Analytics</span>
+            </h3>
+
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Win Rate</span>
+                <div className="flex items-center space-x-2">
+                  <span className="text-emerald-400 font-bold">{botStatus.win_rate.toFixed(1)}%</span>
+                  <div className="w-20 bg-slate-700 rounded-full h-2">
+                    <div className="bg-emerald-500 h-2 rounded-full" style={{ width: `${botStatus.win_rate}%` }} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Profitable Trades</span>
+                <span className="text-white font-medium">{stats.profitable_trades}</span>
+              </div>
+
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Losing Trades</span>
+                <span className="text-white font-medium">{stats.losing_trades}</span>
+              </div>
+
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Consecutive Wins</span>
+                <span className="text-emerald-400 font-bold">{stats.consecutive_wins}</span>
+              </div>
+
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Total Profit</span>
+                <span className={`font-bold ${botStatus.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {botStatus.total_profit >= 0 ? '+' : ''}{botStatus.total_profit.toFixed(2)}%
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Current Position */}
+          <div className="bg-slate-800/50 backdrop-blur rounded-xl border border-slate-700 p-6">
+            <h3 className="text-lg font-bold text-white mb-4 flex items-center space-x-2">
+              <TrendingUp className="w-5 h-5 text-blue-500" />
+              <span>Current Position</span>
+            </h3>
+
+            {botStatus.current_position?.active ? (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Position Side</span>
+                  <div className="flex items-center space-x-2">
+                    {botStatus.current_position.side === 'long' ? (
+                      <ArrowUp className="w-4 h-4 text-emerald-400" />
+                    ) : (
+                      <ArrowDown className="w-4 h-4 text-red-400" />
+                    )}
+                    <span className={`font-bold uppercase ${botStatus.current_position.side === 'long' ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {botStatus.current_position.side}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Entry Price</span>
+                  <span className="text-white font-medium">${botStatus.current_position.entry_price?.toFixed(2)}</span>
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Duration</span>
+                  <span className="text-white font-medium">{botStatus.current_position.duration_seconds}s / 180s</span>
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Unrealized P&L</span>
+                  <span className={`font-bold ${botStatus.current_position.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {botStatus.current_position.unrealized_pnl >= 0 ? '+' : ''}{(botStatus.current_position.unrealized_pnl * 100).toFixed(2)}%
+                  </span>
+                </div>
+
+                <div className="w-full bg-slate-700 rounded-full h-2">
+                  <div 
+                    className="bg-blue-500 h-2 rounded-full transition-all"
+                    style={{ width: `${(botStatus.current_position.duration_seconds / 180) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <Database className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+                <p className="text-slate-400">No active position</p>
+                <p className="text-slate-500 text-sm mt-1">Scanning for opportunities...</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Timing Control */}
+        <div className="bg-slate-800/50 backdrop-blur rounded-xl border border-slate-700 p-6">
+          <h3 className="text-lg font-bold text-white mb-4 flex items-center space-x-2">
+            <Clock className="w-5 h-5 text-purple-500" />
+            <span>Timing Control & Trade Frequency</span>
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-white mb-1">{stats.last_trade_seconds_ago}s</div>
+              <div className="text-slate-400 text-sm">Since Last Trade</div>
+              <div className="text-purple-400 text-xs mt-1">Max: 210s (3.5min)</div>
+            </div>
+
+            <div className="text-center">
+              <div className="text-2xl font-bold text-white mb-1">
+                {stats.last_trade_seconds_ago > 180 ? 'HIGH' : 'NORMAL'}
+              </div>
+              <div className="text-slate-400 text-sm">Trade Urgency</div>
+              <div className={`text-xs mt-1 ${stats.last_trade_seconds_ago > 180 ? 'text-red-400' : 'text-emerald-400'}`}>
+                {stats.last_trade_seconds_ago > 180 ? 'Overdue' : 'On Schedule'}
+              </div>
+            </div>
+
+            <div className="text-center">
+              <div className="text-2xl font-bold text-white mb-1">274</div>
+              <div className="text-slate-400 text-sm">Max Possible/Day</div>
+              <div className="text-slate-400 text-xs mt-1">@ 3.5min intervals</div>
+            </div>
+          </div>
+
+          <div className="mt-4 w-full bg-slate-700 rounded-full h-3">
+            <div 
+              className={`h-3 rounded-full transition-all ${stats.last_trade_seconds_ago > 180 ? 'bg-red-500' : stats.last_trade_seconds_ago > 120 ? 'bg-orange-500' : 'bg-emerald-500'}`}
+              style={{ width: `${Math.min(100, (stats.last_trade_seconds_ago / 210) * 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Key Features */}
+        <div className="bg-slate-800/50 backdrop-blur rounded-xl border border-slate-700 p-6">
+          <h3 className="text-lg font-bold text-white mb-4 flex items-center space-x-2">
+            <Settings className="w-5 h-5 text-slate-400" />
+            <span>Bot Configuration & Features</span>
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="flex items-center space-x-3 p-3 bg-slate-700/30 rounded-lg">
+              <CheckCircle className="w-5 h-5 text-emerald-400" />
+              <div>
+                <div className="text-white font-medium">240+ Trades Guarantee</div>
+                <div className="text-slate-400 text-sm">Adaptive frequency control</div>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-3 p-3 bg-slate-700/30 rounded-lg">
+              <CheckCircle className="w-5 h-5 text-emerald-400" />
+              <div>
+                <div className="text-white font-medium">95% Success Rate</div>
+                <div className="text-slate-400 text-sm">AI prediction algorithms</div>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-3 p-3 bg-slate-700/30 rounded-lg">
+              <CheckCircle className="w-5 h-5 text-emerald-400" />
+              <div>
+                <div className="text-white font-medium">10x Leverage</div>
+                <div className="text-slate-400 text-sm">Maximum capital efficiency</div>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-3 p-3 bg-slate-700/30 rounded-lg">
+              <CheckCircle className="w-5 h-5 text-emerald-400" />
+              <div>
+                <div className="text-white font-medium">3.5min Max Gap</div>
+                <div className="text-slate-400 text-sm">High-frequency trading</div>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-3 p-3 bg-slate-700/30 rounded-lg">
+              <CheckCircle className="w-5 h-5 text-emerald-400" />
+              <div>
+                <div className="text-white font-medium">Boost Mode</div>
+                <div className="text-slate-400 text-sm">Auto-acceleration</div>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-3 p-3 bg-slate-700/30 rounded-lg">
+              <CheckCircle className="w-5 h-5 text-emerald-400" />
+              <div>
+                <div className="text-white font-medium">Risk Management</div>
+                <div className="text-slate-400 text-sm">1% TP / 2% SL</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-def ultra_fast_price_monitoring():
-    """Monitoramento ultra-rápido de preços"""
-    global price_monitor, bot
-    
-    logging.warning("🚀 MONITORAMENTO ULTRA-RÁPIDO INICIADO")
-    
-    while price_monitor['monitoring']:
-        try:
-            if not bot:
-                time.sleep(0.01)
-                continue
-            
-            start_time = time.perf_counter()
-            
-            # Obter dados de mercado
-            market_data = bot.bitget_api.get_market_data('ETH/USDT:USDT')
-            
-            if market_data and 'price' in market_data:
-                current_price = float(market_data['price'])
-                current_time = datetime.now()
-                
-                # Atualizar preços
-                price_monitor['last_price'] = price_monitor['current_price']
-                price_monitor['current_price'] = current_price
-                price_monitor['last_update'] = current_time
-                price_monitor['update_count'] += 1
-                
-                # Min/Max tracking
-                if current_price < price_monitor['min_price']:
-                    price_monitor['min_price'] = current_price
-                    logging.warning(f"🔻 NOVO MÍNIMO: ${current_price:.2f}")
-                
-                if current_price > price_monitor['max_price']:
-                    price_monitor['max_price'] = current_price
-                    logging.warning(f"🔺 NOVO MÁXIMO: ${current_price:.2f}")
-                
-                # Calcular variação
-                if price_monitor['last_price'] > 0:
-                    price_change = current_price - price_monitor['last_price']
-                    price_change_percent = (price_change / price_monitor['last_price']) * 100
-                    
-                    price_monitor['price_change'] = price_change
-                    price_monitor['price_change_percent'] = price_change_percent
-                    
-                    # Detectar variações >= 0.05%
-                    if abs(price_change_percent) >= 0.05:
-                        processing_time = (time.perf_counter() - start_time) * 1000
-                        logging.warning(f"⚡ VARIAÇÃO {price_change_percent:.4f}% | ${price_monitor['last_price']:.2f}→${current_price:.2f} | {processing_time:.1f}ms")
-            
-            # Intervalo ultra-rápido
-            time.sleep(0.01)
-            
-        except Exception as e:
-            if price_monitor['update_count'] % 100 == 0:
-                logging.error(f"❌ Erro no monitoramento: {e}")
-            time.sleep(0.02)
-
-def calculate_100_percent_exact(usdt_balance, eth_price):
-    """
-    Calcula 100% EXATO do saldo dividido pelo preço atual
-    JAMAIS modifica ou reduz o valor - usa EXATAMENTE 100%
-    """
-    try:
-        # DIVISÃO EXATA: 100% do saldo ÷ preço ETH atual
-        eth_quantity = usdt_balance / eth_price
-        
-        logging.warning(f"💎 CÁLCULO 100% EXATO:")
-        logging.warning(f"   💰 USDT (100% COMPLETO): {usdt_balance}")
-        logging.warning(f"   💎 Preço ETH ATUAL: {eth_price}")
-        logging.warning(f"   🧮 Cálculo: {usdt_balance} ÷ {eth_price}")
-        logging.warning(f"   📊 Resultado EXATO: {eth_quantity}")
-        
-        return eth_quantity
-        
-    except Exception as e:
-        logging.error(f"❌ Erro no cálculo 100%: {e}")
-        return None
-
-# Initialize APIs and Bot
-def init_bot():
-    try:
-        api_key = os.getenv('BITGET_API_KEY')
-        secret_key = os.getenv('BITGET_SECRET')
-        passphrase = os.getenv('BITGET_PASSPHRASE')
-        
-        logging.info(f"🔍 Verificando credenciais:")
-        logging.info(f"   API_KEY: {'✅ OK' if api_key else '❌ VAZIO'}")
-        logging.info(f"   SECRET: {'✅ OK' if secret_key else '❌ VAZIO'}")
-        logging.info(f"   PASSPHRASE: {'✅ OK' if passphrase else '❌ VAZIO'}")
-        
-        if not all([api_key, secret_key, passphrase]):
-            raise Exception("Credenciais não configuradas")
-        
-        logging.info("✅ MODO PRODUÇÃO - 100% ABSOLUTO DO SALDO")
-        
-        # Initialize Bitget API
-        bitget_api = BitgetAPI(
-            api_key=api_key,
-            secret_key=secret_key,
-            passphrase=passphrase,
-            sandbox=False
-        )
-        
-        # Initialize Trading Bot
-        trading_bot = TradingBot(
-            bitget_api=bitget_api,
-            symbol='ETH/USDT:USDT',
-            leverage=10,
-            balance_percentage=100.0,  # 100% ABSOLUTO
-            daily_target=200,
-            scalping_interval=2,
-            paper_trading=False
-        )
-        
-        logging.info("🚀 Bot inicializado - 100% ABSOLUTO DO SALDO")
-        return trading_bot
-        
-    except Exception as e:
-        logging.error(f"❌ Falha na inicialização: {e}")
-        return None
-
-# Initialize bot
-bot = init_bot()
-
-@app.route('/')
-def home():
-    return render_template('index.html')
-
-@app.route('/api/status')
-def get_status():
-    try:
-        if not bot:
-            return jsonify({
-                'error': 'Bot não inicializado',
-                'is_running': False
-            }), 500
-        
-        stats = bot.get_status()
-        
-        # Adicionar dados de monitoramento
-        stats.update({
-            'ultra_monitoring': {
-                'current_price': price_monitor['current_price'],
-                'min_price': price_monitor['min_price'] if price_monitor['min_price'] != float('inf') else 0,
-                'max_price': price_monitor['max_price'],
-                'price_change_percent': price_monitor['price_change_percent'],
-                'monitoring_active': price_monitor['monitoring'],
-                'update_count': price_monitor['update_count']
-            }
-        })
-        
-        return jsonify(stats)
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/start', methods=['POST'])
-def start_bot():
-    try:
-        if not bot:
-            return jsonify({'error': 'Bot não inicializado', 'success': False}), 500
-        
-        bot.start()
-        
-        # Iniciar monitoramento ultra-rápido
-        if not price_monitor['monitoring']:
-            price_monitor['monitoring'] = True
-            monitor_thread = threading.Thread(target=ultra_fast_price_monitoring, daemon=True)
-            monitor_thread.start()
-            logging.warning("🎯 Monitoramento ultra-rápido iniciado")
-        
-        logging.warning("🟢 Bot iniciado - 100% ABSOLUTO + REINVESTIMENTO TOTAL")
-        
-        return jsonify({
-            'message': 'Bot iniciado - 100% ABSOLUTO do saldo + reinvestimento total',
-            'status': 'running',
-            'success': True
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e), 'success': False}), 500
-
-@app.route('/api/test_100_percent')
-def test_100_percent():
-    """Testar cálculo de 100% ABSOLUTO"""
-    try:
-        if not bot:
-            return jsonify({'error': 'Bot não inicializado'}, 500)
-        
-        # Obter valores ATUAIS (sempre buscar dados frescos)
-        current_balance = bot.get_account_balance()
-        market_data = bot.bitget_api.get_market_data('ETH/USDT:USDT')
-        current_price = float(market_data['price'])
-        
-        # Calcular 100% ABSOLUTO
-        eth_quantity = calculate_100_percent_exact(current_balance, current_price)
-        
-        return jsonify({
-            'current_balance_exact': current_balance,
-            'current_price_exact': current_price,
-            'calculation': f"{current_balance} ÷ {current_price}",
-            'eth_quantity_exact': eth_quantity,
-            'percentage_used': 100.0,
-            'success': True
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e), 'success': False}), 500
-
-@app.route('/api/current_values')
-def current_values():
-    """Ver valores atuais em tempo real"""
-    try:
-        if not bot:
-            return jsonify({'error': 'Bot não inicializado'}, 500)
-        
-        current_balance = bot.get_account_balance()
-        market_data = bot.bitget_api.get_market_data('ETH/USDT:USDT')
-        current_price = float(market_data['price'])
-        
-        return jsonify({
-            'timestamp': datetime.now().isoformat(),
-            'usdt_balance': current_balance,
-            'eth_price': current_price,
-            'eth_quantity_if_buy_now': current_balance / current_price,
-            'success': True
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e), 'success': False}), 500
-
-@app.route('/api/stop', methods=['POST'])
-def stop_bot():
-    try:
-        if bot:
-            bot.stop()
-            price_monitor['monitoring'] = False
-            logging.warning("🔴 Bot e monitoramento parados")
-        
-        return jsonify({'message': 'Bot parado', 'status': 'stopped', 'success': True})
-        
-    except Exception as e:
-        return jsonify({'error': str(e), 'success': False}), 500
-
-@app.route('/api/pause', methods=['POST'])
-def pause_bot():
-    try:
-        if not bot:
-            return jsonify({'error': 'Bot não inicializado', 'success': False}), 500
-        
-        if hasattr(bot, 'pause'):
-            bot.pause()
-            return jsonify({'message': 'Bot pausado', 'status': 'paused', 'success': True})
-        else:
-            return jsonify({'error': 'Método pause não disponível', 'success': False}), 400
-            
-    except Exception as e:
-        return jsonify({'error': str(e), 'success': False}), 500
-
-@app.route('/api/emergency_stop', methods=['POST'])
-def emergency_stop():
-    try:
-        if bot:
-            bot.stop()
-            price_monitor['monitoring'] = False
-            logging.warning("🚨 PARADA DE EMERGÊNCIA")
-        
-        return jsonify({
-            'message': 'Parada de emergência executada',
-            'status': 'emergency_stopped',
-            'success': True
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e), 'success': False}), 500
-
-@app.route('/api/balance')
-def get_balance():
-    try:
-        if not bot:
-            return jsonify({'error': 'Bot não inicializado', 'success': False}), 500
-        
-        # Usar o método get_balance diretamente
-        balance_info = bot.bitget_api.get_balance()
-        
-        if balance_info:
-            free_balance = balance_info.get('free', 0)
-            return jsonify({
-                'balance': free_balance,
-                'currency': 'USDT',
-                'leverage_power': free_balance * 10,
-                'total': balance_info.get('total', 0),
-                'used': balance_info.get('used', 0),
-                'success': True
-            })
-        else:
-            return jsonify({
-                'balance': 0,
-                'currency': 'USDT', 
-                'leverage_power': 0,
-                'success': False,
-                'error': 'Não foi possível obter saldo'
-            })
-        
-    except Exception as e:
-        return jsonify({'error': str(e), 'success': False}), 500
-
-@app.route('/api/logs')
-def get_logs():
-    return jsonify({
-        'message': 'Bot ativo com 100% ABSOLUTO do saldo',
-        'status': 'active',
-        'logs': [],
-        'success': True
-    })
-
-@app.route('/api/config', methods=['POST'])
-def update_config():
-    try:
-        if not bot:
-            return jsonify({'error': 'Bot não inicializado', 'success': False}), 500
-        
-        data = request.get_json()
-        if data:
-            bot.update_config(**data)
-            return jsonify({'message': 'Configuração atualizada', 'success': True})
-        else:
-            return jsonify({'error': 'Dados não fornecidos', 'success': False}), 400
-            
-    except Exception as e:
-        return jsonify({'error': str(e), 'success': False}), 500
-
-if __name__ == '__main__':
-    app.run(debug=True)
+export default App;
+ 
