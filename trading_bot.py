@@ -42,11 +42,9 @@ class TradingBot:
         self.entry_price = None
         self.position_side = None
         self.position_size = 0.0
+        self.trading_thread = None
 
         # === CONFIGURAÇÕES PARA GARANTIR 240+ TRADES POR DIA ===
-        # CÁLCULO: 16 horas de trading = 960 minutos
-        # 240 trades = 1 trade a cada 4 minutos máximo
-        # Vamos configurar para 1 trade a cada 3.5 minutos = 274 trades possíveis
         self.min_trades_per_day = 240              # Mínimo OBRIGATÓRIO
         self.target_trades_per_day = 280           # Target para garantir mínimo
         self.max_time_between_trades = 210         # 3.5 minutos = 210 segundos máximo
@@ -54,13 +52,12 @@ class TradingBot:
         self.last_trade_time = 0
         
         # CONFIGURAÇÕES EXTREMAS PARA 95%+ SUCESSO E 240+ TRADES
-        # AJUSTADO: Reduzir exigências para permitir mais trades mantendo qualidade
-        self.min_confidence_to_trade = 0.85        # Reduzido de 0.98 para 0.85 (mais trades)
-        self.min_prediction_score = 0.82           # Reduzido de 0.95 para 0.82
-        self.min_signals_agreement = 15            # Reduzido de 19 para 15 (75% dos sinais)
-        self.min_strength_threshold = 0.012        # 1.2% força mínima (garantir 1% após taxas)
+        self.min_confidence_to_trade = 0.85        # Reduzido para permitir mais trades
+        self.min_prediction_score = 0.82           
+        self.min_signals_agreement = 15            # 75% dos sinais
+        self.min_strength_threshold = 0.012        # 1.2% força mínima
 
-        # MÚLTIPLOS NÍVEIS DE TAKE PROFIT PARA COMPENSAR TAXAS E MAIS TRADES
+        # MÚLTIPLOS NÍVEIS DE TAKE PROFIT
         self.profit_levels = {
             'micro_profit': 0.008,   # 0.8% - saída super rápida (30s)
             'quick_profit': 0.012,   # 1.2% - saída rápida (60s)
@@ -69,10 +66,10 @@ class TradingBot:
         }
         self.profit_target = 0.01            # 1% take profit principal
         self.stop_loss_target = -0.02        # 2% stop loss
-        self.max_position_time = 180         # 3 minutos máximo por trade (para permitir mais trades)
+        self.max_position_time = 180         # 3 minutos máximo por trade
 
         # SISTEMA DE PREVISÃO SUPREMO EXPANDIDO
-        self.price_history = deque(maxlen=5000)  # 5000 pontos históricos
+        self.price_history = deque(maxlen=5000)
         self.volume_history = deque(maxlen=1000)
         self.order_book_history = deque(maxlen=500)
         self.market_sentiment_history = deque(maxlen=200)
@@ -90,84 +87,6 @@ class TradingBot:
         # Histórico para ML
         self.ml_features_history = deque(maxlen=2000)
         self.price_targets_history = deque(maxlen=2000)
-
-        # Base de conhecimento de padrões EXPANDIDA
-        self.pattern_database = {
-            'double_top': {'accuracy': 0.82, 'timeframe': 15, 'reversal': True},
-            'double_bottom': {'accuracy': 0.84, 'timeframe': 15, 'reversal': True},
-            'head_shoulders': {'accuracy': 0.78, 'timeframe': 20, 'reversal': True},
-            'triangle_breakout': {'accuracy': 0.76, 'timeframe': 12, 'continuation': True},
-            'flag_pattern': {'accuracy': 0.73, 'timeframe': 8, 'continuation': True},
-            'cup_handle': {'accuracy': 0.71, 'timeframe': 25, 'bullish': True}
-        }
-
-        # PADRÕES DE ALTA PROBABILIDADE PARA EXTREME SUCCESS
-        self.high_probability_patterns = {
-            'strong_breakout': {'min_strength': 0.025, 'success_rate': 0.96},
-            'momentum_continuation': {'min_strength': 0.020, 'success_rate': 0.94},
-            'support_bounce': {'min_strength': 0.018, 'success_rate': 0.93},
-            'resistance_break': {'min_strength': 0.022, 'success_rate': 0.95},
-            'trend_acceleration': {'min_strength': 0.030, 'success_rate': 0.97}
-        }
-
-        # 10 ESTRATÉGIAS DE SAÍDA AUTOMÁTICA APRIMORADAS
-        self.exit_strategies = {
-            'trailing_stop': {'active': True, 'trail_percent': 0.3},  # Mais apertado
-            'grid_exit': {'active': True, 'levels': 8},  # Mais níveis
-            'time_based': {'active': True, 'max_hold_minutes': 3},  # 3 minutos máximo
-            'volatility_exit': {'active': True, 'vol_threshold': 1.5},  # Mais sensível
-            'momentum_exit': {'active': True, 'rsi_threshold': 65},  # Mais conservador
-            'support_resistance': {'active': True, 'sr_buffer': 0.15},  # Mais apertado
-            'fibonacci_exit': {'active': True, 'fib_levels': [0.618, 0.786, 1.0]},
-            'bollinger_exit': {'active': True, 'bb_threshold': 0.9},  # Mais rigoroso
-            'macd_exit': {'active': True, 'macd_divergence': True},
-            'volume_exit': {'active': True, 'volume_spike': 1.8}  # Mais sensível
-        }
-
-        # Indicadores técnicos avançados
-        self.indicators = {
-            'sma_5': 0, 'sma_10': 0, 'sma_20': 0, 'sma_50': 0,
-            'ema_12': 0, 'ema_26': 0, 'ema_50': 0,
-            'rsi_14': 50, 'rsi_6': 50, 'rsi_21': 50,
-            'macd': 0, 'macd_signal': 0, 'macd_histogram': 0,
-            'bb_upper': 0, 'bb_middle': 0, 'bb_lower': 0, 'bb_width': 0,
-            'stoch_k': 50, 'stoch_d': 50,
-            'williams_r': -50, 'cci': 0, 'atr': 0, 'adx': 25,
-            'obv': 0, 'mfi': 50, 'trix': 0, 'ultimate_oscillator': 50
-        }
-
-        # Sistema de Machine Learning Avançado
-        self.ml_models = {
-            'trend_predictor': {'weights': [0.5, 0.3, 0.15, 0.05], 'bias': 0.02},
-            'reversal_detector': {'weights': [0.4, 0.3, 0.2, 0.1], 'bias': -0.01},
-            'momentum_analyzer': {'weights': [0.6, 0.25, 0.1, 0.05], 'bias': 0.0},
-            'volatility_predictor': {'weights': [0.35, 0.35, 0.2, 0.1], 'bias': 0.01}
-        }
-
-        # Análise de correlação com outros ativos
-        self.correlation_assets = ['BTC/USDT:USDT', 'SOL/USDT:USDT', 'BNB/USDT:USDT']
-        self.asset_correlations = {}
-
-        # Sistema de validação cruzada
-        self.prediction_history = deque(maxlen=500)
-        self.accuracy_tracking = {
-            'short_term': {'correct': 0, 'total': 0},
-            'medium_term': {'correct': 0, 'total': 0},
-            'long_term': {'correct': 0, 'total': 0}
-        }
-
-        # SISTEMA DE VALIDAÇÃO EXTREMA
-        self.validation_requirements = {
-            'ml_models_agreement': 3,      # 3 modelos ML concordando
-            'technical_score_min': 100,    # 100+ pontos técnicos
-            'momentum_confirmation': True,  # Momentum confirmado
-            'volume_confirmation': True,    # Volume confirmado
-            'market_structure': True,       # Estrutura de mercado favorável
-            'volatility_optimal': True,     # Volatilidade ideal
-            'liquidity_check': True,        # Liquidez adequada
-            'spread_check': True,           # Spread baixo
-            'time_filter': True            # Horário favorável
-        }
 
         # CONTROLE DE TRADES DIÁRIOS
         self.trade_frequency_control = {
@@ -187,17 +106,6 @@ class TradingBot:
         self.prediction_accuracy_overall = 0.0
         self.consecutive_wins = 0
         self.max_consecutive_wins = 0
-        self.success_patterns_db = {}
-        self.failed_patterns_db = {}
-
-        # ESTATÍSTICAS DETALHADAS
-        self.stats = {
-            'trades_by_hour': {},
-            'success_by_pattern': {},
-            'avg_profit_by_timeframe': {},
-            'best_entry_conditions': {},
-            'market_phases': {}
-        }
 
         logger.info("🎯 EXTREME SUCCESS AI TRADING BOT INICIALIZADO")
         logger.info(f"🚀 Meta GARANTIDA: {self.min_trades_per_day}+ trades/dia com 95%+ sucesso")
@@ -208,7 +116,6 @@ class TradingBot:
         logger.info(f"🛑 Stop Loss: {abs(self.stop_loss_target)*100}%")
         logger.info(f"⏱️ Máx tempo por trade: {self.max_position_time}s")
 
-    # MÉTODOS OBRIGATÓRIOS PARA CORRIGIR ERROS 500
     def get_status(self):
         """Status detalhado com foco em atingir 240+ trades por dia"""
         try:
@@ -216,8 +123,8 @@ class TradingBot:
             current_hour = current_time.hour
             
             # Calcular progresso em relação à meta de 240 trades
-            hours_passed = max(1, current_hour - 8) if current_hour >= 8 else max(1, current_hour + 16)  # Assumindo trading de 8h às 24h
-            expected_trades_by_now = (240 / 16) * hours_passed  # 15 trades por hora
+            hours_passed = max(1, current_hour - 8) if current_hour >= 8 else max(1, current_hour + 16)
+            expected_trades_by_now = (240 / 16) * hours_passed
             trade_deficit = max(0, expected_trades_by_now - self.trades_today)
             
             # Status de urgência para atingir meta
@@ -305,6 +212,7 @@ class TradingBot:
             self.start_balance = self.get_account_balance()
             self.trades_today = 0
             self.profitable_trades = 0
+            self.last_trade_time = time.time()
             
             # Iniciar thread com frequência agressiva para garantir 240+ trades
             if not hasattr(self, 'trading_thread') or not self.trading_thread or not self.trading_thread.is_alive():
@@ -394,7 +302,7 @@ class TradingBot:
                     if success:
                         self.last_trade_time = time.time()
                         self.trades_today += 1
-                        logger.info(f"✅ Trade #{self.trades_today}/240+ executado")
+                        logger.info(f"✅ Trade #{self.trades_today}/240+ executado - {direction.upper()}")
                 
                 # GERENCIAR POSIÇÃO EXISTENTE COM FOCO EM VELOCIDADE
                 if self.current_position:
@@ -453,6 +361,16 @@ class TradingBot:
         """Análise balanceada entre qualidade e velocidade para garantir 240+ trades"""
         try:
             if len(self.price_history) < 50:
+                # Inicializar histórico se vazio
+                market_data = self.bitget_api.get_market_data(self.symbol)
+                if market_data:
+                    current_price = float(market_data['price'])
+                    # Simular histórico inicial
+                    for i in range(50):
+                        self.price_history.append(current_price * (1 + (np.random.random() - 0.5) * 0.001))
+                    # Adicionar volume simulado
+                    for i in range(10):
+                        self.volume_history.append(1000000 + np.random.random() * 500000)
                 return False, 0.0, None
             
             # Verificar cooldown mínimo (reduzido para permitir mais trades)
@@ -469,6 +387,16 @@ class TradingBot:
             
             current_price = float(market_data['price'])
             self.price_history.append(current_price)
+            
+            # Adicionar volume simulado se não disponível
+            if 'volume' in market_data:
+                self.volume_history.append(float(market_data['volume']))
+            else:
+                # Volume simulado baseado em volatilidade
+                if len(self.price_history) >= 2:
+                    price_change = abs(self.price_history[-1] - self.price_history[-2]) / self.price_history[-2]
+                    simulated_volume = 1000000 * (1 + price_change * 10)
+                    self.volume_history.append(simulated_volume)
             
             # ANÁLISE SIMPLIFICADA MAS EFICAZ PARA VELOCIDADE
             scores = []
@@ -554,7 +482,7 @@ class TradingBot:
         try:
             balance = self.get_account_balance()
             if balance <= 0:
-                return False
+                balance = 1000  # Simular saldo para paper trading
             
             # Calcular posição com 100% do saldo
             position_value = balance * self.leverage
@@ -563,7 +491,7 @@ class TradingBot:
             
             logger.info(f"💰 Saldo: ${balance:.2f} | Posição: ${position_value:.2f} | Confiança: {confidence*100:.1f}%")
             
-            # Simular execução rápida
+            # Executar trade (paper trading ou real)
             if self.paper_trading:
                 self.current_position = {
                     'side': direction,
@@ -579,8 +507,35 @@ class TradingBot:
                 
                 return True
             else:
-                # Implementar execução real
-                return True
+                # Implementar execução real aqui
+                try:
+                    order_result = self.bitget_api.place_order(
+                        symbol=self.symbol,
+                        side='buy' if direction == 'long' else 'sell',
+                        amount=position_size,
+                        price=current_price,
+                        leverage=self.leverage
+                    )
+                    
+                    if order_result and order_result.get('success'):
+                        self.current_position = {
+                            'side': direction,
+                            'size': position_size,
+                            'entry_price': current_price,
+                            'start_time': time.time(),
+                            'order_id': order_result.get('order_id')
+                        }
+                        self.position_side = direction
+                        self.position_size = position_size
+                        self.entry_price = current_price
+                        return True
+                    else:
+                        logger.error(f"❌ Falha ao executar ordem: {order_result}")
+                        return False
+                        
+                except Exception as e:
+                    logger.error(f"❌ Erro ao executar ordem real: {e}")
+                    return False
                 
         except Exception as e:
             logger.error(f"❌ Erro ao executar trade rápido: {e}")
@@ -770,8 +725,18 @@ class TradingBot:
                 logger.info(f"📤 Fechando posição: {reason}")
                 
                 if not self.paper_trading:
-                    # Implementar fechamento real aqui
-                    pass
+                    # Implementar fechamento real
+                    try:
+                        close_result = self.bitget_api.close_position(
+                            symbol=self.symbol,
+                            side='sell' if self.current_position['side'] == 'long' else 'buy',
+                            amount=self.current_position['size']
+                        )
+                        
+                        if not close_result or not close_result.get('success'):
+                            logger.error(f"❌ Falha ao fechar posição: {close_result}")
+                    except Exception as e:
+                        logger.error(f"❌ Erro ao fechar posição real: {e}")
                 
                 self.current_position = None
                 self.position_side = None
@@ -799,7 +764,6 @@ class TradingBot:
         except:
             return 0.0
 
-    # TODOS OS SEUS MÉTODOS ORIGINAIS CONTINUAM ABAIXO...
     def calculate_advanced_features(self, prices: List[float], volumes: List[float] = None) -> Dict:
         """Calcula features avançadas para ML com mais indicadores"""
         if len(prices) < 50:
@@ -875,5 +839,63 @@ class TradingBot:
             logger.error(f"Erro ao calcular features: {e}")
             return {}
 
-    # [RESTO DO SEU CÓDIGO ORIGINAL CONTINUA AQUI...]
-    # Todos os outros métodos permanecem exatamente iguais...
+    def get_daily_stats(self):
+        """Estatísticas detalhadas do dia"""
+        try:
+            win_rate = (self.profitable_trades / max(1, self.total_trades)) * 100
+            
+            return {
+                'trades_executed': self.trades_today,
+                'target_achievement': (self.trades_today / self.min_trades_per_day) * 100,
+                'profitable_trades': self.profitable_trades,
+                'losing_trades': self.total_trades - self.profitable_trades,
+                'win_rate': win_rate,
+                'total_profit_percent': self.total_profit,
+                'consecutive_wins': self.consecutive_wins,
+                'max_consecutive_wins': self.max_consecutive_wins,
+                'avg_trade_duration': self.max_position_time,
+                'boost_mode_activations': sum(1 for _ in [self.trade_frequency_control.get('boost_mode', False)]),
+                'confidence_threshold': self.min_confidence_to_trade
+            }
+        except Exception as e:
+            logger.error(f"❌ Erro ao obter estatísticas diárias: {e}")
+            return {}
+
+    def reset_daily_stats(self):
+        """Reset estatísticas para novo dia"""
+        try:
+            logger.info("🔄 Resetando estatísticas para novo dia")
+            self.trades_today = 0
+            self.profitable_trades = 0
+            self.total_trades = 0
+            self.total_profit = 0.0
+            self.consecutive_wins = 0
+            self.last_trade_time = time.time()
+            self.trade_frequency_control['boost_mode'] = False
+            self.min_confidence_to_trade = 0.85  # Reset ao valor padrão
+            logger.info("✅ Estatísticas resetadas - Novo dia iniciado")
+        except Exception as e:
+            logger.error(f"❌ Erro ao resetar estatísticas: {e}")
+
+    def emergency_stop(self):
+        """Parada de emergência - fecha tudo imediatamente"""
+        try:
+            logger.warning("🚨 PARADA DE EMERGÊNCIA ATIVADA")
+            
+            # Parar o bot
+            self.is_running = False
+            
+            # Fechar posição imediatamente se existir
+            if self.current_position:
+                self._close_position_immediately("Emergency stop")
+            
+            # Parar thread
+            if hasattr(self, 'trading_thread') and self.trading_thread:
+                self.trading_thread.join(timeout=2)
+            
+            logger.warning("🛑 Parada de emergência concluída")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erro na parada de emergência: {e}")
+            return False
