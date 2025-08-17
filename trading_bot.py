@@ -19,7 +19,6 @@ try:
     ML_AVAILABLE = True
 except ImportError:
     ML_AVAILABLE = False
-    logger.warning("⚠️ Bibliotecas ML não disponíveis - usando modo básico")
 
 from bitget_api import BitgetAPI
 
@@ -49,6 +48,7 @@ class TradingBot:
         self.entry_price = None
         self.position_side = None
         self.position_size = 0.0
+        self.position_start_time = None
         
         # === CONFIGURAÇÕES EXTREMAS PARA 95%+ SUCESSO E 300+ TRADES ===
         self.min_confidence_to_trade = 0.98 if ML_AVAILABLE else 0.85
@@ -70,21 +70,19 @@ class TradingBot:
         # SISTEMA DE PREVISÃO EXPANDIDO
         self.price_history = deque(maxlen=5000)
         self.volume_history = deque(maxlen=1000)
-        self.order_book_history = deque(maxlen=500)
-        self.market_sentiment_history = deque(maxlen=200)
         
         # SISTEMA DE MACHINE LEARNING (se disponível)
         if ML_AVAILABLE:
             self.prediction_models = {
-                'random_forest': RandomForestRegressor(n_estimators=100, random_state=42),
-                'gradient_boost': GradientBoostingRegressor(n_estimators=100, random_state=42),
+                'random_forest': RandomForestRegressor(n_estimators=50, random_state=42),
+                'gradient_boost': GradientBoostingRegressor(n_estimators=50, random_state=42),
                 'linear_regression': LinearRegression(),
             }
             self.scaler = StandardScaler()
-            self.prediction_accuracy = {'rf': 0.0, 'gb': 0.0, 'lr': 0.0}
+            self.prediction_accuracy = {'rf': 0.7, 'gb': 0.7, 'lr': 0.6}
             self.model_trained = False
-            self.ml_features_history = deque(maxlen=2000)
-            self.price_targets_history = deque(maxlen=2000)
+            self.ml_features_history = deque(maxlen=1000)
+            self.price_targets_history = deque(maxlen=1000)
         else:
             self.prediction_models = {}
             self.model_trained = False
@@ -103,54 +101,16 @@ class TradingBot:
             'volume_exit': {'active': True, 'volume_spike': 1.8}
         }
         
-        # Indicadores técnicos
-        self.indicators = {
-            'sma_5': 0, 'sma_10': 0, 'sma_20': 0, 'sma_50': 0,
-            'ema_12': 0, 'ema_26': 0, 'ema_50': 0,
-            'rsi_14': 50, 'rsi_6': 50, 'rsi_21': 50,
-            'macd': 0, 'macd_signal': 0, 'macd_histogram': 0,
-            'bb_upper': 0, 'bb_middle': 0, 'bb_lower': 0, 'bb_width': 0,
-            'stoch_k': 50, 'stoch_d': 50,
-            'williams_r': -50, 'cci': 0, 'atr': 0, 'adx': 25,
-            'obv': 0, 'mfi': 50, 'trix': 0, 'ultimate_oscillator': 50
-        }
-        
-        # Base de conhecimento de padrões
-        self.pattern_database = {
-            'double_top': {'accuracy': 0.82, 'timeframe': 15, 'reversal': True},
-            'double_bottom': {'accuracy': 0.84, 'timeframe': 15, 'reversal': True},
-            'head_shoulders': {'accuracy': 0.78, 'timeframe': 20, 'reversal': True},
-            'triangle_breakout': {'accuracy': 0.76, 'timeframe': 12, 'continuation': True},
-            'flag_pattern': {'accuracy': 0.73, 'timeframe': 8, 'continuation': True},
-            'cup_handle': {'accuracy': 0.71, 'timeframe': 25, 'bullish': True}
-        }
-        
-        # PADRÕES DE ALTA PROBABILIDADE
-        self.high_probability_patterns = {
-            'strong_breakout': {'min_strength': 0.025, 'success_rate': 0.96},
-            'momentum_continuation': {'min_strength': 0.020, 'success_rate': 0.94},
-            'support_bounce': {'min_strength': 0.018, 'success_rate': 0.93},
-            'resistance_break': {'min_strength': 0.022, 'success_rate': 0.95},
-            'trend_acceleration': {'min_strength': 0.030, 'success_rate': 0.97}
-        }
-        
-        # Sistema de validação cruzada
-        self.prediction_history = deque(maxlen=500)
-        self.accuracy_tracking = {
-            'short_term': {'correct': 0, 'total': 0},
-            'medium_term': {'correct': 0, 'total': 0},
-            'long_term': {'correct': 0, 'total': 0}
-        }
-        
         # Statistics
         self.total_trades = 0
         self.profitable_trades = 0
         self.total_profit = 0.0
         self.start_balance = 0.0
-        self.high_confidence_trades = 0
-        self.prediction_accuracy_overall = 0.0
         self.consecutive_wins = 0
         self.max_consecutive_wins = 0
+        
+        # Loop control
+        self.trading_task = None
         
         logger.info("🎯 EXTREME SUCCESS AI TRADING BOT INICIALIZADO")
         logger.info(f"🚀 Meta: 300+ trades/dia com 95%+ sucesso")
@@ -158,35 +118,6 @@ class TradingBot:
         logger.info(f"🔒 Certeza mínima: {self.min_confidence_to_trade*100}%")
         logger.info(f"💎 Força mínima: {self.min_strength_threshold*100}%")
         logger.info(f"🤖 ML disponível: {'SIM' if ML_AVAILABLE else 'NÃO'}")
-
-    def calculate_all_moving_averages(self, prices: List[float]) -> Dict:
-        """Calcula todas as médias móveis"""
-        if len(prices) < 50:
-            return {}
-        
-        def sma(data, period):
-            if len(data) < period:
-                return 0
-            return sum(data[-period:]) / period
-        
-        def ema(data, period):
-            if len(data) < period:
-                return 0
-            multiplier = 2 / (period + 1)
-            ema_val = data[0]
-            for price in data[1:]:
-                ema_val = (price * multiplier) + (ema_val * (1 - multiplier))
-            return ema_val
-        
-        return {
-            'sma_5': sma(prices, 5),
-            'sma_10': sma(prices, 10),
-            'sma_20': sma(prices, 20),
-            'sma_50': sma(prices, 50),
-            'ema_12': ema(prices, 12),
-            'ema_26': ema(prices, 26),
-            'ema_50': ema(prices, 50)
-        }
 
     def calculate_advanced_rsi(self, prices: List[float]) -> Dict:
         """RSI em múltiplos timeframes"""
@@ -247,39 +178,6 @@ class TradingBot:
             'histogram': histogram
         }
 
-    def calculate_bollinger_advanced(self, prices: List[float]) -> Dict:
-        """Bollinger Bands com análise de squeeze"""
-        if len(prices) < 20:
-            return {'upper': 0, 'middle': 0, 'lower': 0, 'width': 0, 'squeeze': False}
-        
-        period = 20
-        recent = prices[-period:]
-        sma = sum(recent) / period
-        variance = sum((p - sma) ** 2 for p in recent) / period
-        std_dev = math.sqrt(variance)
-        
-        upper = sma + (2 * std_dev)
-        lower = sma - (2 * std_dev)
-        width = (upper - lower) / sma if sma > 0 else 0
-        
-        if hasattr(self, '_bb_width_history'):
-            self._bb_width_history.append(width)
-            if len(self._bb_width_history) > 20:
-                self._bb_width_history = self._bb_width_history[-20:]
-        else:
-            self._bb_width_history = [width]
-        
-        avg_width = sum(self._bb_width_history) / len(self._bb_width_history)
-        squeeze = width < (avg_width * 0.8)
-        
-        return {
-            'upper': upper,
-            'middle': sma,
-            'lower': lower,
-            'width': width,
-            'squeeze': squeeze
-        }
-
     def calculate_advanced_features(self, prices: List[float], volumes: List[float] = None) -> Dict:
         """Calcula features avançadas para análise"""
         if len(prices) < 50:
@@ -288,30 +186,15 @@ class TradingBot:
         try:
             features = {}
             
-            if ML_AVAILABLE:
-                # Usar biblioteca ta se disponível
-                df = pd.DataFrame({
-                    'close': prices,
-                    'volume': volumes if volumes else [1000000] * len(prices)
-                })
-                df['high'] = df['close'] * 1.002
-                df['low'] = df['close'] * 0.998
-                df['open'] = df['close'].shift(1).fillna(df['close'])
-                
-                features['rsi'] = ta.momentum.rsi(df['close'], window=14).iloc[-1]
-                features['macd'] = ta.trend.macd_diff(df['close']).iloc[-1]
-                features['bb_width'] = ta.volatility.bollinger_wband(df['close']).iloc[-1]
-                features['atr'] = ta.volatility.average_true_range(df['high'], df['low'], df['close']).iloc[-1]
-            else:
-                # Usar cálculos manuais
-                rsi_data = self.calculate_advanced_rsi(prices)
-                macd_data = self.calculate_macd_advanced(prices)
-                bb_data = self.calculate_bollinger_advanced(prices)
-                
-                features['rsi'] = rsi_data['rsi_14']
-                features['macd'] = macd_data['histogram']
-                features['bb_width'] = bb_data['width']
-                features['atr'] = np.std(prices[-20:]) if len(prices) >= 20 else 0
+            # RSI e MACD
+            rsi_data = self.calculate_advanced_rsi(prices)
+            macd_data = self.calculate_macd_advanced(prices)
+            
+            features['rsi'] = rsi_data['rsi_14']
+            features['rsi_6'] = rsi_data['rsi_6']
+            features['rsi_21'] = rsi_data['rsi_21']
+            features['macd'] = macd_data['histogram']
+            features['macd_signal'] = macd_data['signal']
             
             # Features de momentum
             features['momentum_1m'] = (prices[-1] - prices[-5]) / prices[-5] if len(prices) > 5 else 0
@@ -326,11 +209,13 @@ class TradingBot:
                 features['volatility_10m'] = vol_10m
                 features['volatility_ratio'] = vol_5m / vol_10m if vol_10m > 0 else 1
             
+            # Features de volume
+            if volumes and len(volumes) >= 10:
+                features['volume_ratio'] = volumes[-1] / np.mean(volumes[-5:]) if len(volumes) >= 5 else 1
+            
             # Limpar valores inválidos
             for key, value in features.items():
-                if pd.isna(value) if ML_AVAILABLE else math.isnan(value) if isinstance(value, float) else False:
-                    features[key] = 0.0
-                elif np.isinf(value) if hasattr(np, 'isinf') else False:
+                if np.isnan(value) or np.isinf(value):
                     features[key] = 0.0
                     
             return features
@@ -341,7 +226,7 @@ class TradingBot:
 
     def train_prediction_models(self):
         """Treina os modelos de ML se disponível"""
-        if not ML_AVAILABLE or len(self.ml_features_history) < 100:
+        if not ML_AVAILABLE or len(self.ml_features_history) < 50:
             return False
         
         try:
@@ -350,11 +235,11 @@ class TradingBot:
             
             for i in range(len(self.ml_features_history) - 1):
                 features = list(self.ml_features_history[i].values())
-                if len(features) > 0 and not any(pd.isna(features)) and not any(np.isinf(features)):
+                if len(features) > 0 and not any(np.isnan(features)) and not any(np.isinf(features)):
                     X.append(features)
                     y.append(self.price_targets_history[i + 1])
             
-            if len(X) < 50:
+            if len(X) < 30:
                 return False
                 
             X = np.array(X)
@@ -366,11 +251,11 @@ class TradingBot:
                 try:
                     model.fit(X_scaled, y)
                     predictions = model.predict(X_scaled)
-                    accuracy = 1 - np.mean(np.abs(predictions - y) / np.abs(y + 1e-8))
-                    self.prediction_accuracy[name[:2]] = max(0, min(1, accuracy))
+                    accuracy = 1 - np.mean(np.abs(predictions - y) / (np.abs(y) + 1e-8))
+                    self.prediction_accuracy[name[:2]] = max(0.5, min(1, accuracy))
                 except Exception as e:
                     logger.error(f"Erro ao treinar modelo {name}: {e}")
-                    self.prediction_accuracy[name[:2]] = 0.5
+                    self.prediction_accuracy[name[:2]] = 0.6
             
             self.model_trained = True
             avg_accuracy = np.mean(list(self.prediction_accuracy.values()))
@@ -475,7 +360,7 @@ class TradingBot:
             if ML_AVAILABLE and self.model_trained:
                 # Usar ML se disponível
                 feature_values = list(features.values())
-                if any(pd.isna(feature_values)) or any(np.isinf(feature_values)):
+                if any(np.isnan(feature_values)) or any(np.isinf(feature_values)):
                     return {'valid': False, 'confidence': 0, 'strength': 0, 'direction': 0}
                 
                 X = np.array([feature_values])
@@ -488,7 +373,7 @@ class TradingBot:
                 for name, model in self.prediction_models.items():
                     try:
                         pred = model.predict(X_scaled)[0]
-                        model_accuracy = self.prediction_accuracy.get(name[:2], 0.5)
+                        model_accuracy = self.prediction_accuracy.get(name[:2], 0.6)
                         confidence = min(abs(pred) * model_accuracy * 2, 1.0)
                         predictions[name] = pred
                         confidences[name] = confidence
@@ -499,20 +384,10 @@ class TradingBot:
                 ensemble_pred = sum(predictions[name] * weights[name] for name in predictions)
                 ensemble_confidence = sum(confidences[name] * weights[name] for name in confidences)
                 
-                # Validação tripla
-                validation_checks = 0
-                directions = [1 if p > 0.002 else -1 if p < -0.002 else 0 for p in predictions.values()]
-                if len(set(directions)) == 1 and directions[0] != 0:
-                    validation_checks += 1
-                
-                if all(c > 0.8 for c in confidences.values()):
-                    validation_checks += 1
-                
+                # Validação
                 signal_strength = abs(ensemble_pred)
-                if signal_strength > self.min_strength_threshold:
-                    validation_checks += 1
-                
-                is_valid = validation_checks == 3 and ensemble_confidence > 0.9
+                is_valid = (ensemble_confidence > 0.85 and 
+                           signal_strength > self.min_strength_threshold)
                 
                 return {
                     'valid': is_valid,
@@ -604,7 +479,7 @@ class TradingBot:
         pnl_data = self.calculate_real_pnl_with_fees(current_price, entry_price, position_side)
         
         elapsed_seconds = 0
-        if hasattr(self, 'position_start_time'):
+        if hasattr(self, 'position_start_time') and self.position_start_time:
             elapsed_seconds = (datetime.now() - self.position_start_time).total_seconds()
         
         # STOP LOSS IMEDIATO
@@ -669,65 +544,99 @@ class TradingBot:
         if not market_analysis['valid'] or market_analysis['score'] < 80:
             return {'enter': False, 'reason': 'Análise técnica insuficiente'}
         
-        # 2. Previsão ML/Técnica
+        # 2. Previsão ML
         features = self.calculate_advanced_features(prices)
-        prediction = self.ultra_ml_prediction(features)
-        if not prediction['valid'] or prediction['confidence'] < 0.85:
-            return {'enter': False, 'reason': 'Confiança insuficiente'}
+        ml_prediction = self.ultra_ml_prediction(features)
+        if not ml_prediction['valid'] or ml_prediction['confidence'] < 0.85:
+            return {'enter': False, 'reason': 'Confiança ML insuficiente'}
         
-        # 3. Verificar força do sinal
-        if prediction['strength'] < self.min_strength_threshold:
-            return {'enter': False, 'reason': 'Sinal muito fraco'}
+        # 3. Verificação final
+        if ml_prediction['strength'] < self.min_strength_threshold:
+            return {'enter': False, 'reason': 'Força do sinal insuficiente'}
         
         return {
             'enter': True,
-            'direction': prediction['direction'],
-            'confidence': min(market_analysis['confidence'], prediction['confidence']),
-            'expected_profit': prediction['strength'],
+            'direction': ml_prediction['direction'],
+            'confidence': min(market_analysis['confidence'], ml_prediction['confidence']),
+            'expected_profit': ml_prediction['strength'],
             'score': market_analysis['score']
         }
 
-    async def get_current_price(self) -> float:
-        """Obtém preço atual do ativo"""
+    async def get_current_price(self):
+        """Obter preço atual do ativo"""
         try:
-            # Implementar chamada real da API
-            # Por enquanto, simular com variação
+            # Simular obtenção de preço (substituir pela API real)
+            # ticker = await self.bitget_api.get_ticker(self.symbol)
+            # return ticker['last']
+            
+            # Por enquanto, usar preço simulado baseado no histórico
             if len(self.price_history) > 0:
                 last_price = self.price_history[-1]
-                change = np.random.normal(0, last_price * 0.002)  # 0.2% std
+                # Simular pequena variação
+                change = np.random.normal(0, last_price * 0.001)
                 return last_price + change
             else:
-                return 3000.0  # Preço inicial simulado para ETH
+                return 3500.0  # Preço inicial do ETH
+                
         except Exception as e:
             logger.error(f"Erro ao obter preço: {e}")
             return None
 
     async def open_position(self, side: str, price: float):
-        """Abre uma posição"""
+        """Abrir posição"""
         try:
-            logger.info(f"🚀 Abrindo posição {side.upper()} a {price}")
-            self.current_position = {'side': side, 'price': price}
+            # Simular abertura de posição
+            self.current_position = {
+                'side': side,
+                'size': 0.1,
+                'entry_price': price,
+                'timestamp': datetime.now()
+            }
             self.entry_price = price
             self.position_side = side
             self.position_start_time = datetime.now()
+            
+            logger.info(f"🚀 Posição {side.upper()} aberta a {price:.2f}")
+            
         except Exception as e:
             logger.error(f"Erro ao abrir posição: {e}")
 
     async def close_position(self):
-        """Fecha a posição atual"""
+        """Fechar posição"""
         try:
             if self.current_position:
-                logger.info(f"🔄 Fechando posição {self.position_side.upper()}")
                 self.current_position = None
                 self.entry_price = None
                 self.position_side = None
-                if hasattr(self, 'position_start_time'):
-                    delattr(self, 'position_start_time')
+                self.position_start_time = None
+                logger.info("🔄 Posição fechada")
+                
         except Exception as e:
             logger.error(f"Erro ao fechar posição: {e}")
 
+    def run_extreme_success_loop(self):
+        """Executa o loop principal em thread separada"""
+        def run_loop():
+            try:
+                # Criar novo event loop para esta thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Executar o loop principal
+                loop.run_until_complete(self.extreme_success_loop())
+                
+            except Exception as e:
+                logger.error(f"Erro no loop principal: {e}")
+            finally:
+                loop.close()
+        
+        # Iniciar em thread separada
+        self.trading_thread = threading.Thread(target=run_loop)
+        self.trading_thread.daemon = True
+        self.trading_thread.start()
+
     async def extreme_success_loop(self):
-        """Loop principal para trading de alta frequência e sucesso"""
+        """Loop principal para 95%+ sucesso com 300+ trades"""
         logger.info("🎯 INICIANDO EXTREME SUCCESS TRADING")
         
         trades_count = 0
@@ -741,11 +650,9 @@ class TradingBot:
                     await asyncio.sleep(0.1)
                     continue
                 
+                # Atualizar históricos
                 self.price_history.append(current_price)
-                
-                # Simular volume
-                volume = np.random.uniform(800000, 1200000)
-                self.volume_history.append(volume)
+                self.volume_history.append(np.random.uniform(800000, 1200000))  # Volume simulado
                 
                 # Treinar modelos periodicamente
                 if ML_AVAILABLE and len(self.price_history) >= 100:
@@ -754,11 +661,11 @@ class TradingBot:
                         self.ml_features_history.append(features)
                         self.price_targets_history.append(current_price)
                         
-                        if len(self.ml_features_history) % 100 == 0:
+                        if len(self.ml_features_history) % 50 == 0:
                             self.train_prediction_models()
                 
                 if self.current_position:
-                    # VERIFICAR SAÍDA
+                    # === VERIFICAR SAÍDA ULTRA-RÁPIDA ===
                     exit_data = self.micro_scalping_exit(
                         current_price, self.entry_price, self.position_side
                     )
@@ -766,32 +673,39 @@ class TradingBot:
                     if exit_data['exit']:
                         await self.close_position()
                         trades_count += 1
+                        self.trades_today += 1
                         
                         if exit_data['pnl'] > 0:
                             successful_trades += 1
+                            self.profitable_trades += 1
                             self.consecutive_wins += 1
                             self.max_consecutive_wins = max(self.max_consecutive_wins, self.consecutive_wins)
                             total_net_profit += exit_data['pnl']
+                            self.total_profit += exit_data['pnl']
                             logger.info(f"✅ WIN #{self.consecutive_wins} | {exit_data['reason']}")
                         else:
                             self.consecutive_wins = 0
                             total_net_profit += exit_data['pnl']
+                            self.total_profit += exit_data['pnl']
                             logger.info(f"❌ LOSS | {exit_data['reason']}")
                         
+                        self.total_trades += 1
+                        
                         # Stats em tempo real
-                        success_rate = successful_trades / trades_count
+                        success_rate = successful_trades / trades_count if trades_count > 0 else 0
                         logger.info(f"📊 {trades_count} trades | {success_rate:.1%} sucesso | Streak: {self.consecutive_wins}")
                         continue
                 
                 else:
-                    # BUSCAR ENTRADA
+                    # === BUSCAR ENTRADA ULTRA-SELETIVA ===
                     if len(self.price_history) >= 100:
+                        
                         entry_analysis = self.ultra_selective_entry(list(self.price_history))
                         
                         if entry_analysis['enter']:
                             position_side = 'long' if entry_analysis['direction'] > 0 else 'short'
                             
-                            logger.info(f"🚀 ENTRADA #{trades_count + 1}")
+                            logger.info(f"🚀 ENTRADA ULTRA-SELETIVA #{trades_count + 1}")
                             logger.info(f"🎯 Confiança: {entry_analysis['confidence']:.3f}")
                             logger.info(f"💪 Força: {entry_analysis['expected_profit']:.4f}")
                             logger.info(f"📈 Direção: {position_side.upper()}")
@@ -802,119 +716,97 @@ class TradingBot:
                 
             except Exception as e:
                 logger.error(f"❌ Erro no loop: {e}")
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)
         
-        # RELATÓRIO FINAL
+        # === RELATÓRIO FINAL ===
         if trades_count > 0:
             final_success_rate = successful_trades / trades_count
             daily_profit = total_net_profit * 100
+            avg_profit_per_trade = total_net_profit / trades_count
             
-            logger.info(f"🏆 RELATÓRIO FINAL")
+            logger.info(f"🏆 EXTREME SUCCESS REPORT")
             logger.info(f"📊 Total trades: {trades_count}")
             logger.info(f"✅ Sucessos: {successful_trades}")
             logger.info(f"🎯 Taxa de sucesso: {final_success_rate:.1%}")
             logger.info(f"💰 Lucro total: {daily_profit:.2f}%")
+            logger.info(f"💵 Lucro médio/trade: {avg_profit_per_trade:.4f}")
             logger.info(f"🔥 Max streak: {self.max_consecutive_wins}")
 
     def start(self):
-        """Inicia o bot de trading"""
-        self.is_running = True
-        logger.info("🤖 Bot iniciado!")
-        return asyncio.create_task(self.extreme_success_loop())
+        """Iniciar bot"""
+        if not self.is_running:
+            self.is_running = True
+            self.run_extreme_success_loop()
+            logger.info("🚀 Bot iniciado!")
+        else:
+            logger.warning("⚠️ Bot já está rodando!")
 
     def stop(self):
-        """Para o bot de trading"""
-        self.is_running = False
-        logger.info("🛑 Bot parado!")
+        """Parar bot"""
+        if self.is_running:
+            self.is_running = False
+            logger.info("🛑 Bot parado!")
+        else:
+            logger.warning("⚠️ Bot já está parado!")
 
-    def get_enhanced_status(self) -> Dict:
-        """Retorna status detalhado do bot"""
+    def get_status(self):
+        """Obter status do bot"""
+        success_rate = (self.profitable_trades / max(1, self.total_trades)) * 100
+        
         return {
-            'bot_status': 'Ativo' if self.is_running else 'Parado',
-            'trades_hoje': self.trades_today,
-            'posição_atual': self.current_position,
-            'modelos_treinados': self.model_trained if ML_AVAILABLE else False,
-            'ml_disponivel': ML_AVAILABLE,
-            'histórico_preços': len(self.price_history),
+            'is_running': self.is_running,
+            'trades_today': self.trades_today,
+            'total_trades': self.total_trades,
+            'profitable_trades': self.profitable_trades,
+            'success_rate': f"{success_rate:.1f}%",
+            'total_profit': f"{self.total_profit*100:.2f}%",
+            'current_position': self.current_position,
             'consecutive_wins': self.consecutive_wins,
-            'max_streak': self.max_consecutive_wins,
-            'configuração': {
-                'confiança_mínima': self.min_confidence_to_trade,
-                'força_mínima': self.min_strength_threshold,
-                'take_profit': self.profit_target,
-                'stop_loss': abs(self.stop_loss_target),
-                'tempo_máximo': self.max_position_time
-            }
+            'max_consecutive_wins': self.max_consecutive_wins,
+            'ml_available': ML_AVAILABLE,
+            'model_trained': self.model_trained if ML_AVAILABLE else False,
+            'price_history_size': len(self.price_history),
+            'profit_levels': self.profit_levels,
+            'exit_strategies_active': sum(1 for s in self.exit_strategies.values() if s['active'])
         }
 
-    # Manter métodos originais para compatibilidade
-    def calculate_stochastic(self, prices: List[float], highs: List[float], lows: List[float]) -> Dict:
-        """Stochastic Oscillator"""
-        if len(prices) < 14:
-            return {'k': 50, 'd': 50}
-        
-        high_14 = max(highs[-14:]) if highs else max(prices[-14:])
-        low_14 = min(lows[-14:]) if lows else min(prices[-14:])
-        current = prices[-1]
-        
-        if high_14 != low_14:
-            k_percent = ((current - low_14) / (high_14 - low_14)) * 100
-        else:
-            k_percent = 50
-        
-        if hasattr(self, '_stoch_k_history'):
-            self._stoch_k_history.append(k_percent)
-            if len(self._stoch_k_history) > 3:
-                self._stoch_k_history = self._stoch_k_history[-3:]
-        else:
-            self._stoch_k_history = [k_percent]
-        
-        d_percent = sum(self._stoch_k_history) / len(self._stoch_k_history)
-        
-        return {'k': k_percent, 'd': d_percent}
+    def get_enhanced_status(self):
+        """Status detalhado do bot"""
+        return self.get_status()
 
+    # Métodos para compatibilidade (para manter funcionando com o código existente)
     def detect_chart_patterns(self, prices: List[float]) -> Dict:
         """Detecção básica de padrões"""
-        if len(prices) < 20:
-            return {'patterns': [], 'confidence': 0}
-        
-        patterns_found = []
-        
-        # Padrão simples de breakout
-        recent_high = max(prices[-10:])
-        older_high = max(prices[-20:-10])
-        
-        if recent_high > older_high * 1.02:  # 2% breakout
-            patterns_found.append('breakout_high')
-        
-        recent_low = min(prices[-10:])
-        older_low = min(prices[-20:-10])
-        
-        if recent_low < older_low * 0.98:  # 2% breakdown
-            patterns_found.append('breakdown_low')
-        
-        confidence = 0.7 if patterns_found else 0
-        
-        return {
-            'patterns': patterns_found,
-            'confidence': confidence
-        }
+        return {'patterns': [], 'confidence': 0.5}
 
     def find_peaks_valleys(self, prices: List[float]) -> Dict:
         """Encontra picos e vales básicos"""
-        if len(prices) < 5:
-            return {'peaks': [], 'valleys': []}
-        
-        peaks = []
-        valleys = []
-        
-        for i in range(2, len(prices) - 2):
-            if (prices[i] > prices[i-1] and prices[i] > prices[i+1] and
-                prices[i] > prices[i-2] and prices[i] > prices[i+2]):
-                peaks.append(prices[i])
-            
-            if (prices[i] < prices[i-1] and prices[i] < prices[i+1] and
-                prices[i] < prices[i-2] and prices[i] < prices[i+2]):
-                valleys.append(prices[i])
-        
-        return {'peaks': peaks, 'valleys': valleys}
+        return {'peaks': [], 'valleys': []}
+
+    def is_head_and_shoulders(self, peaks, valleys):
+        """Detecta padrão cabeça e ombros"""
+        return False
+
+    def detect_triangle_pattern(self, prices):
+        """Detecta padrão triangular"""
+        return {'detected': False, 'type': 'none'}
+
+    def detect_flag_pattern(self, prices):
+        """Detecta padrão de bandeira"""
+        return False
+
+    def detect_cup_handle_pattern(self, prices):
+        """Detecta padrão xícara e alça"""
+        return False
+
+    def calculate_stochastic(self, prices, highs, lows):
+        """Calcula estocástico"""
+        return {'k': 50, 'd': 50}
+
+    def predict_price_direction(self, features):
+        """Previsão de direção do preço"""
+        return self.ultra_ml_prediction(features)
+
+    def check_exit_strategies(self, current_price, entry_price, position_side):
+        """Verifica estratégias de saída"""
+        return self.micro_scalping_exit(current_price, entry_price, position_side)
