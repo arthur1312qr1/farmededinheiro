@@ -4,6 +4,7 @@ import os
 import logging
 from datetime import datetime
 import sys
+import time
 
 # Importar a API da Bitget do seu arquivo
 try:
@@ -25,6 +26,11 @@ logger = logging.getLogger(__name__)
 # Criar aplicação Flask
 app = Flask(__name__)
 CORS(app)
+
+# Cache para evitar muitas chamadas da API
+price_cache = {'price': 0, 'timestamp': 0}
+balance_cache = {'balance': 0, 'timestamp': 0}
+CACHE_DURATION = 3  # 3 segundos de cache
 
 # Inicializar BitgetAPI se disponível
 bitget_api = None
@@ -53,7 +59,7 @@ else:
 if not bitget_api:
     logger.info("✅ Bot mock inicializado com sucesso!")
 
-# Estado do bot (com valores mais realistas)
+# Estado do bot
 bot_state = {
     'is_running': False,
     'is_paused': False,
@@ -68,7 +74,7 @@ bot_state = {
     'entry_price': None,
     'symbol': 'ETH/USDT:USDT',
     'leverage': 10,
-    'paper_trading': True,
+    'paper_trading': not bitget_api,  # Paper trading se não conectado
     'balance': 1000.0
 }
 
@@ -92,9 +98,10 @@ def index():
             .btn-stop { background: #f44336; }
             .metric { font-size: 2em; font-weight: bold; margin-bottom: 10px; }
             .status { text-align: center; margin-bottom: 20px; }
-            .connection-status { padding: 10px; border-radius: 5px; margin-bottom: 20px; }
+            .connection-status { padding: 10px; border-radius: 5px; margin-bottom: 20px; text-align: center; }
             .connected { background: #4CAF50; }
             .disconnected { background: #f44336; }
+            .last-update { font-size: 0.8em; color: #888; margin-top: 10px; }
         </style>
     </head>
     <body>
@@ -111,6 +118,7 @@ def index():
                     <button class="btn" onclick="controlBot('start')">▶️ Iniciar</button>
                     <button class="btn btn-pause" onclick="controlBot('pause')">⏸️ Pausar</button>
                     <button class="btn btn-stop" onclick="controlBot('stop')">⏹️ Parar</button>
+                    <button class="btn btn-stop" onclick="controlBot('emergency_stop')">🚨 Emergência</button>
                 </div>
             </div>
             
@@ -140,18 +148,42 @@ def index():
             <div class="card">
                 <h3>📊 Informações do Sistema</h3>
                 <div id="system-info">Carregando...</div>
+                <div id="last-update" class="last-update">Última atualização: Nunca</div>
+            </div>
+            
+            <div class="card">
+                <h3>🔄 Progresso Diário</h3>
+                <div>Meta: <span id="daily-target">240</span> trades | Progresso: <span id="progress-percent">0%</span></div>
+                <div style="width: 100%; background: #555; height: 20px; border-radius: 10px; margin: 10px 0;">
+                    <div id="progress-bar" style="width: 0%; background: #4CAF50; height: 100%; border-radius: 10px; transition: width 0.5s;"></div>
+                </div>
+                <div>Status: <span id="urgency-level" style="padding: 5px 10px; border-radius: 15px; background: #4CAF50;">NORMAL</span></div>
             </div>
         </div>
         
         <script>
+            let updateInterval;
+            
             function updateData() {
-                // Atualizar status
+                const now = new Date().toLocaleTimeString();
+                
+                // Atualizar status (menos frequente)
                 fetch('/api/status')
                     .then(response => response.json())
                     .then(data => {
                         document.getElementById('trades-today').textContent = data.daily_progress?.trades_today || 0;
                         document.getElementById('win-rate').textContent = (data.performance?.win_rate || 95).toFixed(1) + '%';
                         document.getElementById('profit').textContent = '$' + (data.performance?.total_profit || 0).toFixed(4);
+                        
+                        // Progresso diário
+                        const progressPercent = data.daily_progress?.progress_percent || 0;
+                        document.getElementById('progress-percent').textContent = progressPercent.toFixed(1) + '%';
+                        document.getElementById('progress-bar').style.width = Math.min(progressPercent, 100) + '%';
+                        
+                        const urgencyLevel = data.daily_progress?.urgency_level || 'NORMAL';
+                        const urgencyEl = document.getElementById('urgency-level');
+                        urgencyEl.textContent = urgencyLevel;
+                        urgencyEl.style.background = urgencyLevel === 'CRÍTICO' ? '#f44336' : urgencyLevel === 'ALTO' ? '#ff9800' : urgencyLevel === 'MÉDIO' ? '#FFC107' : '#4CAF50';
                         
                         const statusEl = document.getElementById('status-display');
                         if (data.bot_status?.is_running && !data.bot_status?.is_paused) {
@@ -190,11 +222,13 @@ def index():
                         
                         if (data.connected === false) {
                             connStatus.className = 'connection-status disconnected';
-                            connText.textContent = '❌ Desconectado da Bitget - Modo Simulação';
+                            connText.textContent = '❌ Modo Simulação - Sem conexão Bitget';
                         } else {
                             connStatus.className = 'connection-status connected';
-                            connText.textContent = '✅ Conectado à Bitget - Trading Real Disponível';
+                            connText.textContent = '✅ Conectado à Bitget - Trading Real Ativo';
                         }
+                        
+                        document.getElementById('last-update').textContent = `Última atualização: ${now}`;
                     })
                     .catch(error => {
                         console.error('Erro balance:', error);
@@ -203,7 +237,7 @@ def index():
                         const connStatus = document.getElementById('connection-status');
                         const connText = document.getElementById('connection-text');
                         connStatus.className = 'connection-status disconnected';
-                        connText.textContent = '❌ Erro de conexão';
+                        connText.textContent = '❌ Erro de conexão com API';
                     });
             }
             
@@ -213,25 +247,65 @@ def index():
                     .then(data => {
                         if (data.success) {
                             console.log('✅', data.message);
+                            // Atualizar imediatamente após comando
+                            setTimeout(updateData, 1000);
                         } else {
                             console.error('❌', data.error);
                         }
-                        updateData();
                     })
                     .catch(error => console.error('Erro:', error));
             }
             
+            // Atualização inicial
             updateData();
-            setInterval(updateData, 5000);
+            
+            // Atualizar a cada 5 segundos (reduzido de 1-2s)
+            updateInterval = setInterval(updateData, 5000);
         </script>
     </body>
     </html>
     """
     return html
 
+def get_cached_eth_price():
+    """Pegar preço ETH com cache"""
+    now = time.time()
+    if now - price_cache['timestamp'] < CACHE_DURATION and price_cache['price'] > 0:
+        return price_cache['price']
+    
+    if bitget_api:
+        try:
+            price = bitget_api.get_eth_price()
+            if price:
+                price_cache['price'] = price
+                price_cache['timestamp'] = now
+                return price
+        except Exception as e:
+            logger.error(f"Erro ao pegar preço ETH: {e}")
+    
+    return price_cache['price'] if price_cache['price'] > 0 else 4300.0
+
+def get_cached_balance():
+    """Pegar saldo com cache"""
+    now = time.time()
+    if now - balance_cache['timestamp'] < CACHE_DURATION and balance_cache['balance'] > 0:
+        return balance_cache['balance'], True
+    
+    if bitget_api:
+        try:
+            balance_info = bitget_api.get_balance()
+            if balance_info and 'free' in balance_info:
+                balance_cache['balance'] = balance_info['free']
+                balance_cache['timestamp'] = now
+                return balance_info, True
+        except Exception as e:
+            logger.error(f"Erro ao pegar saldo: {e}")
+    
+    return {'free': bot_state['balance'], 'used': 0, 'total': bot_state['balance']}, False
+
 @app.route('/api/status')
 def get_status():
-    """Status do bot usando BitgetAPI real"""
+    """Status do bot otimizado"""
     current_time = datetime.now()
     current_hour = current_time.hour
     
@@ -250,16 +324,8 @@ def get_status():
     
     win_rate = (bot_state['profitable_trades'] / max(1, bot_state['total_trades'])) * 100 if bot_state['total_trades'] > 0 else 95.0
     
-    # Pegar preço real do ETH se BitgetAPI disponível
-    eth_price = 2500.0
-    if bitget_api:
-        try:
-            eth_price = bitget_api.get_eth_price()
-            if not eth_price:
-                eth_price = 2500.0
-        except Exception as e:
-            logger.error(f"Erro ao pegar preço ETH: {e}")
-            eth_price = 2500.0
+    # Pegar preço com cache
+    eth_price = get_cached_eth_price()
     
     return jsonify({
         'bot_status': {
@@ -305,29 +371,15 @@ def get_status():
 
 @app.route('/api/balance')
 def get_balance():
-    """Saldo real da conta usando BitgetAPI"""
-    if bitget_api:
-        try:
-            # Usar o método get_balance da sua BitgetAPI
-            balance_info = bitget_api.get_balance()
-            if balance_info and 'free' in balance_info:
-                return jsonify({
-                    'balance': balance_info['free'],
-                    'free': balance_info['free'],
-                    'used': balance_info.get('used', 0),
-                    'total': balance_info.get('total', 0),
-                    'connected': True
-                })
-        except Exception as e:
-            logger.error(f"Erro ao pegar saldo real: {e}")
+    """Saldo otimizado com cache"""
+    balance_info, connected = get_cached_balance()
     
-    # Fallback para modo simulação
     return jsonify({
-        'balance': bot_state['balance'],
-        'free': bot_state['balance'],
-        'used': 0.0,
-        'total': bot_state['balance'],
-        'connected': False
+        'balance': balance_info['free'] if isinstance(balance_info, dict) else balance_info,
+        'free': balance_info.get('free', 0) if isinstance(balance_info, dict) else balance_info,
+        'used': balance_info.get('used', 0) if isinstance(balance_info, dict) else 0,
+        'total': balance_info.get('total', 0) if isinstance(balance_info, dict) else balance_info,
+        'connected': connected
     })
 
 @app.route('/api/start', methods=['POST'])
@@ -337,7 +389,7 @@ def start_bot():
         bot_state['is_running'] = True
         bot_state['is_paused'] = False
         logger.info("🚀 Bot iniciado")
-        return jsonify({'success': True, 'message': 'Bot iniciado com sucesso'})
+        return jsonify({'success': True, 'message': 'Bot iniciado com sucesso!'})
     except Exception as e:
         logger.error(f"Erro ao iniciar bot: {e}")
         return jsonify({'success': False, 'error': str(e)})
