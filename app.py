@@ -1,430 +1,485 @@
-import  { useState, useEffect } from 'react';
-import { Activity, ArrowUp, ArrowDown, Zap, Target, Clock, Star, AlertTriangle, CheckCircle, TrendingUp, Database, Settings } from 'lucide-react';
+import  os
+import logging
+import json
+from datetime import datetime
+from  flask import Flask, render_template, request, jsonify, send_from_directory, make_response 
+from flask_cors import CORS
+import threading
+import time
 
-function App() {
-  const [botStatus, setBotStatus] = useState({
-    is_running: false,
-    trades_today: 0,
-    win_rate: 0,
-    total_profit: 0,
-    current_position: null,
-    deficit: 0,
-    urgency_level: 'NORMAL'
-  });
+# Importar o bot de trading e API da Bitget
+try:
+    from trading_bot import TradingBot
+    from bitget_api import BitgetAPI
+    from config import Config
+except ImportError as e:
+    print(f"❌ Erro ao importar módulos: {e}")
+    print("Certifique-se de que os arquivos trading_bot.py, bitget_api.py e config.py estão presentes")
 
-  const [stats, setStats] = useState({
-    profitable_trades: 0,
-    losing_trades: 0,
-    consecutive_wins: 0,
-    last_trade_seconds_ago: 0,
-    boost_mode_active: false
-  });
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('trading_bot.log'),
+        logging.StreamHandler()
+    ]
+)
 
-  const [isStarting, setIsStarting] = useState(false);
+logger = logging.getLogger(__name__)
 
-  useEffect(() => {
-    const interval = setInterval(fetchStatus, 2000);
-    return () => clearInterval(interval);
-  }, []);
+#  Criar aplicação Flask
+app = Flask(__name__, static_folder='client/dist', static_url_path='/')
+CORS(app, origins=['*'], allow_headers=['*'], methods=['*'], supports_credentials=True) 
 
-  const fetchStatus = async () => {
-    try {
-      // Simulated status for demo
-      const mockStatus = {
-        bot_status: {
-          is_running: botStatus.is_running,
-          symbol: 'ETH/USDT',
-          leverage: 10,
-          paper_trading: true,
-          aggressive_mode: true
-        },
-        daily_progress: {
-          trades_today: botStatus.trades_today + (botStatus.is_running ? Math.floor(Math.random() * 2) : 0),
-          min_target: 240,
-          target: 280,
-          progress_percent: Math.min(100, ((botStatus.trades_today + 1) / 240) * 100),
-          expected_by_now: 45,
-          deficit: Math.max(0, 45 - botStatus.trades_today),
-          urgency_level: botStatus.trades_today < 30 ? 'HIGH' : 'NORMAL',
-          trades_per_hour_current: 15.2,
-          trades_per_hour_needed: 15
-        },
-        performance: {
-          profitable_trades: Math.floor(botStatus.trades_today * 0.95),
-          losing_trades: Math.floor(botStatus.trades_today * 0.05),
-          win_rate: 95.2,
-          target_win_rate: 95.0,
-          total_profit: botStatus.total_profit + (botStatus.is_running ? Math.random() * 0.5 : 0),
-          consecutive_wins: 12
-        },
-        current_position: botStatus.is_running ? {
-          active: Math.random() > 0.7,
-          side: Math.random() > 0.5 ? 'long' : 'short',
-          size: 0.5,
-          entry_price: 2234.56,
-          duration_seconds: 45,
-          max_duration: 180,
-          unrealized_pnl: (Math.random() - 0.5) * 0.02
-        } : { active: false },
-        timing_control: {
-          last_trade_seconds_ago: Math.floor(Math.random() * 210),
-          max_gap_allowed: 210,
-          next_trade_urgency: Math.random() > 0.7 ? 'HIGH' : 'NORMAL',
-          boost_mode_active: Math.random() > 0.8
-        }
-      };
+# Configurações
+app.config.from_object(Config)
 
-      setBotStatus(prev => ({
-        ...prev,
-        is_running: mockStatus.bot_status.is_running,
-        trades_today: mockStatus.daily_progress.trades_today,
-        win_rate: mockStatus.performance.win_rate,
-        total_profit: mockStatus.performance.total_profit,
-        current_position: mockStatus.current_position,
-        deficit: mockStatus.daily_progress.deficit,
-        urgency_level: mockStatus.daily_progress.urgency_level
-      }));
+# Instâncias globais
+bitget_api = None
+trading_bot = None
+bot_thread = None
 
-      setStats({
-        profitable_trades: mockStatus.performance.profitable_trades,
-        losing_trades: mockStatus.performance.losing_trades,
-        consecutive_wins: mockStatus.performance.consecutive_wins,
-        last_trade_seconds_ago: mockStatus.timing_control.last_trade_seconds_ago,
-        boost_mode_active: mockStatus.timing_control.boost_mode_active
-      });
-    } catch (error) {
-      console.error('Error fetching status:', error);
-    }
-  };
+def initialize_bot():
+    """Inicializar bot de trading"""
+    global bitget_api, trading_bot
+    
+    try:
+        # Inicializar API da Bitget
+        bitget_api = BitgetAPI(
+            api_key=os.getenv('BITGET_API_KEY'),
+            secret_key=os.getenv('BITGET_SECRET'),
+            passphrase=os.getenv('BITGET_PASSPHRASE'),
+            sandbox=False  # Usar ambiente de produção
+        )
+        
+        # Inicializar Trading Bot
+        trading_bot = TradingBot(
+            bitget_api=bitget_api,
+            symbol='ETH/USDT:USDT',
+            leverage=10,
+            balance_percentage=100.0,
+            daily_target=350,
+            scalping_interval=0.3,
+            paper_trading=True  # Iniciar em modo paper trading por segurança
+        )
+        
+        logger.info("✅ Bot inicializado com sucesso")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao inicializar bot: {e}")
+        return False
 
-  const startBot = async () => {
-    setIsStarting(true);
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      setBotStatus(prev => ({ ...prev, is_running: true }));
-    } catch (error) {
-      console.error('Error starting bot:', error);
-    }
-    setIsStarting(false);
-  };
+# Rotas da API
 
-  const stopBot = async () => {
-    try {
-      setBotStatus(prev => ({ ...prev, is_running: false }));
-    } catch (error) {
-      console.error('Error stopping bot:', error);
-    }
-  };
+@app.route('/')
+def  serve_frontend():
+    """Servir o frontend React"""
+    return send_from_directory(app.static_folder, 'index.html')
 
-  const getUrgencyColor = (urgency) => {
-    switch (urgency) {
-      case 'CRITICAL': return 'text-red-600 bg-red-50 border-red-200';
-      case 'HIGH': return 'text-orange-600 bg-orange-50 border-orange-200';
-      case 'MEDIUM': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
-      default: return 'text-green-600 bg-green-50 border-green-200';
-    }
-  };
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "*")
+        response.headers.add('Access-Control-Allow-Methods', "*")
+        return response
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* Header */}
-      <div className="bg-slate-800/50 backdrop-blur border-b border-slate-700">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-emerald-500 rounded-lg">
-                <Activity className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-white">Trading Bot 240+</h1>
-                <p className="text-slate-400 text-sm">AI-Powered High-Frequency Trading</p>
-              </div>
-            </div>
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response 
+
+@app.route('/api/status',  methods=['GET', 'OPTIONS'])
+def get_bot_status():
+    """Obter status atual do bot"""
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'OK'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', '*')
+        response.headers.add('Access-Control-Allow-Methods', '*')
+        return response
+    
+    try: 
+        if trading_bot is None:
+            return jsonify({
+                'error': 'Bot não inicializado',
+                'is_running': False,
+                'initialized': False
+            }), 400
+        
+        status = trading_bot.get_status()
+        
+        # Adicionar informações extras
+        status['initialized'] = True
+        status['server_time'] = datetime.now().isoformat()
+        
+               response = jsonify(status)
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', '*')
+        response.headers.add('Access-Control-Allow-Methods', '*')
+        return response 
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao obter status: {e}")
+               response = jsonify({
+            'error': str(e),
+            'is_running': False,
+            'initialized': False
+        })
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', '*')
+        response.headers.add('Access-Control-Allow-Methods', '*')
+        response.status_code = 500
+        return response 
+
+@app.route('/api/start',  methods=['POST', 'OPTIONS'])
+def start_bot():
+    """Iniciar o bot de trading"""
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'OK'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', '*')
+        response.headers.add('Access-Control-Allow-Methods', '*')
+        return response
+    
+    try: 
+        if trading_bot is None:
+            if not initialize_bot():
+                return jsonify({
+                    'success': False,
+                    'message': 'Falha ao inicializar bot'
+                }), 500
+        
+        if trading_bot.is_running:
+            return jsonify({
+                'success': False,
+                'message': 'Bot já está rodando'
+            }), 400
+        
+        # Obter parâmetros opcionais do request
+        data = request.get_json() or {}
+        
+        # Atualizar configurações se fornecidas
+        if 'symbol' in data:
+            trading_bot.symbol = data['symbol']
+        if 'leverage' in data:
+            trading_bot.leverage = int(data['leverage'])
+        if 'paper_trading' in data:
+            trading_bot.paper_trading = bool(data['paper_trading'])
+        
+        # Iniciar bot
+        success = trading_bot.start()
+        
+        if success:
+            logger.info("🚀 Bot iniciado via API")
+            return jsonify({
+                'success': True,
+                'message': f'Bot iniciado - Meta: {trading_bot.min_trades_per_day}+ trades por dia',
+                'config': {
+                    'symbol': trading_bot.symbol,
+                    'leverage': trading_bot.leverage,
+                    'paper_trading': trading_bot.paper_trading,
+                    'min_trades_target': trading_bot.min_trades_per_day
+                }
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Falha ao iniciar bot'
+            }), 500
             
-            <div className="flex items-center space-x-4">
-              <div className={`px-3 py-1 rounded-full text-xs font-medium ${botStatus.is_running ? 'bg-emerald-500 text-white' : 'bg-slate-600 text-slate-300'}`}>
-                {botStatus.is_running ? 'ACTIVE' : 'STOPPED'}
-              </div>
-              
-              {botStatus.is_running ? (
-                <button
-                  onClick={stopBot}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-all"
-                >
-                  Stop Bot
-                </button>
-              ) : (
-                <button
-                  onClick={startBot}
-                  disabled={isStarting}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 text-white rounded-lg font-medium transition-all flex items-center space-x-2"
-                >
-                  {isStarting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                  <span>{isStarting ? 'Starting...' : 'Start Bot'}</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+    except Exception as e:
+        logger.error(f"❌ Erro ao iniciar bot: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Erro: {str(e)}'
+        }), 500
 
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
-        {/* Daily Progress Card */}
-        <div className="bg-slate-800/50 backdrop-blur rounded-xl border border-slate-700 p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-bold text-white flex items-center space-x-2">
-              <Target className="w-5 h-5 text-emerald-500" />
-              <span>Daily Progress - 240+ Trades Guarantee</span>
-            </h2>
-            <div className={`px-3 py-1 rounded-full text-xs font-bold border ${getUrgencyColor(botStatus.urgency_level)}`}>
-              {botStatus.urgency_level} URGENCY
-            </div>
-          </div>
+@app.route('/api/stop',  methods=['POST', 'OPTIONS'])
+def stop_bot():
+    """Parar o bot de trading"""
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'OK'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', '*')
+        response.headers.add('Access-Control-Allow-Methods', '*')
+        return response
+    
+    try: 
+        if trading_bot is None:
+            return jsonify({
+                'success': False,
+                'message': 'Bot não inicializado'
+            }), 400
+        
+        if not trading_bot.is_running:
+            return jsonify({
+                'success': False,
+                'message': 'Bot não está rodando'
+            }), 400
+        
+        # Parar bot
+        success = trading_bot.stop()
+        
+        if success:
+            # Obter estatísticas finais
+            final_stats = {
+                'trades_executed': trading_bot.trades_today,
+                'target_achieved': trading_bot.trades_today >= trading_bot.min_trades_per_day,
+                'win_rate': (trading_bot.profitable_trades / max(1, trading_bot.total_trades)) * 100,
+                'total_profit': trading_bot.total_profit,
+                'profitable_trades': trading_bot.profitable_trades,
+                'total_trades': trading_bot.total_trades
+            }
+            
+            logger.info("🛑 Bot parado via API")
+            return jsonify({
+                'success': True,
+                'message': 'Bot parado com sucesso',
+                'final_stats': final_stats
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Falha ao parar bot'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"❌ Erro ao parar bot: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Erro: {str(e)}'
+        }), 500
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="text-center">
-              <div className="text-3xl font-bold text-white mb-1">{botStatus.trades_today}</div>
-              <div className="text-slate-400 text-sm">Trades Today</div>
-              <div className="text-emerald-400 text-xs mt-1">Target: 240+</div>
-            </div>
+@app.route('/api/emergency-stop', methods=['POST'])
+def emergency_stop():
+    """Parada de emergência"""
+    try:
+        if trading_bot is None:
+            return jsonify({
+                'success': False,
+                'message': 'Bot não inicializado'
+            }), 400
+        
+        success = trading_bot.emergency_stop()
+        
+        logger.warning("🚨 Parada de emergência executada via API")
+        return jsonify({
+            'success': success,
+            'message': 'Parada de emergência executada'
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Erro na parada de emergência: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Erro: {str(e)}'
+        }), 500
 
-            <div className="text-center">
-              <div className="text-3xl font-bold text-white mb-1">{((botStatus.trades_today / 240) * 100).toFixed(1)}%</div>
-              <div className="text-slate-400 text-sm">Progress</div>
-              <div className="w-full bg-slate-700 rounded-full h-2 mt-2">
-                <div 
-                  className="bg-emerald-500 h-2 rounded-full transition-all"
-                  style={{ width: `${Math.min(100, (botStatus.trades_today / 240) * 100)}%` }}
-                />
-              </div>
-            </div>
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    """Obter configuração atual do bot"""
+    try:
+        if trading_bot is None:
+            return jsonify({
+                'error': 'Bot não inicializado'
+            }), 400
+        
+        config = {
+            'symbol': trading_bot.symbol,
+            'leverage': trading_bot.leverage,
+            'balance_percentage': trading_bot.balance_percentage,
+            'paper_trading': trading_bot.paper_trading,
+            'min_trades_per_day': trading_bot.min_trades_per_day,
+            'target_trades_per_day': trading_bot.target_trades_per_day,
+            'profit_target': trading_bot.profit_target,
+            'stop_loss_target': trading_bot.stop_loss_target,
+            'max_position_time': trading_bot.max_position_time,
+            'min_confidence_to_trade': trading_bot.min_confidence_to_trade
+        }
+        
+        return jsonify(config)
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao obter configuração: {e}")
+        return jsonify({
+            'error': str(e)
+        }), 500
 
-            <div className="text-center">
-              <div className="text-3xl font-bold text-white mb-1">{botStatus.deficit}</div>
-              <div className="text-slate-400 text-sm">Trade Deficit</div>
-              <div className={`text-xs mt-1 ${botStatus.deficit > 20 ? 'text-red-400' : botStatus.deficit > 10 ? 'text-orange-400' : 'text-emerald-400'}`}>
-                {botStatus.deficit > 0 ? 'Behind Schedule' : 'On Track'}
-              </div>
-            </div>
+@app.route('/api/config', methods=['POST'])
+def update_config():
+    """Atualizar configuração do bot"""
+    try:
+        if trading_bot is None:
+            return jsonify({
+                'success': False,
+                'message': 'Bot não inicializado'
+            }), 400
+        
+        if trading_bot.is_running:
+            return jsonify({
+                'success': False,
+                'message': 'Não é possível alterar configuração com bot rodando'
+            }), 400
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Dados não fornecidos'
+            }), 400
+        
+        # Atualizar configurações permitidas
+        allowed_configs = [
+            'symbol', 'leverage', 'balance_percentage', 'paper_trading',
+            'profit_target', 'stop_loss_target', 'max_position_time'
+        ]
+        
+        updated = []
+        for key, value in data.items():
+            if key in allowed_configs and hasattr(trading_bot, key):
+                setattr(trading_bot, key, value)
+                updated.append(key)
+        
+        logger.info(f"⚙️ Configuração atualizada: {updated}")
+        return jsonify({
+            'success': True,
+            'message': f'Configuração atualizada: {", ".join(updated)}',
+            'updated_fields': updated
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao atualizar configuração: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Erro: {str(e)}'
+        }), 500
 
-            <div className="text-center">
-              <div className="text-3xl font-bold text-white mb-1">15.2</div>
-              <div className="text-slate-400 text-sm">Trades/Hour</div>
-              <div className="text-slate-400 text-xs mt-1">Need: 15/hour</div>
-            </div>
-          </div>
+@app.route('/api/stats')
+def get_daily_stats():
+    """Obter estatísticas detalhadas do dia"""
+    try:
+        if trading_bot is None:
+            return jsonify({
+                'error': 'Bot não inicializado'
+            }), 400
+        
+        stats = trading_bot.get_daily_stats()
+        return jsonify(stats)
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao obter estatísticas: {e}")
+        return jsonify({
+            'error': str(e)
+        }), 500
 
-          {stats.boost_mode_active && (
-            <div className="mt-4 p-3 bg-orange-500/10 border border-orange-500/20 rounded-lg">
-              <div className="flex items-center space-x-2">
-                <Zap className="w-4 h-4 text-orange-400" />
-                <span className="text-orange-400 font-medium text-sm">BOOST MODE ACTIVE - Accelerating to meet daily target</span>
-              </div>
-            </div>
-          )}
-        </div>
+@app.route('/api/balance')
+def get_account_balance():
+    """Obter saldo da conta"""
+    try:
+        if trading_bot is None:
+            return jsonify({
+                'error': 'Bot não inicializado'
+            }), 400
+        
+        balance = trading_bot.get_account_balance()
+        return jsonify({
+            'balance': balance,
+            'currency': 'USDT'
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao obter saldo: {e}")
+        return jsonify({
+            'error': str(e)
+        }), 500
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Performance Stats */}
-          <div className="bg-slate-800/50 backdrop-blur rounded-xl border border-slate-700 p-6">
-            <h3 className="text-lg font-bold text-white mb-4 flex items-center space-x-2">
-              <Star className="w-5 h-5 text-yellow-500" />
-              <span>Performance Analytics</span>
-            </h3>
+@app.route('/api/health')
+def health_check():
+    """Health check do servidor e bot"""
+    try:
+        health_status = {
+            'server': 'OK',
+            'timestamp': datetime.now().isoformat(),
+            'bot_initialized': trading_bot is not None,
+            'bot_running': trading_bot.is_running if trading_bot else False
+        }
+        
+        # Verificar conexão com API se bot estiver inicializado
+        if trading_bot and bitget_api:
+            try:
+                # Teste rápido de conectividade
+                market_data = bitget_api.get_market_data('ETH/USDT:USDT')
+                health_status['api_connection'] = 'OK' if market_data else 'FAILED'
+            except:
+                health_status['api_connection'] = 'FAILED'
+        else:
+            health_status['api_connection'] = 'NOT_INITIALIZED'
+        
+        return jsonify(health_status)
+        
+    except Exception as e:
+        logger.error(f"❌ Erro no health check: {e}")
+        return jsonify({
+            'server': 'ERROR',
+            'error': str(e)
+        }), 500
 
-            <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400">Win Rate</span>
-                <div className="flex items-center space-x-2">
-                  <span className="text-emerald-400 font-bold">{botStatus.win_rate.toFixed(1)}%</span>
-                  <div className="w-20 bg-slate-700 rounded-full h-2">
-                    <div className="bg-emerald-500 h-2 rounded-full" style={{ width: `${botStatus.win_rate}%` }} />
-                  </div>
-                </div>
-              </div>
+# Manipuladores de erro
+@app.errorhandler(404)
+def not_found(error):
+    """Redirecionar 404 para o frontend"""
+    return send_from_directory(app.static_folder, 'index.html')
 
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400">Profitable Trades</span>
-                <span className="text-white font-medium">{stats.profitable_trades}</span>
-              </div>
+@app.errorhandler(500)
+def internal_error(error):
+    """Erro interno do servidor"""
+    logger.error(f"Erro interno: {error}")
+    return jsonify({
+        'error': 'Erro interno do servidor',
+        'message': str(error)
+    }), 500
 
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400">Losing Trades</span>
-                <span className="text-white font-medium">{stats.losing_trades}</span>
-              </div>
-
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400">Consecutive Wins</span>
-                <span className="text-emerald-400 font-bold">{stats.consecutive_wins}</span>
-              </div>
-
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400">Total Profit</span>
-                <span className={`font-bold ${botStatus.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {botStatus.total_profit >= 0 ? '+' : ''}{botStatus.total_profit.toFixed(2)}%
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Current Position */}
-          <div className="bg-slate-800/50 backdrop-blur rounded-xl border border-slate-700 p-6">
-            <h3 className="text-lg font-bold text-white mb-4 flex items-center space-x-2">
-              <TrendingUp className="w-5 h-5 text-blue-500" />
-              <span>Current Position</span>
-            </h3>
-
-            {botStatus.current_position?.active ? (
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-400">Position Side</span>
-                  <div className="flex items-center space-x-2">
-                    {botStatus.current_position.side === 'long' ? (
-                      <ArrowUp className="w-4 h-4 text-emerald-400" />
-                    ) : (
-                      <ArrowDown className="w-4 h-4 text-red-400" />
-                    )}
-                    <span className={`font-bold uppercase ${botStatus.current_position.side === 'long' ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {botStatus.current_position.side}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-400">Entry Price</span>
-                  <span className="text-white font-medium">${botStatus.current_position.entry_price?.toFixed(2)}</span>
-                </div>
-
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-400">Duration</span>
-                  <span className="text-white font-medium">{botStatus.current_position.duration_seconds}s / 180s</span>
-                </div>
-
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-400">Unrealized P&L</span>
-                  <span className={`font-bold ${botStatus.current_position.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {botStatus.current_position.unrealized_pnl >= 0 ? '+' : ''}{(botStatus.current_position.unrealized_pnl * 100).toFixed(2)}%
-                  </span>
-                </div>
-
-                <div className="w-full bg-slate-700 rounded-full h-2">
-                  <div 
-                    className="bg-blue-500 h-2 rounded-full transition-all"
-                    style={{ width: `${(botStatus.current_position.duration_seconds / 180) * 100}%` }}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <Database className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                <p className="text-slate-400">No active position</p>
-                <p className="text-slate-500 text-sm mt-1">Scanning for opportunities...</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Timing Control */}
-        <div className="bg-slate-800/50 backdrop-blur rounded-xl border border-slate-700 p-6">
-          <h3 className="text-lg font-bold text-white mb-4 flex items-center space-x-2">
-            <Clock className="w-5 h-5 text-purple-500" />
-            <span>Timing Control & Trade Frequency</span>
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-white mb-1">{stats.last_trade_seconds_ago}s</div>
-              <div className="text-slate-400 text-sm">Since Last Trade</div>
-              <div className="text-purple-400 text-xs mt-1">Max: 210s (3.5min)</div>
-            </div>
-
-            <div className="text-center">
-              <div className="text-2xl font-bold text-white mb-1">
-                {stats.last_trade_seconds_ago > 180 ? 'HIGH' : 'NORMAL'}
-              </div>
-              <div className="text-slate-400 text-sm">Trade Urgency</div>
-              <div className={`text-xs mt-1 ${stats.last_trade_seconds_ago > 180 ? 'text-red-400' : 'text-emerald-400'}`}>
-                {stats.last_trade_seconds_ago > 180 ? 'Overdue' : 'On Schedule'}
-              </div>
-            </div>
-
-            <div className="text-center">
-              <div className="text-2xl font-bold text-white mb-1">274</div>
-              <div className="text-slate-400 text-sm">Max Possible/Day</div>
-              <div className="text-slate-400 text-xs mt-1">@ 3.5min intervals</div>
-            </div>
-          </div>
-
-          <div className="mt-4 w-full bg-slate-700 rounded-full h-3">
-            <div 
-              className={`h-3 rounded-full transition-all ${stats.last_trade_seconds_ago > 180 ? 'bg-red-500' : stats.last_trade_seconds_ago > 120 ? 'bg-orange-500' : 'bg-emerald-500'}`}
-              style={{ width: `${Math.min(100, (stats.last_trade_seconds_ago / 210) * 100)}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Key Features */}
-        <div className="bg-slate-800/50 backdrop-blur rounded-xl border border-slate-700 p-6">
-          <h3 className="text-lg font-bold text-white mb-4 flex items-center space-x-2">
-            <Settings className="w-5 h-5 text-slate-400" />
-            <span>Bot Configuration & Features</span>
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="flex items-center space-x-3 p-3 bg-slate-700/30 rounded-lg">
-              <CheckCircle className="w-5 h-5 text-emerald-400" />
-              <div>
-                <div className="text-white font-medium">240+ Trades Guarantee</div>
-                <div className="text-slate-400 text-sm">Adaptive frequency control</div>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-3 p-3 bg-slate-700/30 rounded-lg">
-              <CheckCircle className="w-5 h-5 text-emerald-400" />
-              <div>
-                <div className="text-white font-medium">95% Success Rate</div>
-                <div className="text-slate-400 text-sm">AI prediction algorithms</div>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-3 p-3 bg-slate-700/30 rounded-lg">
-              <CheckCircle className="w-5 h-5 text-emerald-400" />
-              <div>
-                <div className="text-white font-medium">10x Leverage</div>
-                <div className="text-slate-400 text-sm">Maximum capital efficiency</div>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-3 p-3 bg-slate-700/30 rounded-lg">
-              <CheckCircle className="w-5 h-5 text-emerald-400" />
-              <div>
-                <div className="text-white font-medium">3.5min Max Gap</div>
-                <div className="text-slate-400 text-sm">High-frequency trading</div>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-3 p-3 bg-slate-700/30 rounded-lg">
-              <CheckCircle className="w-5 h-5 text-emerald-400" />
-              <div>
-                <div className="text-white font-medium">Boost Mode</div>
-                <div className="text-slate-400 text-sm">Auto-acceleration</div>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-3 p-3 bg-slate-700/30 rounded-lg">
-              <CheckCircle className="w-5 h-5 text-emerald-400" />
-              <div>
-                <div className="text-white font-medium">Risk Management</div>
-                <div className="text-slate-400 text-sm">1% TP / 2% SL</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default App;
- 
+# Inicialização
+if __name__ == '__main__':
+    logger.info("🚀 Iniciando servidor Flask Trading Bot")
+    
+    # Verificar variáveis de ambiente necessárias
+    required_env_vars = ['BITGET_API_KEY', 'BITGET_SECRET', 'BITGET_PASSPHRASE']
+    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+    
+    if missing_vars:
+        logger.error(f"❌ Variáveis de ambiente obrigatórias não definidas: {missing_vars}")
+        logger.error("Defina as variáveis no Render ou arquivo .env")
+    else:
+        logger.info("✅ Variáveis de ambiente verificadas")
+    
+    # Tentar inicializar bot na inicialização
+    try:
+        if not missing_vars:
+            initialize_bot()
+    except Exception as e:
+        logger.warning(f"⚠️ Falha na inicialização automática do bot: {e}")
+        logger.info("Bot pode ser inicializado via API /api/start")
+    
+    # Iniciar servidor
+    port = int(os.environ.get('PORT', 5000))
+    debug = os.environ.get('FLASK_ENV') == 'development'
+    
+    logger.info(f"🌐 Servidor rodando na porta {port}")
+    logger.info("📱 Interface disponível em: http://localhost:{}/")
+    logger.info("🔌 API endpoints:")
+    logger.info("   GET  /api/status - Status do bot")
+    logger.info("   POST /api/start - Iniciar bot")
+    logger.info("   POST /api/stop - Parar bot")
+    logger.info("   GET  /api/config - Configuração")
+    logger.info("   POST /api/config - Atualizar configuração")
+    logger.info("   GET  /api/stats - Estatísticas")
+    logger.info("   GET  /api/health - Health check")
+    
+    app.run(host='0.0.0.0', port=port, debug=debug)
