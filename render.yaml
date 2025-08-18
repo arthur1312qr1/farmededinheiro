@@ -12,4 +12,4 @@ services:
       - key: LEVERAGE
         value: "10"
       - key: SYMBOL
-        value: "ethusdt_UMCBL"
+        value: "ETH/USDT:USDT"
