@@ -9,7 +9,7 @@ def get_config() -> Dict[str, Any]:
     return {
         # Trading parameters
         'PAPER_TRADING': os.getenv('PAPER_TRADING', 'false').lower() == 'true',
-        'SYMBOL': os.getenv('SYMBOL', 'ethusdt_UMCBL'),
+        'SYMBOL': os.getenv('SYMBOL', 'ETHUSDT'),
         'LEVERAGE': int(os.getenv('LEVERAGE', 10)),
         'TARGET_TRADES_PER_DAY': int(os.getenv('TARGET_TRADES_PER_DAY', 200)),
         'BASE_CURRENCY': os.getenv('BASE_CURRENCY', 'USDT'),
