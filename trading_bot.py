@@ -19,7 +19,7 @@ from bitget_api import BitgetAPI
 logger = logging.getLogger(__name__)
 
 class TradingBot:
-    def __init__(self, bitget_api: BitgetAPI, symbol: str='ETHUSDT', # Corrigido aqui
+    def __init__(self, bitget_api: BitgetAPI, symbol: str='ETH/USDT', # Corrigido aqui
                  leverage: int=10, balance_percentage: float=100.0,
                  daily_target: int=350, scalping_interval: float=0.3,
                  paper_trading: bool=False):
