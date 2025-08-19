@@ -19,7 +19,7 @@ from bitget_api import BitgetAPI
 logger = logging.getLogger(__name__)
 
 class TradingBot:
-    def __init__(self, bitget_api: BitgetAPI, symbol: str='ETHUSDT',
+    def __init__(self, bitget_api: BitgetAPI, symbol: str='ETHUSDT', # Corrigido aqui
                  leverage: int=10, balance_percentage: float=100.0,
                  daily_target: int=350, scalping_interval: float=0.3,
                  paper_trading: bool=False):
@@ -360,17 +360,17 @@ class TradingBot:
     def _balanced_analysis_for_240_trades(self):
         """Análise balanceada entre qualidade e velocidade para garantir 240+ trades"""
         try:
+            # CORREÇÃO: Inicializar e verificar dados antes de usar
+            market_data = self.bitget_api.get_market_data(self.symbol)
+            if not market_data or 'price' not in market_data:
+                logger.warning("🟡 Dados de mercado incompletos. Pulando análise.")
+                return False, 0.0, None
+            
+            current_price = float(market_data['price'])
+            self.price_history.append(current_price)
+
             if len(self.price_history) < 50:
-                # Inicializar histórico se vazio
-                market_data = self.bitget_api.get_market_data(self.symbol)
-                if market_data:
-                    current_price = float(market_data['price'])
-                    # Simular histórico inicial
-                    for i in range(50):
-                        self.price_history.append(current_price * (1 + (np.random.random() - 0.5) * 0.001))
-                    # Adicionar volume simulado
-                    for i in range(10):
-                        self.volume_history.append(1000000 + np.random.random() * 500000)
+                # Continuar a popular o histórico
                 return False, 0.0, None
             
             # Verificar cooldown mínimo (reduzido para permitir mais trades)
@@ -379,15 +379,7 @@ class TradingBot:
             
             if time_since_last < min_cooldown:
                 return False, 0.0, None
-            
-            # Obter dados de mercado
-            market_data = self.bitget_api.get_market_data(self.symbol)
-            if not market_data:
-                return False, 0.0, None
-            
-            current_price = float(market_data['price'])
-            self.price_history.append(current_price)
-            
+
             # Adicionar volume simulado se não disponível
             if 'volume' in market_data:
                 self.volume_history.append(float(market_data['volume']))
@@ -414,7 +406,12 @@ class TradingBot:
             
             # 2. Momentum rápido
             if len(self.price_history) >= 10:
-                momentum = (current_price - self.price_history[-10]) / self.price_history[-10]
+                # Adicionando validação para evitar divisão por zero, embora improvável para preços.
+                if self.price_history[-10] == 0:
+                    momentum = 0.0
+                else:
+                    momentum = (current_price - self.price_history[-10]) / self.price_history[-10]
+                
                 if momentum > 0.005:  # 0.5% movimento positivo
                     scores.append(0.7)
                 elif momentum < -0.005:  # 0.5% movimento negativo
@@ -445,7 +442,12 @@ class TradingBot:
             
             # 5. Volatilidade check
             if len(self.price_history) >= 10:
-                volatility = np.std(list(self.price_history)[-10:]) / np.mean(list(self.price_history)[-10:])
+                prices_for_vol = list(self.price_history)[-10:]
+                if np.mean(prices_for_vol) == 0: # Adicionando validação extra
+                    volatility = 0
+                else:
+                    volatility = np.std(prices_for_vol) / np.mean(prices_for_vol)
+                
                 if 0.001 < volatility < 0.005:  # Volatilidade ideal
                     scores.append(0.4)
                 else:
@@ -486,7 +488,12 @@ class TradingBot:
             
             # Calcular posição com 100% do saldo
             position_value = balance * self.leverage
-            current_price = float(self.bitget_api.get_market_data(self.symbol)['price'])
+            market_data = self.bitget_api.get_market_data(self.symbol)
+            if not market_data or 'price' not in market_data or float(market_data['price']) == 0:
+                logger.error("❌ Não foi possível obter o preço atual. Falha na execução do trade.")
+                return False
+                
+            current_price = float(market_data['price'])
             position_size = position_value / current_price
             
             logger.info(f"💰 Saldo: ${balance:.2f} | Posição: ${position_value:.2f} | Confiança: {confidence*100:.1f}%")
@@ -800,15 +807,22 @@ class TradingBot:
             features['ultimate_osc'] = ta.momentum.ultimate_oscillator(df['high'], df['low'], df['close']).iloc[-1]
 
             # Features de momentum MULTI-TIMEFRAME
-            features['momentum_1m'] = (prices[-1] - prices[-5]) / prices[-5] if len(prices) > 5 else 0
-            features['momentum_3m'] = (prices[-1] - prices[-15]) / prices[-15] if len(prices) > 15 else 0
-            features['momentum_5m'] = (prices[-1] - prices[-25]) / prices[-25] if len(prices) > 25 else 0
-            features['momentum_10m'] = (prices[-1] - prices[-50]) / prices[-50] if len(prices) > 50 else 0
+            if len(prices) >= 50:
+                features['momentum_1m'] = (prices[-1] - prices[-5]) / prices[-5] if prices[-5] != 0 and len(prices) > 5 else 0
+                features['momentum_3m'] = (prices[-1] - prices[-15]) / prices[-15] if prices[-15] != 0 and len(prices) > 15 else 0
+                features['momentum_5m'] = (prices[-1] - prices[-25]) / prices[-25] if prices[-25] != 0 and len(prices) > 25 else 0
+                features['momentum_10m'] = (prices[-1] - prices[-50]) / prices[-50] if prices[-50] != 0 and len(prices) > 50 else 0
+            else:
+                features['momentum_1m'] = 0
+                features['momentum_3m'] = 0
+                features['momentum_5m'] = 0
+                features['momentum_10m'] = 0
+
 
             # Features de volatilidade AVANÇADAS
             if len(prices) >= 50:
-                vol_5m = np.std(prices[-25:]) / np.mean(prices[-25:])
-                vol_10m = np.std(prices[-50:]) / np.mean(prices[-50:])
+                vol_5m = np.std(prices[-25:]) / np.mean(prices[-25:]) if np.mean(prices[-25:]) != 0 else 0
+                vol_10m = np.std(prices[-50:]) / np.mean(prices[-50:]) if np.mean(prices[-50:]) != 0 else 0
                 features['volatility_5m'] = vol_5m
                 features['volatility_10m'] = vol_10m
                 features['volatility_ratio'] = vol_5m / vol_10m if vol_10m > 0 else 1
@@ -817,16 +831,23 @@ class TradingBot:
             if volumes and len(volumes) >= 10:
                 features['volume_ratio_5'] = volumes[-1] / np.mean(volumes[-5:])
                 features['volume_ratio_10'] = volumes[-1] / np.mean(volumes[-10:])
-                features['volume_trend'] = (np.mean(volumes[-5:]) - np.mean(volumes[-10:-5])) / np.mean(volumes[-10:-5])
+                features['volume_trend'] = (np.mean(volumes[-5:]) - np.mean(volumes[-10:-5])) / np.mean(volumes[-10:-5]) if np.mean(volumes[-10:-5]) != 0 else 0
 
             # Features de estrutura de mercado
             if len(prices) >= 50:
                 recent_highs = [max(prices[i:i+10]) for i in range(len(prices)-40, len(prices)-10, 10)]
                 recent_lows = [min(prices[i:i+10]) for i in range(len(prices)-40, len(prices)-10, 10)]
 
-                if len(recent_highs) >= 3:
+                if len(recent_highs) >= 3 and recent_highs[0] != 0:
                     features['structure_trend'] = (recent_highs[-1] - recent_highs[0]) / recent_highs[0]
+                else:
+                    features['structure_trend'] = 0
+
+                if len(recent_lows) >= 3 and recent_lows[0] != 0:
                     features['support_trend'] = (recent_lows[-1] - recent_lows[0]) / recent_lows[0]
+                else:
+                    features['support_trend'] = 0
+
 
             # Limpar NaN values
             for key, value in features.items():
