@@ -63,7 +63,7 @@ class BitgetAPI:
     def get_eth_price(self):
         """Pega preço atual do ETH em tempo real"""
         try:
-            ticker = self.exchange.fetch_ticker('ETH/USDT:USDT')
+            ticker = self.exchange.fetch_ticker('ETHUSDT')
             price = ticker['last']
             print(f"📈 Preço ETH atual: ${price:.2f}")
             return price
@@ -71,11 +71,11 @@ class BitgetAPI:
             print(f"❌ Erro ao pegar preço ETH: {e}")
             return 0
 
-    def get_current_price(self, symbol='ETH/USDT:USDT'):
+    def get_current_price(self, symbol='ETHUSDT'):
         """Alias para get_eth_price - compatibilidade"""
         return self.get_eth_price()
 
-    def get_market_data(self, symbol='ETH/USDT:USDT'):
+    def get_market_data(self, symbol='ETHUSDT'):
         """Dados de mercado - CORRIGIDO para aceitar symbol"""
         try:
             ticker = self.exchange.fetch_ticker(symbol)
@@ -156,13 +156,13 @@ class BitgetAPI:
             eth_quantity = self.calculate_eth_quantity(usdt_balance, eth_price)
             
             print(f"🎯 Executando ordem de compra...")
-            print(f"   Símbolo: ETH/USDT:USDT")
+            print(f"   Símbolo: ETHUSDT")
             print(f"   Quantidade: {eth_quantity} ETH")
             print(f"   Alavancagem: 10x")
             
             # Fazer ordem de compra
             order = self.exchange.create_market_buy_order(
-                symbol='ETH/USDT:USDT',
+                symbol='ETHUSDT',
                 amount=eth_quantity,
                 params={
                     'leverage': 10
@@ -192,11 +192,11 @@ class BitgetAPI:
         """Vender ETH quando atingir lucro"""
         try:
             # Pegar posição atual
-            positions = self.exchange.fetch_positions(['ETH/USDT:USDT'])
+            positions = self.exchange.fetch_positions(['ETHUSDT'])
             eth_position = None
             
             for pos in positions:
-                if pos['symbol'] == 'ETH/USDT:USDT' and abs(pos['size']) > 0:
+                if pos['symbol'] == 'ETHUSDT' and abs(pos['size']) > 0:
                     eth_position = pos
                     break
             
@@ -224,7 +224,7 @@ class BitgetAPI:
                 print(f"🎯 Meta de {profit_target * 100}% atingida! Vendendo...")
                 
                 order = self.exchange.create_market_sell_order(
-                    symbol='ETH/USDT:USDT',
+                    symbol='ETHUSDT',
                     amount=quantity
                 )
                 
@@ -250,12 +250,12 @@ class BitgetAPI:
     def get_position_info(self):
         """Informações da posição atual"""
         try:
-            positions = self.exchange.fetch_positions(['ETH/USDT:USDT'])
+            positions = self.exchange.fetch_positions(['ETHUSDT'])
             balance = self.get_balance()
             
             eth_position = None
             for pos in positions:
-                if pos['symbol'] == 'ETH/USDT:USDT' and abs(pos['size']) > 0:
+                if pos['symbol'] == 'ETHUSDT' and abs(pos['size']) > 0:
                     eth_position = pos
                     break
             
@@ -294,7 +294,7 @@ class BitgetAPI:
         else:
             return self.place_sell_order()
 
-    def get_ticker(self, symbol='ETH/USDT:USDT'):
+    def get_ticker(self, symbol='ETHUSDT'):
         """Compatibilidade - alias para get_market_data"""
         return self.get_market_data(symbol)
 
@@ -302,7 +302,7 @@ class BitgetAPI:
         """Compatibilidade - alias para get_balance"""
         return self.get_balance()
 
-    def fetch_ticker(self, symbol='ETH/USDT:USDT'):
+    def fetch_ticker(self, symbol='ETHUSDT'):
         """Compatibilidade - acesso direto ao exchange"""
         try:
             return self.exchange.fetch_ticker(symbol)
@@ -314,7 +314,9 @@ class BitgetAPI:
         """Compatibilidade - acesso direto ao exchange"""
         try:
             if symbols:
-                return self.exchange.fetch_positions(symbols)
+                # Corrigir o símbolo na lista
+                corrected_symbols = [s.replace('ETH/USDT:USDT', 'ETHUSDT') for s in symbols]
+                return self.exchange.fetch_positions(corrected_symbols)
             else:
                 return self.exchange.fetch_positions()
         except Exception as e:
@@ -324,13 +326,15 @@ class BitgetAPI:
     def create_order(self, symbol, order_type, side, amount, price=None, params={}):
         """Compatibilidade - acesso direto ao exchange"""
         try:
+            # Usar o símbolo corrigido
+            corrected_symbol = symbol.replace('ETH/USDT:USDT', 'ETHUSDT')
             if order_type == 'market':
                 if side == 'buy':
-                    return self.exchange.create_market_buy_order(symbol, amount, None, params)
+                    return self.exchange.create_market_buy_order(corrected_symbol, amount, None, params)
                 else:
-                    return self.exchange.create_market_sell_order(symbol, amount, None, params)
+                    return self.exchange.create_market_sell_order(corrected_symbol, amount, None, params)
             else:
-                return self.exchange.create_order(symbol, order_type, side, amount, price, params)
+                return self.exchange.create_order(corrected_symbol, order_type, side, amount, price, params)
         except Exception as e:
             print(f"❌ Erro create_order: {e}")
             return None
@@ -346,7 +350,7 @@ if __name__ == "__main__":
         api = BitgetAPI()
         if api.test_connection():
             info = api.get_position_info()
-            market = api.get_market_data('ETH/USDT:USDT')
+            market = api.get_market_data('ETHUSDT')
             print("🔥 Bot funcionando corretamente!")
         else:
             print("❌ Falha na conexão")
