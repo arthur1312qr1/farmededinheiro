@@ -14,7 +14,9 @@ try:
     
     config = get_config()
     
-    # Teste direto da API
+    # CORREÇÃO: config já retorna bool, não string
+    paper_trading = config.get('PAPER_TRADING', False)  # Já é bool!
+    
     print("📡 Testando conexão BitgetAPI...")
     api = BitgetAPI(
         api_key=config.get('BITGET_API_KEY'),
@@ -22,7 +24,7 @@ try:
         passphrase=config.get('BITGET_PASSPHRASE')
     )
     
-    # Testar saldo diretamente
+    # Testar API diretamente
     try:
         test_balance = api.get_balance()
         test_price = api.get_eth_price()
@@ -32,12 +34,12 @@ try:
         print(f"❌ Erro no teste API: {e}")
         API_CONNECTED = False
     
-    # Inicializar TradingBot
+    # CORREÇÃO: Usar parâmetro correto para TradingBot
     trading_bot = TradingBot(
-        api=api,
+        bitget_api=api,  # Nome correto do parâmetro
         symbol=config.get('SYMBOL', 'ETH/USDT:USDT'),
-        leverage=int(config.get('LEVERAGE', 10)),
-        paper_trading=config.get('PAPER_TRADING', 'true').lower() == 'true'
+        leverage=config.get('LEVERAGE', 10),
+        paper_trading=paper_trading  # Já é bool
     )
     
     print("✅ Sistema inicializado!")
@@ -63,7 +65,7 @@ bot_state = {
 }
 
 def trading_loop():
-    """Loop de trading que usa o trading_bot.py"""
+    """Loop que executa o trading_bot"""
     print("🚀 Iniciando loop de trading...")
     
     while bot_state['is_running'] and not bot_state['is_paused']:
@@ -71,27 +73,15 @@ def trading_loop():
             if trading_bot and API_CONNECTED:
                 print("🔄 Executando trading_bot...")
                 
-                # Chamar métodos do trading_bot
-                if hasattr(trading_bot, 'run'):
-                    result = trading_bot.run()
-                elif hasattr(trading_bot, 'execute'):
-                    result = trading_bot.execute()
-                elif hasattr(trading_bot, 'main_loop'):
-                    result = trading_bot.main_loop()
-                else:
-                    # Tentar métodos individuais
-                    try:
-                        if hasattr(trading_bot, 'analyze_market'):
-                            analysis = trading_bot.analyze_market()
-                            print(f"📊 Análise: {analysis}")
-                            
-                        if hasattr(trading_bot, 'execute_trade'):
-                            trade_result = trading_bot.execute_trade()
-                            if trade_result:
-                                bot_state['trades_today'] += 1
-                                print(f"✅ Trade executado! Total: {bot_state['trades_today']}")
-                    except Exception as e:
-                        print(f"❌ Erro nos métodos individuais: {e}")
+                # Chamar start() do trading_bot uma vez
+                if not trading_bot.is_running:
+                    trading_bot.start()
+                
+                # Pegar status do trading_bot
+                status = trading_bot.get_status()
+                if status:
+                    bot_state['trades_today'] = status.get('daily_progress', {}).get('trades_today', 0)
+                    bot_state['total_profit'] = status.get('performance', {}).get('total_profit', 0)
                 
                 bot_state['last_error'] = None
                 
@@ -100,7 +90,7 @@ def trading_loop():
             print(f"❌ {error_msg}")
             bot_state['last_error'] = error_msg
             
-        time.sleep(3)  # Intervalo entre execuções
+        time.sleep(5)  # Intervalo maior
     
     print("🛑 Trading loop finalizado")
 
@@ -166,9 +156,13 @@ def index():
 
     <script>
         document.getElementById('btn-start').addEventListener('click', function() {
+            console.log('🚀 Iniciando bot...');
             fetch('/api/start', { method: 'POST' })
                 .then(r => r.json())
-                .then(data => console.log('Start:', data));
+                .then(data => {
+                    console.log('Start:', data);
+                    updateData();
+                });
         });
         
         document.getElementById('btn-pause').addEventListener('click', function() {
@@ -187,6 +181,8 @@ def index():
             fetch('/api/data')
                 .then(r => r.json())
                 .then(data => {
+                    console.log('📊 Dados recebidos:', data);
+                    
                     document.getElementById('trades').textContent = data.trades || 0;
                     document.getElementById('balance').textContent = '$' + (data.balance || 0).toFixed(4);
                     document.getElementById('price').textContent = '$' + (data.price || 0).toFixed(2);
@@ -194,7 +190,12 @@ def index():
                     document.getElementById('status').textContent = data.status || 'PARADO';
                     document.getElementById('info').textContent = data.info || 'Sistema ativo';
                     document.getElementById('debug').textContent = 'Atualizado: ' + new Date().toLocaleTimeString();
-                    document.getElementById('errors').textContent = data.error || '✅ Funcionando';
+                    
+                    if (data.error) {
+                        document.getElementById('errors').textContent = '❌ ' + data.error;
+                    } else {
+                        document.getElementById('errors').textContent = '✅ Funcionando';
+                    }
                 })
                 .catch(e => {
                     console.error('Erro:', e);
@@ -211,30 +212,30 @@ def index():
 
 @app.route('/api/data')
 def get_data():
-    """Endpoint que busca dados reais"""
+    """Endpoint que busca dados reais da API"""
     try:
-        print("📊 Buscando dados...")
+        print("📊 Buscando dados da API...")
         
-        # Buscar saldo DIRETAMENTE da API
+        # Buscar saldo DIRETAMENTE
         balance = 0
         try:
             if api and API_CONNECTED:
                 balance_info = api.get_balance()
-                print(f"💰 Balance info: {balance_info}")
+                print(f"💰 Balance raw: {balance_info}")
                 if balance_info and isinstance(balance_info, dict):
                     balance = balance_info.get('free', 0)
-                    print(f"💰 Saldo extraído: {balance}")
+                    print(f"💰 Saldo extraído: ${balance:.4f}")
         except Exception as e:
-            print(f"❌ Erro ao buscar saldo: {e}")
+            print(f"❌ Erro saldo: {e}")
         
-        # Buscar preço DIRETAMENTE da API  
+        # Buscar preço DIRETAMENTE  
         price = 0
         try:
             if api and API_CONNECTED:
                 price = api.get_eth_price()
-                print(f"📈 Preço ETH: {price}")
+                print(f"📈 Preço ETH: ${price:.2f}")
         except Exception as e:
-            print(f"❌ Erro ao buscar preço: {e}")
+            print(f"❌ Erro preço: {e}")
         
         # Status do bot
         if bot_state['is_running'] and not bot_state['is_paused']:
@@ -254,7 +255,7 @@ def get_data():
             'error': bot_state['last_error']
         }
         
-        print(f"✅ Resposta: {response}")
+        print(f"✅ Enviando: {response}")
         return jsonify(response)
         
     except Exception as e:
@@ -271,11 +272,12 @@ def start():
     try:
         bot_state['is_running'] = True
         bot_state['is_paused'] = False
+        bot_state['last_error'] = None
         
         if not bot_state['thread'] or not bot_state['thread'].is_alive():
             bot_state['thread'] = threading.Thread(target=trading_loop, daemon=True)
             bot_state['thread'].start()
-            print("🚀 Thread de trading iniciada!")
+            print("🚀 Thread iniciada!")
         
         return jsonify({'success': True, 'message': 'Bot iniciado'})
     except Exception as e:
@@ -284,12 +286,16 @@ def start():
 @app.route('/api/pause', methods=['POST'])
 def pause():
     bot_state['is_paused'] = True
+    if trading_bot:
+        trading_bot.stop()
     return jsonify({'success': True, 'message': 'Bot pausado'})
 
 @app.route('/api/stop', methods=['POST'])
 def stop():
     bot_state['is_running'] = False
     bot_state['is_paused'] = False
+    if trading_bot:
+        trading_bot.stop()
     return jsonify({'success': True, 'message': 'Bot parado'})
 
 if __name__ == '__main__':
