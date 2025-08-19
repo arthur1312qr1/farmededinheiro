@@ -23,7 +23,7 @@ try:
         passphrase=config.get('BITGET_PASSPHRASE')
     )
     
-    # Inicializar TradingBot com os parâmetros corretos
+    # Inicializar TradingBot
     trading_bot = TradingBot(
         api=bitget_api,
         symbol=config.get('SYMBOL', 'ETH/USDT:USDT'),
@@ -32,10 +32,7 @@ try:
     )
     
     API_CONNECTED = True
-    print("✅ Sistema inicializado:")
-    print(f"   📊 Símbolo: {config.get('SYMBOL', 'ETH/USDT:USDT')}")
-    print(f"   📈 Alavancagem: {config.get('LEVERAGE', 10)}x")
-    print(f"   📋 Paper Trading: {config.get('PAPER_TRADING', 'true')}")
+    print("✅ Sistema inicializado com sucesso!")
     
 except Exception as e:
     print(f"❌ Erro na inicialização: {e}")
@@ -66,490 +63,231 @@ bot_state = {
 }
 
 def run_trading_loop():
-    """Loop principal do bot de trading"""
-    print("🚀 Iniciando loop principal do trading bot...")
+    """Loop principal que executa o trading_bot"""
+    print("🚀 Iniciando loop de trading...")
     
     while bot_state['is_running']:
         if bot_state['is_paused']:
-            print("⏸️ Bot pausado, aguardando...")
+            print("⏸️ Bot pausado")
             time.sleep(5)
             continue
             
         try:
             if trading_bot and API_CONNECTED:
-                print("🔄 Executando análise e trading...")
+                print("🔄 Executando trading_bot...")
                 
-                # Chamar o método principal do seu trading_bot
+                # CHAMAR SEU TRADING_BOT.PY - ele faz tudo!
                 if hasattr(trading_bot, 'execute'):
                     result = trading_bot.execute()
                 elif hasattr(trading_bot, 'run'):
                     result = trading_bot.run()
-                elif hasattr(trading_bot, 'analyze_and_trade'):
-                    result = trading_bot.analyze_and_trade()
                 else:
-                    # Tentar métodos individuais
+                    # Métodos individuais
                     analysis = None
                     prediction = None
                     trade_result = None
                     
-                    # Fazer análise
                     if hasattr(trading_bot, 'analyze_market'):
                         analysis = trading_bot.analyze_market()
-                        bot_state['last_analysis'] = analysis
-                        print(f"📊 Análise: {analysis}")
+                        bot_state['last_analysis'] = str(analysis)
                     
-                    # Fazer previsão
-                    if hasattr(trading_bot, 'predict') or hasattr(trading_bot, 'make_prediction'):
-                        if hasattr(trading_bot, 'predict'):
-                            prediction = trading_bot.predict()
-                        else:
-                            prediction = trading_bot.make_prediction()
-                        bot_state['current_prediction'] = prediction
-                        print(f"🔮 Previsão: {prediction}")
+                    if hasattr(trading_bot, 'predict'):
+                        prediction = trading_bot.predict()
+                        bot_state['current_prediction'] = str(prediction)
                     
-                    # Executar trade baseado na análise
                     if hasattr(trading_bot, 'execute_trade'):
-                        trade_result = trading_bot.execute_trade(analysis, prediction)
-                    elif hasattr(trading_bot, 'trade'):
-                        trade_result = trading_bot.trade()
+                        trade_result = trading_bot.execute_trade()
                     
-                    result = {
-                        'analysis': analysis,
-                        'prediction': prediction,
-                        'trade': trade_result
-                    }
+                    result = trade_result
                 
                 # Processar resultado
                 if result:
-                    print(f"✅ Resultado: {result}")
-                    
-                    # Se foi um trade bem sucedido
-                    if isinstance(result, dict):
-                        if result.get('trade_executed') or result.get('success'):
-                            bot_state['trades_today'] += 1
-                            bot_state['total_trades'] += 1
-                            
-                            if result.get('profitable', True):
-                                bot_state['profitable_trades'] += 1
-                            
-                            if result.get('profit'):
-                                bot_state['total_profit'] += result['profit']
-                            
-                            print(f"🎉 Trade executado! Total hoje: {bot_state['trades_today']}")
-                    
-                    elif result:  # Se retornou algo truthy
-                        bot_state['trades_today'] += 1
-                        print(f"🎉 Ação executada! Total hoje: {bot_state['trades_today']}")
+                    bot_state['trades_today'] += 1
+                    bot_state['total_trades'] += 1
+                    print(f"✅ Trade executado! Total: {bot_state['trades_today']}")
                 
                 bot_state['last_error'] = None
                 
             else:
-                error_msg = "TradingBot ou API não disponível"
-                print(f"❌ {error_msg}")
-                bot_state['last_error'] = error_msg
-                time.sleep(10)
+                bot_state['last_error'] = "API ou TradingBot não disponível"
                 
         except Exception as e:
-            error_msg = f"Erro no loop de trading: {str(e)}"
+            error_msg = f"Erro no trading: {str(e)}"
             print(f"❌ {error_msg}")
-            traceback.print_exc()
-            logger.error(error_msg)
             bot_state['last_error'] = error_msg
-            time.sleep(5)  # Pausa antes de tentar novamente
+            time.sleep(5)
         
-        # Intervalo entre execuções (configurável)
-        time.sleep(2)  # 2 segundos entre tentativas
+        time.sleep(2)  # Pausa entre execuções
     
-    print("🛑 Loop de trading finalizado")
+    print("🛑 Loop finalizado")
 
 @app.route('/')
 def index():
     return '''
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html>
 <head>
+    <title>Trading Bot</title>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trading Bot Dashboard</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #1a1a1a;
-            color: white;
-            padding: 20px;
-            line-height: 1.6;
-        }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        
-        .control-panel {
-            background: #333;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-        
-        .btn {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 6px;
+        body { font-family: Arial; background: #1a1a1a; color: white; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .card { background: #333; padding: 20px; margin: 10px; border-radius: 8px; }
+        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+        .metric { text-align: center; }
+        .metric-value { font-size: 2em; margin-bottom: 10px; }
+        .btn { 
+            padding: 15px 25px; 
+            margin: 5px; 
+            border: none; 
+            border-radius: 5px; 
+            color: white; 
+            font-size: 16px; 
             cursor: pointer;
-            font-size: 16px;
-            font-weight: bold;
-            margin: 5px;
-            transition: all 0.3s ease;
-            min-width: 120px;
+            transition: all 0.3s;
         }
-        
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-        }
-        
-        .btn:active {
-            transform: translateY(0);
-        }
-        
-        .btn-start {
-            background: #4CAF50;
-            color: white;
-        }
-        
-        .btn-start:hover {
-            background: #45a049;
-        }
-        
-        .btn-pause {
-            background: #ff9800;
-            color: white;
-        }
-        
-        .btn-pause:hover {
-            background: #e68900;
-        }
-        
-        .btn-stop {
-            background: #f44336;
-            color: white;
-        }
-        
-        .btn-stop:hover {
-            background: #da190b;
-        }
-        
-        .metrics-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .metric-card {
-            background: #333;
-            padding: 20px;
-            border-radius: 8px;
-            text-align: center;
-        }
-        
-        .metric-value {
-            font-size: 2em;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
-        
-        .metric-label {
-            color: #ccc;
-            font-size: 0.9em;
-        }
-        
-        .analysis-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .info-card {
-            background: #333;
-            padding: 20px;
-            border-radius: 8px;
-        }
-        
-        .status-indicator {
-            display: inline-block;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-weight: bold;
-            margin-left: 10px;
-        }
-        
-        .status-running {
-            background: #4CAF50;
-            color: white;
-        }
-        
-        .status-paused {
-            background: #ff9800;
-            color: white;
-        }
-        
-        .status-stopped {
-            background: #f44336;
-            color: white;
-        }
-        
-        .progress-bar {
-            width: 100%;
-            background: #555;
-            height: 20px;
-            border-radius: 10px;
-            margin: 10px 0;
-            overflow: hidden;
-        }
-        
-        .progress-fill {
-            height: 100%;
-            background: #4CAF50;
-            border-radius: 10px;
-            transition: width 0.5s ease;
-            width: 0%;
-        }
-        
-        .debug-info {
-            font-size: 0.8em;
-            color: #888;
-            margin-top: 10px;
-        }
-        
-        @media (max-width: 768px) {
-            .analysis-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .metrics-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-        }
+        .btn:hover { transform: scale(1.05); }
+        .btn-start { background: #4CAF50; }
+        .btn-pause { background: #ff9800; }
+        .btn-stop { background: #f44336; }
+        .status-running { color: #4CAF50; }
+        .status-paused { color: #ff9800; }
+        .status-stopped { color: #f44336; }
+        .error { color: #ff6b6b; }
+        .success { color: #4CAF50; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>🤖 Trading Bot Dashboard Avançado</h1>
+        <h1>🤖 Trading Bot Dashboard</h1>
+        
+        <div class="card">
+            <h2>Status: <span id="status" class="status-stopped">PARADO</span></h2>
+            <button id="btn-start" class="btn btn-start">🚀 Iniciar</button>
+            <button id="btn-pause" class="btn btn-pause">⏸️ Pausar</button>
+            <button id="btn-stop" class="btn btn-stop">🛑 Parar</button>
         </div>
         
-        <div class="control-panel">
-            <h2>Status: <span id="status" class="status-indicator status-stopped">PARADO</span></h2>
-            <div style="margin-top: 20px;">
-                <button id="startBtn" class="btn btn-start" onclick="startBot()">🚀 Iniciar Bot</button>
-                <button id="pauseBtn" class="btn btn-pause" onclick="pauseBot()">⏸️ Pausar</button>
-                <button id="stopBtn" class="btn btn-stop" onclick="stopBot()">🛑 Parar</button>
+        <div class="grid">
+            <div class="card metric">
+                <div id="trades" class="metric-value" style="color: #2196F3;">0</div>
+                <div>Trades Hoje</div>
             </div>
-        </div>
-        
-        <div class="metrics-grid">
-            <div class="metric-card">
-                <div class="metric-value" style="color: #2196F3;" id="trades">0</div>
-                <div class="metric-label">Trades Hoje</div>
+            <div class="card metric">
+                <div id="balance" class="metric-value" style="color: #9C27B0;">$0.00</div>
+                <div>Saldo USDT</div>
             </div>
-            <div class="metric-card">
-                <div class="metric-value" style="color: #4CAF50;" id="win-rate">0%</div>
-                <div class="metric-label">Taxa de Sucesso</div>
+            <div class="card metric">
+                <div id="price" class="metric-value" style="color: #FF5722;">$0.00</div>
+                <div>Preço ETH</div>
             </div>
-            <div class="metric-card">
-                <div class="metric-value" style="color: #9C27B0;" id="balance">$0.00</div>
-                <div class="metric-label">Saldo USDT</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-value" style="color: #FF5722;" id="price">$0.00</div>
-                <div class="metric-label">Preço ETH</div>
+            <div class="card metric">
+                <div id="profit" class="metric-value" style="color: #FFC107;">$0.00</div>
+                <div>Lucro Total</div>
             </div>
         </div>
         
-        <div class="analysis-grid">
-            <div class="info-card">
-                <h3>📊 Análise Atual</h3>
-                <div id="analysis" style="color: #00BCD4;">Aguardando análise...</div>
-            </div>
-            <div class="info-card">
-                <h3>🔮 Previsão</h3>
-                <div id="prediction" style="color: #FF9800;">Aguardando previsão...</div>
-            </div>
+        <div class="card">
+            <h3>📊 Análise: <span id="analysis">Aguardando...</span></h3>
+            <h3>🔮 Previsão: <span id="prediction">Aguardando...</span></h3>
         </div>
         
-        <div class="info-card">
-            <h3>📊 Meta Diária: 240 Trades</h3>
-            <div>Atual: <span id="progress-trades">0</span> | Restam: <span id="remaining">240</span> | Lucro: $<span id="profit">0.0000</span></div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progress-bar"></div>
-            </div>
-            <div id="progress-text">0% da meta diária</div>
-        </div>
-        
-        <div class="info-card">
+        <div class="card">
             <h3>🔧 Sistema</h3>
             <div id="info">Carregando...</div>
-            <div class="debug-info" id="debug">Sistema inicializando...</div>
+            <div id="debug" style="font-size: 0.8em; color: #888; margin-top: 10px;"></div>
         </div>
         
-        <div class="info-card">
+        <div class="card">
             <h3>⚠️ Status e Erros</h3>
-            <div id="errors" style="color: #4CAF50;">Sistema funcionando</div>
+            <div id="errors" class="success">Sistema funcionando</div>
         </div>
     </div>
-    
+
     <script>
-        console.log('🚀 Dashboard carregado!');
+        // Event listeners para os botões
+        document.getElementById('btn-start').addEventListener('click', function() {
+            console.log('🚀 Clicou em Iniciar');
+            this.disabled = true;
+            this.textContent = '🔄 Iniciando...';
+            
+            fetch('/api/start', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    console.log('Resposta start:', data);
+                    this.disabled = false;
+                    this.textContent = '🚀 Iniciar';
+                    updateData();
+                })
+                .catch(e => {
+                    console.error('Erro:', e);
+                    this.disabled = false;
+                    this.textContent = '🚀 Iniciar';
+                });
+        });
+        
+        document.getElementById('btn-pause').addEventListener('click', function() {
+            console.log('⏸️ Clicou em Pausar');
+            fetch('/api/pause', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    console.log('Resposta pause:', data);
+                    updateData();
+                });
+        });
+        
+        document.getElementById('btn-stop').addEventListener('click', function() {
+            console.log('🛑 Clicou em Parar');
+            fetch('/api/stop', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    console.log('Resposta stop:', data);
+                    updateData();
+                });
+        });
         
         function updateData() {
-            console.log('📡 Atualizando dados...');
-            
             fetch('/api/data')
-                .then(response => {
-                    console.log('📡 Resposta recebida:', response.status);
-                    return response.json();
-                })
+                .then(r => r.json())
                 .then(data => {
-                    console.log('📊 Dados:', data);
-                    
                     // Atualizar métricas
                     document.getElementById('trades').textContent = data.trades || 0;
                     document.getElementById('balance').textContent = '$' + (data.balance || 0).toFixed(4);
                     document.getElementById('price').textContent = '$' + (data.price || 0).toFixed(2);
-                    document.getElementById('profit').textContent = (data.profit || 0).toFixed(4);
+                    document.getElementById('profit').textContent = '$' + (data.profit || 0).toFixed(4);
                     
-                    // Taxa de sucesso
-                    const winRate = data.total_trades > 0 ? ((data.profitable_trades / data.total_trades) * 100) : 0;
-                    document.getElementById('win-rate').textContent = winRate.toFixed(1) + '%';
-                    
-                    // Status com classes CSS
+                    // Status
                     const statusEl = document.getElementById('status');
                     statusEl.textContent = data.status || 'PARADO';
-                    statusEl.className = 'status-indicator';
-                    
-                    if (data.status === 'RODANDO') {
-                        statusEl.classList.add('status-running');
-                    } else if (data.status === 'PAUSADO') {
-                        statusEl.classList.add('status-paused');
-                    } else {
-                        statusEl.classList.add('status-stopped');
-                    }
+                    statusEl.className = 'status-' + (data.status === 'RODANDO' ? 'running' : 
+                                                     data.status === 'PAUSADO' ? 'paused' : 'stopped');
                     
                     // Análise e previsão
-                    document.getElementById('analysis').textContent = data.analysis || 'Aguardando análise...';
-                    document.getElementById('prediction').textContent = data.prediction || 'Aguardando previsão...';
+                    document.getElementById('analysis').textContent = data.analysis || 'Aguardando...';
+                    document.getElementById('prediction').textContent = data.prediction || 'Aguardando...';
                     
-                    // Progresso
-                    const trades = data.trades || 0;
-                    const progress = Math.min((trades / 240) * 100, 100);
-                    document.getElementById('progress-trades').textContent = trades;
-                    document.getElementById('remaining').textContent = Math.max(240 - trades, 0);
-                    document.getElementById('progress-bar').style.width = progress + '%';
-                    document.getElementById('progress-text').textContent = progress.toFixed(1) + '% da meta diária';
-                    
+                    // Info
                     document.getElementById('info').textContent = data.info || 'Sistema ativo';
-                    document.getElementById('debug').textContent = 'Última atualização: ' + new Date().toLocaleTimeString();
+                    document.getElementById('debug').textContent = 'Atualizado: ' + new Date().toLocaleTimeString();
                     
                     // Erros
                     const errorEl = document.getElementById('errors');
                     if (data.error) {
                         errorEl.textContent = '❌ ERRO: ' + data.error;
-                        errorEl.style.color = '#ff6b6b';
+                        errorEl.className = 'error';
                     } else {
-                        errorEl.textContent = '✅ Sistema funcionando - Bot executando análises e trades';
-                        errorEl.style.color = '#4CAF50';
+                        errorEl.textContent = '✅ Sistema funcionando - Trading ativo';
+                        errorEl.className = 'success';
                     }
                 })
-                .catch(error => {
-                    console.error('❌ Erro na requisição:', error);
-                    document.getElementById('errors').textContent = '❌ ERRO DE CONEXÃO: ' + error.message;
-                    document.getElementById('errors').style.color = '#ff6b6b';
+                .catch(e => {
+                    console.error('Erro:', e);
+                    document.getElementById('errors').textContent = '❌ Erro de conexão';
+                    document.getElementById('errors').className = 'error';
                 });
         }
         
-        function startBot() {
-            console.log('🚀 Iniciando bot...');
-            document.getElementById('startBtn').disabled = true;
-            
-            fetch('/api/start', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                console.log('✅ Resposta start:', data);
-                document.getElementById('startBtn').disabled = false;
-                setTimeout(updateData, 1000);
-            })
-            .catch(error => {
-                console.error('❌ Erro ao iniciar:', error);
-                document.getElementById('startBtn').disabled = false;
-            });
-        }
-        
-        function pauseBot() {
-            console.log('⏸️ Pausando bot...');
-            document.getElementById('pauseBtn').disabled = true;
-            
-            fetch('/api/pause', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                console.log('⏸️ Resposta pause:', data);
-                document.getElementById('pauseBtn').disabled = false;
-                setTimeout(updateData, 1000);
-            })
-            .catch(error => {
-                console.error('❌ Erro ao pausar:', error);
-                document.getElementById('pauseBtn').disabled = false;
-            });
-        }
-        
-        function stopBot() {
-            console.log('🛑 Parando bot...');
-            document.getElementById('stopBtn').disabled = true;
-            
-            fetch('/api/stop', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                console.log('🛑 Resposta stop:', data);
-                document.getElementById('stopBtn').disabled = false;
-                setTimeout(updateData, 1000);
-            })
-            .catch(error => {
-                console.error('❌ Erro ao parar:', error);
-                document.getElementById('stopBtn').disabled = false;
-            });
-        }
-        
         // Inicializar
-        console.log('🔄 Iniciando atualizações automáticas...');
         updateData();
         setInterval(updateData, 3000);
     </script>
@@ -559,12 +297,10 @@ def index():
 
 @app.route('/api/data')
 def get_data():
-    """Dados completos do sistema"""
+    """Endpoint para dados do sistema"""
     try:
-        # Dados da API
+        # Buscar saldo
         balance = 0
-        price = 0
-        
         if bitget_api and API_CONNECTED:
             try:
                 balance_info = bitget_api.get_balance()
@@ -572,13 +308,16 @@ def get_data():
                     balance = balance_info.get('free', 0)
             except:
                 pass
-                
+        
+        # Buscar preço
+        price = 0
+        if bitget_api and API_CONNECTED:
             try:
                 price = bitget_api.get_eth_price() or 0
             except:
                 pass
         
-        # Status
+        # Status do bot
         if bot_state['is_running'] and not bot_state['is_paused']:
             status = 'RODANDO'
         elif bot_state['is_paused']:
@@ -586,20 +325,18 @@ def get_data():
         else:
             status = 'PARADO'
         
-        # Thread status
+        # Thread ativa?
         thread_active = bot_state['thread'] and bot_state['thread'].is_alive()
         
         return {
             'trades': bot_state['trades_today'],
-            'profitable_trades': bot_state['profitable_trades'],
-            'total_trades': bot_state['total_trades'],
             'balance': balance,
             'price': price,
             'profit': bot_state['total_profit'],
             'status': status,
-            'analysis': str(bot_state['last_analysis']) if bot_state['last_analysis'] else 'Aguardando análise...',
-            'prediction': str(bot_state['current_prediction']) if bot_state['current_prediction'] else 'Aguardando previsão...',
-            'info': f'API: {API_CONNECTED}, Thread: {"Ativa" if thread_active else "Inativa"}, Total: {bot_state["total_trades"]}',
+            'analysis': bot_state['last_analysis'] or 'Aguardando análise...',
+            'prediction': bot_state['current_prediction'] or 'Aguardando previsão...',
+            'info': f'API: {API_CONNECTED}, Thread: {"Ativa" if thread_active else "Inativa"}',
             'error': bot_state['last_error']
         }
         
@@ -607,12 +344,12 @@ def get_data():
         return {
             'trades': 0, 'balance': 0, 'price': 0, 'profit': 0,
             'status': 'ERRO', 'error': str(e),
-            'analysis': 'Erro na análise', 'prediction': 'Erro na previsão'
+            'analysis': 'Erro', 'prediction': 'Erro'
         }
 
 @app.route('/api/start', methods=['POST'])
 def start():
-    """Iniciar o sistema de trading"""
+    """Iniciar o bot"""
     try:
         if not trading_bot:
             return {'success': False, 'error': 'TradingBot não disponível'}
@@ -621,12 +358,14 @@ def start():
         bot_state['is_paused'] = False
         bot_state['last_error'] = None
         
+        # Iniciar thread se necessário
         if not bot_state['thread'] or not bot_state['thread'].is_alive():
             bot_state['thread'] = threading.Thread(target=run_trading_loop, daemon=True)
             bot_state['thread'].start()
+            print("🚀 Thread iniciada!")
         
-        print("🚀 Sistema de trading iniciado!")
-        return {'success': True, 'message': 'Sistema iniciado - executando análises e trades'}
+        logger.info("🚀 Bot iniciado")
+        return {'success': True, 'message': 'Bot iniciado com sucesso'}
         
     except Exception as e:
         error_msg = f"Erro ao iniciar: {e}"
@@ -635,16 +374,18 @@ def start():
 
 @app.route('/api/pause', methods=['POST'])
 def pause():
+    """Pausar o bot"""
     bot_state['is_paused'] = True
-    print("⏸️ Sistema pausado")
-    return {'success': True, 'message': 'Sistema pausado'}
+    logger.info("⏸️ Bot pausado")
+    return {'success': True, 'message': 'Bot pausado'}
 
 @app.route('/api/stop', methods=['POST'])
 def stop():
+    """Parar o bot"""
     bot_state['is_running'] = False
     bot_state['is_paused'] = False
-    print("🛑 Sistema parado")
-    return {'success': True, 'message': 'Sistema parado'}
+    logger.info("🛑 Bot parado")
+    return {'success': True, 'message': 'Bot parado'}
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
