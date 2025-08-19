@@ -80,7 +80,6 @@ def run_trading_loop():
                 print("🔄 Executando análise e trading...")
                 
                 # Chamar o método principal do seu trading_bot
-                # Assumindo que seu TradingBot tem um método como execute() ou run()
                 if hasattr(trading_bot, 'execute'):
                     result = trading_bot.execute()
                 elif hasattr(trading_bot, 'run'):
@@ -167,77 +166,268 @@ def run_trading_loop():
 def index():
     return '''
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 <head>
-    <title>Trading Bot Dashboard</title>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Bot Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: white;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .control-panel {
+            background: #333;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            margin: 5px;
+            transition: all 0.3s ease;
+            min-width: 120px;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .btn-start {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        .btn-start:hover {
+            background: #45a049;
+        }
+        
+        .btn-pause {
+            background: #ff9800;
+            color: white;
+        }
+        
+        .btn-pause:hover {
+            background: #e68900;
+        }
+        
+        .btn-stop {
+            background: #f44336;
+            color: white;
+        }
+        
+        .btn-stop:hover {
+            background: #da190b;
+        }
+        
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .metric-card {
+            background: #333;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .metric-label {
+            color: #ccc;
+            font-size: 0.9em;
+        }
+        
+        .analysis-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .info-card {
+            background: #333;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        
+        .status-running {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        .status-paused {
+            background: #ff9800;
+            color: white;
+        }
+        
+        .status-stopped {
+            background: #f44336;
+            color: white;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            background: #555;
+            height: 20px;
+            border-radius: 10px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #4CAF50;
+            border-radius: 10px;
+            transition: width 0.5s ease;
+            width: 0%;
+        }
+        
+        .debug-info {
+            font-size: 0.8em;
+            color: #888;
+            margin-top: 10px;
+        }
+        
+        @media (max-width: 768px) {
+            .analysis-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .metrics-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
 </head>
-<body style="font-family: Arial; background: #1a1a1a; color: white; padding: 20px;">
-    <h1>🤖 Trading Bot Dashboard Avançado</h1>
-    
-    <div style="background: #333; padding: 20px; margin: 10px; border-radius: 8px;">
-        <h2>Status: <span id="status" style="color: #f44336;">PARADO</span></h2>
-        <button onclick="start()" style="background: #4CAF50; color: white; padding: 10px; border: none; margin: 5px;">🚀 Iniciar Bot</button>
-        <button onclick="pause()" style="background: #ff9800; color: white; padding: 10px; border: none; margin: 5px;">⏸️ Pausar</button>
-        <button onclick="stop()" style="background: #f44336; color: white; padding: 10px; border: none; margin: 5px;">🛑 Parar</button>
-    </div>
-    
-    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;">
-        <div style="background: #333; padding: 20px; border-radius: 8px; text-align: center;">
-            <div style="font-size: 2em; color: #2196F3;" id="trades">0</div>
-            <div>Trades Hoje</div>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Trading Bot Dashboard Avançado</h1>
         </div>
-        <div style="background: #333; padding: 20px; border-radius: 8px; text-align: center;">
-            <div style="font-size: 1.5em; color: #4CAF50;" id="win-rate">0%</div>
-            <div>Taxa de Sucesso</div>
+        
+        <div class="control-panel">
+            <h2>Status: <span id="status" class="status-indicator status-stopped">PARADO</span></h2>
+            <div style="margin-top: 20px;">
+                <button id="startBtn" class="btn btn-start" onclick="startBot()">🚀 Iniciar Bot</button>
+                <button id="pauseBtn" class="btn btn-pause" onclick="pauseBot()">⏸️ Pausar</button>
+                <button id="stopBtn" class="btn btn-stop" onclick="stopBot()">🛑 Parar</button>
+            </div>
         </div>
-        <div style="background: #333; padding: 20px; border-radius: 8px; text-align: center;">
-            <div style="font-size: 2em; color: #9C27B0;" id="balance">$0.00</div>
-            <div>Saldo USDT</div>
+        
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-value" style="color: #2196F3;" id="trades">0</div>
+                <div class="metric-label">Trades Hoje</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" style="color: #4CAF50;" id="win-rate">0%</div>
+                <div class="metric-label">Taxa de Sucesso</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" style="color: #9C27B0;" id="balance">$0.00</div>
+                <div class="metric-label">Saldo USDT</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" style="color: #FF5722;" id="price">$0.00</div>
+                <div class="metric-label">Preço ETH</div>
+            </div>
         </div>
-        <div style="background: #333; padding: 20px; border-radius: 8px; text-align: center;">
-            <div style="font-size: 2em; color: #FF5722;" id="price">$0.00</div>
-            <div>Preço ETH</div>
+        
+        <div class="analysis-grid">
+            <div class="info-card">
+                <h3>📊 Análise Atual</h3>
+                <div id="analysis" style="color: #00BCD4;">Aguardando análise...</div>
+            </div>
+            <div class="info-card">
+                <h3>🔮 Previsão</h3>
+                <div id="prediction" style="color: #FF9800;">Aguardando previsão...</div>
+            </div>
         </div>
-    </div>
-    
-    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin: 20px 0;">
-        <div style="background: #333; padding: 20px; border-radius: 8px;">
-            <h3>📊 Análise Atual</h3>
-            <div id="analysis" style="color: #00BCD4;">Aguardando análise...</div>
+        
+        <div class="info-card">
+            <h3>📊 Meta Diária: 240 Trades</h3>
+            <div>Atual: <span id="progress-trades">0</span> | Restam: <span id="remaining">240</span> | Lucro: $<span id="profit">0.0000</span></div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-bar"></div>
+            </div>
+            <div id="progress-text">0% da meta diária</div>
         </div>
-        <div style="background: #333; padding: 20px; border-radius: 8px;">
-            <h3>🔮 Previsão</h3>
-            <div id="prediction" style="color: #FF9800;">Aguardando previsão...</div>
+        
+        <div class="info-card">
+            <h3>🔧 Sistema</h3>
+            <div id="info">Carregando...</div>
+            <div class="debug-info" id="debug">Sistema inicializando...</div>
         </div>
-    </div>
-    
-    <div style="background: #333; padding: 20px; margin: 10px 0; border-radius: 8px;">
-        <h3>🔧 Sistema</h3>
-        <div id="info">Carregando...</div>
-        <div id="debug" style="font-size: 0.8em; margin-top: 10px; color: #888;"></div>
-    </div>
-    
-    <div style="background: #333; padding: 20px; margin: 10px 0; border-radius: 8px;">
-        <h3>⚠️ Status e Erros</h3>
-        <div id="errors" style="color: #4CAF50;">Sistema funcionando</div>
-    </div>
-    
-    <div style="background: #333; padding: 20px; margin: 10px 0; border-radius: 8px;">
-        <h3>📊 Meta Diária: 240 Trades</h3>
-        <div>Atual: <span id="progress-trades">0</span> | Restam: <span id="remaining">240</span> | Lucro: $<span id="profit">0.0000</span></div>
-        <div style="width: 100%; background: #555; height: 20px; border-radius: 10px; margin: 10px 0;">
-            <div id="progress-bar" style="width: 0%; background: #4CAF50; height: 100%; border-radius: 10px; transition: width 0.5s;"></div>
+        
+        <div class="info-card">
+            <h3>⚠️ Status e Erros</h3>
+            <div id="errors" style="color: #4CAF50;">Sistema funcionando</div>
         </div>
-        <div id="progress-text">0% da meta diária</div>
     </div>
     
     <script>
-        function update() {
+        console.log('🚀 Dashboard carregado!');
+        
+        function updateData() {
+            console.log('📡 Atualizando dados...');
+            
             fetch('/api/data')
-                .then(r => r.json())
+                .then(response => {
+                    console.log('📡 Resposta recebida:', response.status);
+                    return response.json();
+                })
                 .then(data => {
-                    // Métricas básicas
+                    console.log('📊 Dados:', data);
+                    
+                    // Atualizar métricas
                     document.getElementById('trades').textContent = data.trades || 0;
                     document.getElementById('balance').textContent = '$' + (data.balance || 0).toFixed(4);
                     document.getElementById('price').textContent = '$' + (data.price || 0).toFixed(2);
@@ -247,15 +437,17 @@ def index():
                     const winRate = data.total_trades > 0 ? ((data.profitable_trades / data.total_trades) * 100) : 0;
                     document.getElementById('win-rate').textContent = winRate.toFixed(1) + '%';
                     
-                    // Status
+                    // Status com classes CSS
                     const statusEl = document.getElementById('status');
                     statusEl.textContent = data.status || 'PARADO';
+                    statusEl.className = 'status-indicator';
+                    
                     if (data.status === 'RODANDO') {
-                        statusEl.style.color = '#4CAF50';
+                        statusEl.classList.add('status-running');
                     } else if (data.status === 'PAUSADO') {
-                        statusEl.style.color = '#ff9800';
+                        statusEl.classList.add('status-paused');
                     } else {
-                        statusEl.style.color = '#f44336';
+                        statusEl.classList.add('status-stopped');
                     }
                     
                     // Análise e previsão
@@ -271,7 +463,7 @@ def index():
                     document.getElementById('progress-text').textContent = progress.toFixed(1) + '% da meta diária';
                     
                     document.getElementById('info').textContent = data.info || 'Sistema ativo';
-                    document.getElementById('debug').textContent = 'Atualizado: ' + new Date().toLocaleTimeString();
+                    document.getElementById('debug').textContent = 'Última atualização: ' + new Date().toLocaleTimeString();
                     
                     // Erros
                     const errorEl = document.getElementById('errors');
@@ -283,35 +475,83 @@ def index():
                         errorEl.style.color = '#4CAF50';
                     }
                 })
-                .catch(e => {
-                    console.error('Erro:', e);
-                    document.getElementById('errors').textContent = '❌ ERRO DE CONEXÃO: ' + e.message;
+                .catch(error => {
+                    console.error('❌ Erro na requisição:', error);
+                    document.getElementById('errors').textContent = '❌ ERRO DE CONEXÃO: ' + error.message;
+                    document.getElementById('errors').style.color = '#ff6b6b';
                 });
         }
         
-        function start() {
-            fetch('/api/start', {method: 'POST'})
-                .then(r => r.json())
-                .then(data => console.log('Bot iniciado:', data))
-                .then(() => setTimeout(update, 1000));
+        function startBot() {
+            console.log('🚀 Iniciando bot...');
+            document.getElementById('startBtn').disabled = true;
+            
+            fetch('/api/start', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('✅ Resposta start:', data);
+                document.getElementById('startBtn').disabled = false;
+                setTimeout(updateData, 1000);
+            })
+            .catch(error => {
+                console.error('❌ Erro ao iniciar:', error);
+                document.getElementById('startBtn').disabled = false;
+            });
         }
         
-        function pause() {
-            fetch('/api/pause', {method: 'POST'})
-                .then(r => r.json())
-                .then(data => console.log('Bot pausado:', data))
-                .then(() => setTimeout(update, 1000));
+        function pauseBot() {
+            console.log('⏸️ Pausando bot...');
+            document.getElementById('pauseBtn').disabled = true;
+            
+            fetch('/api/pause', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('⏸️ Resposta pause:', data);
+                document.getElementById('pauseBtn').disabled = false;
+                setTimeout(updateData, 1000);
+            })
+            .catch(error => {
+                console.error('❌ Erro ao pausar:', error);
+                document.getElementById('pauseBtn').disabled = false;
+            });
         }
         
-        function stop() {
-            fetch('/api/stop', {method: 'POST'})
-                .then(r => r.json())
-                .then(data => console.log('Bot parado:', data))
-                .then(() => setTimeout(update, 1000));
+        function stopBot() {
+            console.log('🛑 Parando bot...');
+            document.getElementById('stopBtn').disabled = true;
+            
+            fetch('/api/stop', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('🛑 Resposta stop:', data);
+                document.getElementById('stopBtn').disabled = false;
+                setTimeout(updateData, 1000);
+            })
+            .catch(error => {
+                console.error('❌ Erro ao parar:', error);
+                document.getElementById('stopBtn').disabled = false;
+            });
         }
         
-        update();
-        setInterval(update, 3000); // A cada 3 segundos
+        // Inicializar
+        console.log('🔄 Iniciando atualizações automáticas...');
+        updateData();
+        setInterval(updateData, 3000);
     </script>
 </body>
 </html>
