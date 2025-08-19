@@ -17,8 +17,9 @@ try:
         passphrase=config.get('BITGET_PASSPHRASE')
     )
     API_CONNECTED = True
+    print("✅ BitgetAPI inicializada com sucesso")
 except Exception as e:
-    print(f"Erro na API: {e}")
+    print(f"❌ Erro na API: {e}")
     bitget_api = None
     API_CONNECTED = False
 
@@ -74,22 +75,32 @@ def index():
     <div style="background: #333; padding: 20px; margin: 10px 0; border-radius: 8px;">
         <h3>Sistema</h3>
         <div id="info">Carregando...</div>
+        <div id="debug" style="font-size: 0.8em; margin-top: 10px; color: #888;"></div>
     </div>
     
     <script>
+        let requestCount = 0;
+        
         function update() {
+            requestCount++;
+            console.log('Fazendo requisição #' + requestCount);
+            
             fetch('/api/data')
                 .then(r => r.json())
                 .then(data => {
+                    console.log('Dados recebidos:', data);
+                    
                     document.getElementById('trades').textContent = data.trades || 0;
                     document.getElementById('balance').textContent = '$' + (data.balance || 0).toFixed(4);
                     document.getElementById('price').textContent = '$' + (data.price || 0).toFixed(2);
                     document.getElementById('status').textContent = data.status || 'PARADO';
                     document.getElementById('info').textContent = data.info || 'Conectado';
+                    document.getElementById('debug').textContent = 'Req #' + requestCount + ' - ' + new Date().toLocaleTimeString();
                 })
                 .catch(e => {
-                    console.error(e);
+                    console.error('Erro na requisição:', e);
                     document.getElementById('info').textContent = 'Erro: ' + e.message;
+                    document.getElementById('debug').textContent = 'ERRO Req #' + requestCount + ' - ' + e.message;
                 });
         }
         
@@ -114,22 +125,41 @@ def index():
 def get_data():
     """Endpoint único para todos os dados"""
     try:
+        print("📊 Iniciando coleta de dados...")
+        
         # Pegar saldo
         balance = 0
-        if bitget_api:
+        if bitget_api and API_CONNECTED:
             try:
+                print("💰 Buscando saldo...")
                 balance_info = bitget_api.get_balance()
-                balance = balance_info.get('free', 0) if balance_info else 0
-            except:
+                print(f"💰 Balance info: {balance_info}")
+                if balance_info and isinstance(balance_info, dict):
+                    balance = balance_info.get('free', 0)
+                    print(f"💰 Saldo encontrado: ${balance}")
+                else:
+                    print("⚠️ Balance info vazio ou inválido")
+            except Exception as e:
+                print(f"❌ Erro ao buscar saldo: {e}")
                 balance = 0
+        else:
+            print("⚠️ API não conectada, usando saldo mock")
         
         # Pegar preço
         price = 0
-        if bitget_api:
+        if bitget_api and API_CONNECTED:
             try:
-                price = bitget_api.get_eth_price() or 0
-            except:
+                print("📈 Buscando preço ETH...")
+                price = bitget_api.get_eth_price()
+                print(f"📈 Preço encontrado: ${price}")
+                if not price:
+                    print("⚠️ Preço retornado é None")
+                    price = 0
+            except Exception as e:
+                print(f"❌ Erro ao buscar preço: {e}")
                 price = 0
+        else:
+            print("⚠️ API não conectada, usando preço mock")
         
         # Status do bot
         if bot_state['is_running'] and not bot_state['is_paused']:
@@ -139,15 +169,21 @@ def get_data():
         else:
             status = 'PARADO'
         
-        return {
+        response_data = {
             'trades': bot_state['trades_today'],
             'balance': balance,
             'price': price,
             'status': status,
-            'info': f'Conectado: {API_CONNECTED}, Saldo: ${balance:.4f}, Preço: ${price:.2f}'
+            'info': f'API: {API_CONNECTED}, Saldo: ${balance:.4f}, Preço: ${price:.2f}'
         }
+        
+        print(f"✅ Dados finais: {response_data}")
+        return response_data
+        
     except Exception as e:
-        logger.error(f"Erro em /api/data: {e}")
+        error_msg = f"Erro em /api/data: {e}"
+        print(f"❌ {error_msg}")
+        logger.error(error_msg)
         return {
             'trades': 0,
             'balance': 0,
@@ -178,4 +214,6 @@ def stop():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
+    print(f"🚀 Iniciando servidor na porta {port}")
+    print(f"🔗 API Conectada: {API_CONNECTED}")
     app.run(host='0.0.0.0', port=port, debug=True)
