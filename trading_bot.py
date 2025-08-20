@@ -611,74 +611,102 @@ class TradingBot:
             return False
 
     def _lightning_position_management(self):
-        """Gerenciamento ultra-rápido de posição para maximizar trades"""
+        """Gerenciamento ultra-rápido de posição para maximizar trades - CORRIGIDO"""
         if not self.current_position:
             return
         
         try:
             market_data = self.bitget_api.get_market_data(self.symbol)
+            if not market_data or 'price' not in market_data:
+                logger.error("❌ Sem dados de mercado para gerenciar posição")
+                return
+                
             current_price = float(market_data['price'])
             
             # Calcular P&L e duração
             pnl = self.current_position.calculate_pnl(current_price)
             duration = self.current_position.get_duration()
             
+            # LOG DETALHADO DA POSIÇÃO ATUAL
+            logger.info(f"📊 GERENCIANDO POSIÇÃO:")
+            logger.info(f"   Lado: {self.current_position.side.name}")
+            logger.info(f"   Preço entrada: ${self.current_position.entry_price:.2f}")
+            logger.info(f"   Preço atual: ${current_price:.2f}")
+            logger.info(f"   P&L: {pnl*100:.3f}% (Target: {self.profit_target*100:.1f}%)")
+            logger.info(f"   Duração: {duration:.1f}s (Max: {self.max_position_time}s)")
+            logger.info(f"   Target Price: ${self.current_position.target_price:.2f}")
+            logger.info(f"   Stop Price: ${self.current_position.stop_price:.2f}")
+            
             should_close = False
             close_reason = ""
             
-            # CRITÉRIOS DE FECHAMENTO ULTRA-AGRESSIVOS PARA MAIS TRADES
+            # CRITÉRIOS DE FECHAMENTO CORRIGIDOS E MAIS SENSÍVEIS
             
-            # 1. Target atingido (0.8%)
+            # 1. TARGET ATINGIDO - Verificação mais precisa
             if pnl >= self.profit_target:
                 should_close = True
-                close_reason = f"Target {self.profit_target*100:.1f}% atingido"
+                close_reason = f"✅ TARGET ATINGIDO: {pnl*100:.3f}% (meta: {self.profit_target*100:.1f}%)"
             
-            # 2. Stop loss
+            # 2. STOP LOSS ATINGIDO - Verificação mais precisa 
             elif pnl <= self.stop_loss_target:
                 should_close = True
-                close_reason = f"Stop loss {abs(self.stop_loss_target)*100:.1f}%"
+                close_reason = f"🛑 STOP LOSS: {pnl*100:.3f}% (limite: {self.stop_loss_target*100:.1f}%)"
             
-            # 3. Tempo máximo (muito reduzido para mais trades!)
+            # 3. MICRO PROFITS - Mais agressivo (0.3% após 20s)
+            elif duration >= 20 and pnl >= 0.003:
+                should_close = True
+                close_reason = f"⚡ MICRO PROFIT: {pnl*100:.3f}% em {duration:.0f}s"
+            
+            # 4. BREAK-EVEN RÁPIDO (após 30s)
+            elif duration >= 30 and pnl >= -0.001:
+                should_close = True
+                close_reason = f"🟰 BREAK-EVEN: {pnl*100:.3f}% em {duration:.0f}s"
+            
+            # 5. QUALQUER PROFIT após 45s
+            elif duration >= 45 and pnl > 0.0005:
+                should_close = True
+                close_reason = f"💰 PROFIT RÁPIDO: {pnl*100:.3f}% em {duration:.0f}s"
+            
+            # 6. TEMPO MÁXIMO - Sempre fechar
             elif duration >= self.max_position_time:
                 should_close = True
-                if pnl > 0:
-                    close_reason = f"Tempo máximo com lucro: {pnl*100:.2f}%"
-                else:
-                    close_reason = f"Tempo máximo - cortar perda: {pnl*100:.2f}%"
+                close_reason = f"⏰ TEMPO MÁXIMO: {pnl*100:.3f}% em {duration:.0f}s"
             
-            # 4. Micro profit rápido (0.4% após 30s)
-            elif duration >= 30 and pnl >= 0.004:
+            # 7. TRAILING STOP mais sensível
+            elif pnl >= 0.004 and self._check_simple_trailing_stop(current_price, pnl):
                 should_close = True
-                close_reason = f"Micro profit rápido: {pnl*100:.2f}%"
+                close_reason = f"📉 TRAILING STOP: {pnl*100:.3f}%"
             
-            # 5. Break-even após 45s
-            elif duration >= 45 and -0.002 <= pnl <= 0.002:
+            # 8. REVERSÃO detectada
+            elif pnl >= 0.002 and self._detect_simple_reversal():
                 should_close = True
-                close_reason = f"Break-even rápido: {pnl*100:.2f}%"
+                close_reason = f"🔄 REVERSÃO: {pnl*100:.3f}%"
             
-            # 6. Qualquer lucro após 60s
-            elif duration >= 60 and pnl > 0.001:
+            # 9. GRANDE PERDA - Cortar rápido
+            elif pnl <= -0.008:  # Perda de 0.8%
                 should_close = True
-                close_reason = f"Qualquer lucro após 1min: {pnl*100:.2f}%"
-            
-            # 7. Trailing stop agressivo
-            elif pnl >= 0.005 and self._check_simple_trailing_stop(current_price, pnl):
-                should_close = True
-                close_reason = f"Trailing stop: {pnl*100:.2f}%"
-            
-            # 8. Reversão de momentum
-            elif pnl >= 0.003 and self._detect_simple_reversal():
-                should_close = True
-                close_reason = f"Reversão detectada: {pnl*100:.2f}%"
+                close_reason = f"🚨 CORTAR PERDA: {pnl*100:.3f}%"
             
             if should_close:
-                self._close_position_fast(close_reason, pnl)
+                logger.warning(f"🔔 CRITÉRIO ATINGIDO: {close_reason}")
+                success = self._close_position_fast(close_reason, pnl)
+                if not success:
+                    logger.error("❌ Falha ao fechar posição - tentando novamente...")
+                    # Tentar fechar novamente após pequeno delay
+                    time.sleep(0.5)
+                    self._force_close_position(close_reason, pnl)
+            else:
+                # Log periódico para acompanhar
+                if int(duration) % 10 == 0:  # A cada 10 segundos
+                    logger.info(f"⏳ Posição ativa: P&L={pnl*100:.3f}% | Duração={duration:.0f}s")
                 
         except Exception as e:
             logger.error(f"❌ Erro no gerenciamento de posição: {e}")
-            # Em caso de erro, fechar posição para evitar travamento
+            traceback.print_exc()
+            # FORÇAR fechamento em caso de erro
             if self.current_position and self.current_position.get_duration() > 120:
-                self._close_position_fast("Erro - fechamento de segurança", 0)
+                logger.warning("🚨 Forçando fechamento por erro prolongado")
+                self._force_close_position("Erro - fechamento forçado", 0)
 
     def _check_simple_trailing_stop(self, current_price: float, pnl: float) -> bool:
         """Trailing stop simples"""
@@ -714,60 +742,237 @@ class TradingBot:
         except:
             return False
 
-    def _close_position_fast(self, reason: str, pnl: float):
-        """Fecha posição rapidamente"""
+    def _close_position_fast(self, reason: str, pnl: float) -> bool:
+        """Fecha posição rapidamente - VERSÃO CORRIGIDA E MELHORADA"""
         try:
-            logger.info(f"⚡ FECHANDO: {reason}")
-            logger.info(f"   P&L: {pnl*100:.2f}%")
+            if not self.current_position:
+                logger.warning("⚠️  Tentativa de fechar posição inexistente")
+                return False
+                
+            logger.info(f"⚡ INICIANDO FECHAMENTO: {reason}")
+            logger.info(f"   P&L: {pnl*100:.3f}%")
             logger.info(f"   Duração: {self.current_position.get_duration():.1f}s")
+            logger.info(f"   Lado: {self.current_position.side.name}")
+            logger.info(f"   Tamanho: {self.current_position.size:.6f}")
             
-            # Executar fechamento
-            if not self.paper_trading:
+            # EXECUTAR FECHAMENTO REAL
+            close_success = False
+            
+            if self.paper_trading:
+                # PAPER TRADING - sempre sucesso
+                logger.info("📝 PAPER TRADING - Fechamento simulado")
+                close_success = True
+                
+            else:
+                # TRADING REAL - Executar ordem de fechamento
+                logger.info("💰 TRADING REAL - Executando fechamento...")
+                
                 try:
                     if self.current_position.side == TradeDirection.LONG:
+                        # Fechar posição LONG = VENDER
+                        logger.info("   📤 Executando VENDA para fechar LONG...")
                         result = self.bitget_api.place_sell_order()
-                        logger.info(f"   Resultado venda: {result}")
+                        
+                        if result and result.get('success'):
+                            logger.info(f"   ✅ VENDA EXECUTADA: {result}")
+                            close_success = True
+                        else:
+                            logger.error(f"   ❌ FALHA NA VENDA: {result}")
+                            # Tentar método alternativo
+                            logger.info("   🔄 Tentando método alternativo...")
+                            alt_result = self._alternative_close_method()
+                            close_success = alt_result
+                            
+                    else:  # SHORT
+                        # Fechar posição SHORT = COMPRAR
+                        logger.info("   📥 Executando COMPRA para fechar SHORT...")
+                        result = self.bitget_api.place_buy_order()
+                        
+                        if result and result.get('success'):
+                            logger.info(f"   ✅ COMPRA EXECUTADA: {result}")
+                            close_success = True
+                        else:
+                            logger.error(f"   ❌ FALHA NA COMPRA: {result}")
+                            close_success = False
+                    
                 except Exception as e:
-                    logger.error(f"❌ Erro ao fechar posição real: {e}")
+                    logger.error(f"   ❌ ERRO na execução de fechamento: {e}")
+                    traceback.print_exc()
+                    # Tentar método de emergência
+                    close_success = self._emergency_close_method()
             
-            # Atualizar métricas
-            with self._lock:
-                self.metrics.total_trades += 1
-                self.metrics.total_profit += pnl
+            # PROCESSAR RESULTADO
+            if close_success:
+                logger.info("✅ POSIÇÃO FECHADA COM SUCESSO!")
                 
-                if pnl > 0:
-                    self.metrics.profitable_trades += 1
-                    self.metrics.consecutive_wins += 1
-                    self.metrics.max_consecutive_wins = max(
-                        self.metrics.max_consecutive_wins, 
-                        self.metrics.consecutive_wins
-                    )
+                # ATUALIZAR MÉTRICAS
+                with self._lock:
+                    self.metrics.total_trades += 1
+                    self.metrics.total_profit += pnl
+                    
+                    if pnl > 0:
+                        self.metrics.profitable_trades += 1
+                        self.metrics.consecutive_wins += 1
+                        self.metrics.max_consecutive_wins = max(
+                            self.metrics.max_consecutive_wins, 
+                            self.metrics.consecutive_wins
+                        )
+                        logger.info(f"💰 TRADE LUCRATIVO: +{pnl*100:.3f}%")
+                    else:
+                        self.metrics.consecutive_wins = 0
+                        logger.info(f"📉 TRADE COM PERDA: {pnl*100:.3f}%")
+                    
+                    # Atualizar duração média
+                    if self.metrics.total_trades > 0:
+                        total_duration = (self.metrics.average_trade_duration * (self.metrics.total_trades - 1) + 
+                                        self.current_position.get_duration())
+                        self.metrics.average_trade_duration = total_duration / self.metrics.total_trades
+                
+                # LIMPAR POSIÇÃO
+                position_duration = self.current_position.get_duration()
+                self.current_position = None
+                
+                # Reset trailing stop
+                if hasattr(self, '_max_pnl_reached'):
+                    delattr(self, '_max_pnl_reached')
+                
+                # LOG DE PERFORMANCE ATUALIZADA
+                logger.info(f"📊 PERFORMANCE ATUALIZADA:")
+                logger.info(f"   📈 Total trades: {self.metrics.total_trades}")
+                logger.info(f"   🎯 Win rate: {self.metrics.win_rate:.1f}%")
+                logger.info(f"   💵 Profit total: {self.metrics.total_profit*100:.3f}%")
+                logger.info(f"   🔥 Consecutive wins: {self.metrics.consecutive_wins}")
+                logger.info(f"   ⏱️  Duração média: {self.metrics.average_trade_duration:.1f}s")
+                
+                # PREPARAR PARA PRÓXIMO TRADE
+                self.last_trade_time = time.time()
+                logger.info(f"⏰ Próximo trade pode ser executado imediatamente")
+                
+                return True
+                
+            else:
+                logger.error("❌ FALHA AO FECHAR POSIÇÃO!")
+                logger.error(f"   Motivo: {reason}")
+                logger.error(f"   P&L não realizado: {pnl*100:.3f}%")
+                
+                # EM CASO DE FALHA CRÍTICA, MARCAR PARA RETRY
+                if hasattr(self, '_close_retries'):
+                    self._close_retries += 1
                 else:
-                    self.metrics.consecutive_wins = 0
+                    self._close_retries = 1
                 
-                # Atualizar duração média
-                if self.metrics.total_trades > 0:
-                    total_duration = (self.metrics.average_trade_duration * (self.metrics.total_trades - 1) + 
-                                    self.current_position.get_duration())
-                    self.metrics.average_trade_duration = total_duration / self.metrics.total_trades
+                # APÓS 3 TENTATIVAS, FORÇAR LIMPEZA
+                if self._close_retries >= 3:
+                    logger.warning("🚨 FORÇANDO LIMPEZA APÓS 3 FALHAS")
+                    self.current_position = None
+                    self._close_retries = 0
+                    return False
+                    
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ ERRO CRÍTICO no fechamento: {e}")
+            traceback.print_exc()
             
-            # Reset trailing stop
-            if hasattr(self, '_max_pnl_reached'):
-                delattr(self, '_max_pnl_reached')
-            
-            # Limpar posição
+            # LIMPEZA DE EMERGÊNCIA
+            logger.warning("🚨 EXECUTANDO LIMPEZA DE EMERGÊNCIA")
             self.current_position = None
+            return False
+
+    def _alternative_close_method(self) -> bool:
+        """Método alternativo para fechar posição"""
+        try:
+            logger.info("🔄 Tentando método alternativo de fechamento...")
             
-            # Log de performance
-            logger.info(f"📊 STATS ATUAIS:")
-            logger.info(f"   Total: {self.metrics.total_trades} trades")
-            logger.info(f"   Win Rate: {self.metrics.win_rate:.1f}%")
-            logger.info(f"   Profit Total: {self.metrics.total_profit*100:.2f}%")
-            logger.info(f"   Consecutive Wins: {self.metrics.consecutive_wins}")
+            # Tentar usar a API diretamente
+            positions = self.bitget_api.get_position_info()
+            if positions and positions.get('position'):
+                pos = positions['position']
+                if abs(pos['size']) > 0:
+                    # Tentar fechar via create_order diretamente
+                    symbol = self.symbol.replace('USDT', '/USDT:USDT')
+                    side = 'sell' if self.current_position.side == TradeDirection.LONG else 'buy'
+                    amount = abs(pos['size'])
+                    
+                    order = self.bitget_api.create_order(
+                        symbol=symbol,
+                        order_type='market',
+                        side=side,
+                        amount=amount
+                    )
+                    
+                    if order:
+                        logger.info(f"✅ Método alternativo funcionou: {order}")
+                        return True
+                        
+            return False
             
         except Exception as e:
-            logger.error(f"❌ Erro ao fechar posição: {e}")
-            # Forçar limpeza da posição em caso de erro
+            logger.error(f"❌ Método alternativo falhou: {e}")
+            return False
+
+    def _emergency_close_method(self) -> bool:
+        """Método de emergência para fechar posição"""
+        try:
+            logger.warning("🚨 MÉTODO DE EMERGÊNCIA para fechamento!")
+            
+            # Última tentativa com parâmetros mínimos
+            if self.current_position.side == TradeDirection.LONG:
+                # Tentar sell com quantidade mínima
+                try:
+                    # Usar quantidade padrão mínima
+                    emergency_result = self.bitget_api.exchange.create_market_sell_order(
+                        'ETHUSDT', 
+                        0.01,  # Quantidade mínima
+                        None, 
+                        {'leverage': self.leverage}
+                    )
+                    
+                    if emergency_result:
+                        logger.warning("⚠️  FECHAMENTO DE EMERGÊNCIA executado")
+                        return True
+                        
+                except Exception as emergency_error:
+                    logger.error(f"❌ Método de emergência falhou: {emergency_error}")
+                    
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Método de emergência com erro crítico: {e}")
+            return False
+
+    def _force_close_position(self, reason: str, pnl: float):
+        """Força fechamento absoluto da posição"""
+        try:
+            logger.warning(f"🚨 FORÇANDO FECHAMENTO ABSOLUTO: {reason}")
+            
+            # Primeiro, tentar o método normal
+            success = self._close_position_fast(reason, pnl)
+            
+            if not success:
+                # Se falhou, forçar limpeza
+                logger.warning("🔥 LIMPEZA FORÇADA - posição será removida")
+                
+                # Salvar dados da posição para métricas
+                if self.current_position:
+                    with self._lock:
+                        self.metrics.total_trades += 1
+                        self.metrics.total_profit += pnl
+                        
+                        if pnl > 0:
+                            self.metrics.profitable_trades += 1
+                        else:
+                            self.metrics.consecutive_wins = 0
+                
+                # FORÇAR limpeza
+                self.current_position = None
+                self.last_trade_time = time.time()
+                
+                logger.warning("⚠️  Posição forçadamente limpa - bot pode continuar")
+                
+        except Exception as e:
+            logger.error(f"❌ Erro no fechamento forçado: {e}")
+            # ÚLTIMO RECURSO
             self.current_position = None
 
     def get_account_balance(self) -> float:
