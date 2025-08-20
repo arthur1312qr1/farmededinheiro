@@ -149,6 +149,12 @@ class TradingBot:
         logger.info(f"   🎯 Target: {self.profit_target*100}% | Stop: {abs(self.stop_loss_target)*100}%")
         logger.info("⚠️  MODO: MÁXIMO LUCRO DIÁRIO - TRADES GARANTIDOS!")
 
+    # ===== PROPRIEDADE CORRIGIDA =====
+    @property
+    def is_running(self) -> bool:
+        """Propriedade para verificar se o bot está rodando"""
+        return self.state == TradingState.RUNNING
+
     def get_status(self) -> Dict:
         """Status melhorado com debug de trades"""
         try:
@@ -166,7 +172,7 @@ class TradingBot:
                 return {
                     'bot_status': {
                         'state': self.state.value,
-                        'is_running': self.state == TradingState.RUNNING,
+                        'is_running': self.is_running,
                         'symbol': self.symbol,
                         'leverage': self.leverage,
                         'paper_trading': self.paper_trading,
