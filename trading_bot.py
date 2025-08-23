@@ -1364,30 +1364,78 @@ class TradingBot:
                 return False
 
     def _execute_short_order_extreme(self, position_size: float) -> Dict:
-        """Executa ordem SHORT extrema"""
+        """Executa ordem SHORT extrema - CORRIGIDO"""
         try:
             logger.info(f"SHORT EXTREMO - {position_size:.6f}")
             
-            order = self.bitget_api.exchange.create_market_sell_order(
-                'ETHUSDT',
-                position_size,
-                None,
-                {'leverage': self.leverage}
-            )
+            # MÉTODO 1: create_market_sell_order CORRIGIDO
+            try:
+                order = self.bitget_api.exchange.create_market_sell_order(
+                    'ETHUSDT',
+                    position_size,
+                    None  # price - para market order sempre None
+                )
+                
+                if order:
+                    # Configurar alavancagem separadamente se necessário
+                    try:
+                        self.bitget_api.exchange.set_leverage(self.leverage, 'ETHUSDT')
+                    except Exception as lev_err:
+                        logger.warning(f"Aviso alavancagem: {lev_err}")
+                    
+                    logger.info(f"SHORT EXTREMO EXECUTADO: {order['id']}")
+                    return {
+                        "success": True,
+                        "order": order,
+                        "quantity": position_size,
+                        "price": order.get('price', 0)
+                    }
+            except Exception as method1_error:
+                logger.warning(f"Método 1 SHORT falhou: {method1_error}")
             
-            if order:
-                logger.info(f"SHORT EXTREMO: {order['id']}")
-                return {
-                    "success": True,
-                    "order": order,
-                    "quantity": position_size,
-                    "price": order.get('price', 0)
-                }
-            else:
-                return {"success": False, "error": "SHORT extremo falhou"}
+            # MÉTODO 2: create_order genérico
+            try:
+                logger.info("Tentando SHORT via create_order...")
+                order = self.bitget_api.exchange.create_order(
+                    symbol='ETHUSDT',
+                    type='market',
+                    side='sell',
+                    quantity=position_size,
+                    price=None,
+                    params={'leverage': self.leverage}
+                )
+                
+                if order:
+                    logger.info(f"SHORT via create_order: {order['id']}")
+                    return {
+                        "success": True,
+                        "order": order,
+                        "quantity": position_size,
+                        "price": order.get('price', 0)
+                    }
+            except Exception as method2_error:
+                logger.error(f"Método 2 SHORT falhou: {method2_error}")
+            
+            # MÉTODO 3: Fallback via API wrapper
+            try:
+                logger.info("Tentando SHORT via wrapper API...")
+                result = self.bitget_api.place_sell_order(profit_target=0)
+                
+                if result and result.get('success'):
+                    logger.info("SHORT via wrapper executado")
+                    return {
+                        "success": True,
+                        "result": result,
+                        "quantity": position_size,
+                        "price": result.get('price', 0)
+                    }
+            except Exception as method3_error:
+                logger.error(f"Método 3 SHORT falhou: {method3_error}")
+            
+            return {"success": False, "error": "Todos os métodos SHORT falharam"}
                 
         except Exception as e:
-            logger.error(f"Erro SHORT extremo: {e}")
+            logger.error(f"Erro crítico SHORT extremo: {e}")
             return {"success": False, "error": str(e)}
 
     def _prevent_multiple_positions(self):
@@ -1840,32 +1888,74 @@ class TradingBot:
             return False
 
     def _close_short_position_guaranteed(self) -> Dict:
-        """Fecha posição SHORT com garantia máxima"""
+        """Fecha posição SHORT com garantia máxima - CORRIGIDO"""
         try:
             logger.info("Fechando SHORT com garantia - Comprando para cobrir...")
             
-            # Método 1: Buy order padrão
-            result = self.bitget_api.place_buy_order()
-            
-            if result and result.get('success'):
-                logger.info(f"SHORT fechado via buy garantido: {result.get('message', '')}")
-                return {"success": True, "result": result}
-            
-            # Método 2: API direta
+            # MÉTODO 1: Via wrapper BitgetAPI
             try:
-                order = self.bitget_api.exchange.create_market_buy_order(
-                    'ETHUSDT', abs(self.current_position.size), None, {'leverage': self.leverage}
-                )
-                if order:
-                    logger.info(f"SHORT fechado via API direta garantida")
-                    return {"success": True, "order": order}
-            except Exception as e:
-                logger.error(f"Método 2 SHORT garantido: {e}")
+                result = self.bitget_api.place_buy_order()
+                if result and result.get('success'):
+                    logger.info(f"SHORT fechado via buy wrapper: {result.get('message', '')}")
+                    return {"success": True, "result": result}
+            except Exception as method1_error:
+                logger.warning(f"Método 1 close SHORT: {method1_error}")
             
-            return {"success": False, "error": "Falha ao fechar SHORT garantido"}
+            # MÉTODO 2: create_market_buy_order CORRIGIDO
+            try:
+                logger.info("Fechando SHORT via market buy...")
+                order = self.bitget_api.exchange.create_market_buy_order(
+                    'ETHUSDT',
+                    abs(self.current_position.size),
+                    None  # price sempre None para market order
+                )
+                
+                if order:
+                    logger.info(f"SHORT fechado via market buy: {order['id']}")
+                    return {"success": True, "order": order}
+                    
+            except Exception as method2_error:
+                logger.warning(f"Método 2 close SHORT: {method2_error}")
+            
+            # MÉTODO 3: create_order genérico com reduceOnly
+            try:
+                logger.info("Fechando SHORT via create_order reduce...")
+                order = self.bitget_api.exchange.create_order(
+                    symbol='ETHUSDT',
+                    type='market',
+                    side='buy',
+                    quantity=abs(self.current_position.size),
+                    price=None,
+                    params={'reduceOnly': True}
+                )
+                
+                if order:
+                    logger.info(f"SHORT fechado via reduce-only: {order['id']}")
+                    return {"success": True, "order": order}
+                    
+            except Exception as method3_error:
+                logger.warning(f"Método 3 close SHORT: {method3_error}")
+            
+            # MÉTODO 4: Tentativa direta sem parâmetros extras
+            try:
+                logger.info("Fechando SHORT via método direto...")
+                order = self.bitget_api.exchange.create_market_order(
+                    'ETHUSDT', 
+                    'buy', 
+                    abs(self.current_position.size)
+                )
+                
+                if order:
+                    logger.info(f"SHORT fechado via método direto: {order['id']}")
+                    return {"success": True, "order": order}
+                    
+            except Exception as method4_error:
+                logger.error(f"Método 4 close SHORT: {method4_error}")
+            
+            return {"success": False, "error": "Todos os métodos de fechar SHORT falharam"}
                 
         except Exception as e:
-            logger.error(f"Erro ao fechar SHORT garantido: {e}")
+            logger.error(f"Erro crítico no fechamento SHORT: {e}")
             return {"success": False, "error": str(e)}
 
     def get_account_balance(self) -> float:
