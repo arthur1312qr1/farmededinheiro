@@ -1247,7 +1247,7 @@ def _extreme_market_analysis_with_ml(self) -> Tuple[bool, float, Optional[TradeD
             traceback.print_exc()
             return False, 0.0, None, 0.0, {'error': str(e)}
 
-    def _calculate_extreme_rsi(self, prices: np.array, period: int = 14) -> Tuple[int, float]:
+def _calculate_extreme_rsi(self, prices: np.array, period: int = 14) -> Tuple[int, float]:
         """RSI extremo com detecção precisa"""
         try:
             if len(prices) < period + 1:
@@ -1278,7 +1278,7 @@ def _extreme_market_analysis_with_ml(self) -> Tuple[bool, float, Optional[TradeD
         except Exception as e:
             return 0, 50.0
 
-    def _calculate_extreme_macd(self, prices: np.array) -> int:
+def _calculate_extreme_macd(self, prices: np.array) -> int:
         """MACD extremo com crossover preciso"""
         try:
             if len(prices) < 26:
@@ -1316,7 +1316,7 @@ def _extreme_market_analysis_with_ml(self) -> Tuple[bool, float, Optional[TradeD
         except:
             return 0
 
-    def _ema(self, prices: np.array, period: int) -> float:
+def _ema(self, prices: np.array, period: int) -> float:
         """EMA preciso"""
         if len(prices) < period:
             return np.mean(prices)
@@ -1327,7 +1327,7 @@ def _extreme_market_analysis_with_ml(self) -> Tuple[bool, float, Optional[TradeD
             ema = alpha * price + (1 - alpha) * ema
         return ema
 
-    def _calculate_extreme_bollinger(self, prices: np.array, current_price: float) -> int:
+def _calculate_extreme_bollinger(self, prices: np.array, current_price: float) -> int:
         """Bollinger Bands extremas"""
         try:
             if len(prices) < 20:
@@ -1353,7 +1353,7 @@ def _extreme_market_analysis_with_ml(self) -> Tuple[bool, float, Optional[TradeD
         except:
             return 0
 
-    def _analyze_extreme_volume(self, current_volume: float) -> int:
+def _analyze_extreme_volume(self, current_volume: float) -> int:
         """Análise extrema de volume"""
         try:
             if len(self.volume_history) < 20:
