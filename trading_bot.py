@@ -1580,7 +1580,7 @@ def _execute_extreme_trade_single(self, direction: TradeDirection, confidence: f
                 self.is_entering_position = False
                 return False
 
-    def _execute_short_order_extreme(self, position_size: float) -> Dict:
+def _execute_short_order_extreme(self, position_size: float) -> Dict:
         """Executa ordem SHORT extrema"""
         try:
             logger.info(f"SHORT EXTREMO - {position_size:.6f}")
@@ -1607,7 +1607,7 @@ def _execute_extreme_trade_single(self, direction: TradeDirection, confidence: f
             logger.error(f"Erro SHORT extremo: {e}")
             return {"success": False, "error": str(e)}
 
-    def _check_emergency_conditions(self) -> bool:
+def _check_emergency_conditions(self) -> bool:
         """Verificar condições de emergência extremas"""
         try:
             # Verificar perdas consecutivas
@@ -1636,7 +1636,7 @@ def _execute_extreme_trade_single(self, direction: TradeDirection, confidence: f
             logger.error(f"Erro ao verificar emergência: {e}")
             return True  # Parar por segurança
 
-    def _adjust_for_50_percent_extreme(self):
+def _adjust_for_50_percent_extreme(self):
         """Ajustar parâmetros dinamicamente para garantir 50% diário"""
         try:
             with self._lock:
@@ -1679,7 +1679,7 @@ def _execute_extreme_trade_single(self, direction: TradeDirection, confidence: f
         except Exception as e:
             logger.error(f"Erro no ajuste extremo: {e}")
 
-    def get_account_balance(self) -> float:
+def get_account_balance(self) -> float:
         """Obter saldo da conta com fallback extremo"""
         try:
             balance_info = self.bitget_api.get_balance()
@@ -1698,7 +1698,7 @@ def _execute_extreme_trade_single(self, direction: TradeDirection, confidence: f
             logger.error(f"Erro ao obter saldo: {e}")
             return 1000.0 if self.paper_trading else 100.0
 
-    def emergency_stop(self) -> bool:
+def emergency_stop(self) -> bool:
         """Parada de emergência extrema com fechamento forçado garantido"""
         try:
             logger.warning("PARADA DE EMERGÊNCIA EXTREMA TOTAL")
@@ -1729,7 +1729,7 @@ def _execute_extreme_trade_single(self, direction: TradeDirection, confidence: f
             logger.error(f"Erro na parada de emergência extrema: {e}")
             return False
 
-    def reset_daily_stats(self):
+def reset_daily_stats(self):
         """Reset para novo dia - otimizado para 50% extremo"""
         try:
             logger.info("Reset para NOVO DIA EXTREMO - META 50% LUCRO LÍQUIDO!")
@@ -1772,7 +1772,7 @@ def _execute_extreme_trade_single(self, direction: TradeDirection, confidence: f
         except Exception as e:
             logger.error(f"Erro ao resetar: {e}")
 
-    def get_daily_stats(self) -> Dict:
+def get_daily_stats(self) -> Dict:
         """Estatísticas focadas na meta de 50% diário extremo com lucro líquido"""
         try:
             with self._lock:
@@ -1849,7 +1849,7 @@ def _execute_extreme_trade_single(self, direction: TradeDirection, confidence: f
             logger.error(f"Erro nas estatísticas extremas: {e}")
             return {'error': str(e)}
 
-    def _prevent_multiple_positions(self):
+def _prevent_multiple_positions(self):
         """PREVENIR MÚLTIPLAS POSIÇÕES - GARANTIA ABSOLUTA"""
         try:
             current_time = time.time()
@@ -1941,10 +1941,10 @@ class TradePosition:
     stop_price: float = None
     order_id: str = None
     
-    def get_duration(self) -> float:
+def get_duration(self) -> float:
         return time.time() - self.start_time
     
-    def calculate_pnl(self, current_price: float) -> float:
+def calculate_pnl(self, current_price: float) -> float:
         """Calcula P&L atual"""
         if self.side == TradeDirection.LONG:
             return (current_price - self.entry_price) / self.entry_price
