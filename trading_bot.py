@@ -11,7 +11,7 @@ should_trade, confidence, direction, strength, analysis_details = self._extreme_
                 
                 # FORÃ‡AR TRADE SE MUITO TEMPO SEM TRADING (mais agressivo)
 seconds_since_last = time.time() - self.last_trade_time
-                force_trade = seconds_since_last >= self.force_trade_after_seconds and not self.current_position
+force_trade = seconds_since_last >= self.force_trade_after_seconds and not self.current_position
                 
                 if force_trade:
                     logger.warning(f"FORÃ‡ANDO TRADE EXTREMO - {seconds_since_last:.0f}s sem trade!")
