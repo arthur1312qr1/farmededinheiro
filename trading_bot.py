@@ -43,7 +43,7 @@ def _calculate_macd(self, prices: np.array, fast: int = 12, slow: int = 26, sign
             
         return macd, signal_line
     
-    def _ema(self, prices: np.array, period: int) -> float:
+def _ema(self, prices: np.array, period: int) -> float:
         """EMA preciso"""
         if len(prices) < period:
             return np.mean(prices)
