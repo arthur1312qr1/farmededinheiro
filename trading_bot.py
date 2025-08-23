@@ -54,7 +54,7 @@ def _ema(self, prices: np.array, period: int) -> float:
             ema = alpha * price + (1 - alpha) * ema
         return ema
     
-    def _calculate_bollinger_bands(self, prices: np.array, period: int = 20, std_dev: float = 2) -> Tuple[float, float, float]:
+def _calculate_bollinger_bands(self, prices: np.array, period: int = 20, std_dev: float = 2) -> Tuple[float, float, float]:
         """Bollinger Bands precisas"""
         if len(prices) < period:
             price_mean = np.mean(prices)
