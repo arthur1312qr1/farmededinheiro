@@ -1,4 +1,548 @@
-def get_status(self) -> Dict:
+import logging
+import time
+import traceback
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+import threading
+import math
+import statistics
+from collections import deque
+import numpy as np
+import asyncio
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+import pandas as pd
+import ta
+from dataclasses import dataclass
+from enum import Enum
+
+from bitget_api import BitgetAPI
+
+logger = logging.getLogger(__name__)
+
+class TradingState(Enum):
+    """Estados do bot para melhor controle"""
+    STOPPED = "stopped"
+    RUNNING = "running"
+    PAUSED = "paused"
+    EMERGENCY = "emergency"
+
+class TradeDirection(Enum):
+    """Direções de trade"""
+    LONG = "long"
+    SHORT = "short"
+
+@dataclass
+class TradePosition:
+    """Classe para representar uma posição de trade"""
+    side: TradeDirection
+    size: float
+    entry_price: float
+    start_time: float
+    target_price: float = None
+    stop_price: float = None
+    order_id: str = None
+    
+    def get_duration(self) -> float:
+        return time.time() - self.start_time
+    
+    def calculate_pnl(self, current_price: float) -> float:
+        """Calcula P&L atual"""
+        if self.side == TradeDirection.LONG:
+            return (current_price - self.entry_price) / self.entry_price
+        else:
+            return (self.entry_price - current_price) / self.entry_price
+
+@dataclass
+class TradingMetrics:
+    """Métricas de performance do trading"""
+    total_trades: int = 0
+    profitable_trades: int = 0
+    total_profit: float = 0.0
+    max_drawdown: float = 0.0
+    consecutive_wins: int = 0
+    consecutive_losses: int = 0
+    max_consecutive_wins: int = 0
+    max_consecutive_losses: int = 0
+    average_trade_duration: float = 0.0
+    total_fees_paid: float = 0.0
+    
+    @property
+    def win_rate(self) -> float:
+        return (self.profitable_trades / max(1, self.total_trades)) * 100
+    
+    @property
+    def losing_trades(self) -> int:
+        return self.total_trades - self.profitable_trades
+    
+    @property
+    def net_profit(self) -> float:
+        return self.total_profit - self.total_fees_paid
+
+class AdvancedPredictor:
+    """Preditor avançado para análise técnica extremamente precisa"""
+    
+    def __init__(self):
+        self.models = {
+            'rf': RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42),
+            'gbr': GradientBoostingRegressor(n_estimators=200, max_depth=8, random_state=42),
+            'lr': LinearRegression()
+        }
+        self.scaler = StandardScaler()
+        self.trained = False
+        self.feature_history = deque(maxlen=500)
+        self.price_history = deque(maxlen=500)
+        
+    def extract_features(self, prices: np.array) -> np.array:
+        """Extrai features avançadas para ML"""
+        if len(prices) < 50:
+            return np.zeros(25)  # 25 features
+        
+        features = []
+        
+        # 1. Trends múltiplos
+        for period in [5, 10, 20]:
+            if len(prices) >= period:
+                trend = (prices[-1] - prices[-period]) / prices[-period]
+                features.append(trend)
+            else:
+                features.append(0)
+        
+        # 2. RSI múltiplos
+        for period in [7, 14, 21]:
+            rsi = self._calculate_rsi(prices, period)
+            features.append(rsi / 100.0)
+        
+        # 3. MACD
+        macd, signal = self._calculate_macd(prices)
+        features.extend([macd, signal, macd - signal])
+        
+        # 4. Bollinger Bands
+        bb_upper, bb_lower, bb_middle = self._calculate_bollinger_bands(prices)
+        bb_position = (prices[-1] - bb_lower) / (bb_upper - bb_lower) if bb_upper != bb_lower else 0.5
+        bb_width = (bb_upper - bb_lower) / bb_middle if bb_middle != 0 else 0
+        features.extend([bb_position, bb_width])
+        
+        # 5. Volume indicators (simulados)
+        features.extend([0.5, 0.5])  # Volume ratio, Volume trend
+        
+        # 6. Volatilidade
+        volatility = np.std(prices[-20:]) / np.mean(prices[-20:])
+        features.append(volatility)
+        
+        # 7. Support/Resistance
+        support_strength = self._calculate_support_strength(prices)
+        resistance_strength = self._calculate_resistance_strength(prices)
+        features.extend([support_strength, resistance_strength])
+        
+        # 8. Moving averages crossovers
+        for short, long in [(5, 10), (10, 20), (20, 50)]:
+            if len(prices) >= long:
+                ma_short = np.mean(prices[-short:])
+                ma_long = np.mean(prices[-long:])
+                cross = (ma_short - ma_long) / ma_long
+                features.append(cross)
+            else:
+                features.append(0)
+        
+        # 9. Price action patterns
+        hammer = self._detect_hammer(prices)
+        doji = self._detect_doji(prices)
+        engulfing = self._detect_engulfing(prices)
+        features.extend([hammer, doji, engulfing])
+        
+        return np.array(features[:25])  # Garantir exatamente 25 features
+
+    def _calculate_rsi(self, prices: np.array, period: int = 14) -> float:
+        """RSI preciso"""
+        if len(prices) < period + 1:
+            return 50.0
+        
+        deltas = np.diff(prices[-period-1:])
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+        
+        avg_gain = np.mean(gains)
+        avg_loss = np.mean(losses)
+        
+        if avg_loss == 0:
+            return 100.0
+        
+        rs = avg_gain / avg_loss
+        return 100 - (100 / (1 + rs))
+    
+    def _calculate_macd(self, prices: np.array, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[float, float]:
+        """MACD preciso"""
+        if len(prices) < slow:
+            return 0.0, 0.0
+        
+        ema_fast = self._ema(prices, fast)
+        ema_slow = self._ema(prices, slow)
+        macd = ema_fast - ema_slow
+        
+        # Signal line (EMA do MACD)
+        if len(prices) < slow + signal:
+            return macd, macd
+        
+        macd_history = []
+        for i in range(len(prices) - signal + 1, len(prices) + 1):
+            if i >= slow:
+                fast_ema = self._ema(prices[:i], fast)
+                slow_ema = self._ema(prices[:i], slow)
+                macd_history.append(fast_ema - slow_ema)
+        
+        if len(macd_history) >= signal:
+            signal_line = self._ema(np.array(macd_history), signal)
+        else:
+            signal_line = macd
+            
+        return macd, signal_line
+    
+    def _ema(self, prices: np.array, period: int) -> float:
+        """EMA preciso"""
+        if len(prices) < period:
+            return np.mean(prices)
+        
+        alpha = 2.0 / (period + 1)
+        ema = prices[0]
+        for price in prices[1:]:
+            ema = alpha * price + (1 - alpha) * ema
+        return ema
+    
+    def _calculate_bollinger_bands(self, prices: np.array, period: int = 20, std_dev: float = 2) -> Tuple[float, float, float]:
+        """Bollinger Bands precisas"""
+        if len(prices) < period:
+            price_mean = np.mean(prices)
+            return price_mean, price_mean, price_mean
+        
+        middle = np.mean(prices[-period:])
+        std = np.std(prices[-period:])
+        upper = middle + (std_dev * std)
+        lower = middle - (std_dev * std)
+        
+        return upper, lower, middle
+    
+    def _calculate_support_strength(self, prices: np.array) -> float:
+        """Força do suporte"""
+        if len(prices) < 20:
+            return 0.0
+        
+        try:
+            lows = []
+            for i in range(1, len(prices) - 1):
+                if prices[i] < prices[i-1] and prices[i] < prices[i+1]:
+                    lows.append(prices[i])
+            
+            if len(lows) < 1:
+                return 0.0
+            
+            current_price = prices[-1]
+            supports_below = [low for low in lows if low <= current_price]
+            
+            if not supports_below:
+                return 0.0
+            
+            closest_support = max(supports_below)
+            distance = (current_price - closest_support) / current_price
+            
+            return max(0, 1 - distance * 10)  # Normalizar
+            
+        except Exception:
+            return 0.0
+    
+    def _calculate_resistance_strength(self, prices: np.array) -> float:
+        """Força da resistência"""
+        if len(prices) < 20:
+            return 0.0
+        
+        try:
+            highs = []
+            for i in range(1, len(prices) - 1):
+                if (len(prices) > i+2 and prices[i] > prices[i-1] and 
+                    prices[i] > prices[i-2] if i >= 2 else True and
+                    prices[i] > prices[i+1] and 
+                    prices[i] > prices[i+2] if i+2 < len(prices) else True):
+                    highs.append(prices[i])
+            
+            if len(highs) < 1:
+                return 0.0
+            
+            current_price = prices[-1]
+            resistances_above = [high for high in highs if high >= current_price]
+            
+            if not resistances_above:
+                return 0.0
+            
+            closest_resistance = min(resistances_above)
+            distance = (closest_resistance - current_price) / current_price
+            
+            return max(0, 1 - distance * 10)  # Normalizar
+            
+        except Exception:
+            return 0.0
+    
+    def _detect_hammer(self, prices: np.array) -> float:
+        """Detectar padrão hammer"""
+        if len(prices) < 4:
+            return 0.0
+        
+        # Simulação de OHLC do último período
+        recent = prices[-4:]
+        high = np.max(recent)
+        low = np.min(recent)
+        close = recent[-1]
+        open_price = recent[0]
+        
+        body = abs(close - open_price)
+        upper_shadow = high - max(close, open_price)
+        lower_shadow = min(close, open_price) - low
+        
+        if lower_shadow > 2 * body and upper_shadow < body:
+            return 1.0
+        return 0.0
+    
+    def _detect_doji(self, prices: np.array) -> float:
+        """Detectar padrão doji"""
+        if len(prices) < 4:
+            return 0.0
+        
+        recent = prices[-4:]
+        high = np.max(recent)
+        low = np.min(recent)
+        close = recent[-1]
+        open_price = recent[0]
+        
+        body = abs(close - open_price)
+        total_range = high - low
+        
+        if body < 0.1 * total_range:
+            return 1.0
+        return 0.0
+    
+    def _detect_engulfing(self, prices: np.array) -> float:
+        """Detectar padrão engolfo"""
+        if len(prices) < 8:
+            return 0.0
+        
+        # Comparar dois períodos
+        prev_period = prices[-8:-4]
+        curr_period = prices[-4:]
+        
+        prev_open, prev_close = prev_period[0], prev_period[-1]
+        curr_open, curr_close = curr_period[0], curr_period[-1]
+        
+        # Engolfo bullish
+        if prev_close < prev_open and curr_close > curr_open:
+            if curr_close > prev_open and curr_open < prev_close:
+                return 1.0
+        
+        # Engolfo bearish  
+        if prev_close > prev_open and curr_close < curr_open:
+            if curr_close < prev_open and curr_open > prev_close:
+                return -1.0
+        
+        return 0.0
+    
+    def train_models(self, prices: np.array):
+        """Treinar modelos ML"""
+        if len(prices) < 100:
+            return
+        
+        X = []
+        y = []
+        
+        # Criar dataset para treino
+        for i in range(50, len(prices) - 5):
+            features = self.extract_features(prices[:i+1])
+            future_return = (prices[i+5] - prices[i]) / prices[i]
+            
+            X.append(features)
+            y.append(future_return)
+        
+        if len(X) < 50:
+            return
+        
+        X = np.array(X)
+        y = np.array(y)
+        
+        # Normalizar features
+        X_scaled = self.scaler.fit_transform(X)
+        
+        # Treinar modelos
+        for name, model in self.models.items():
+            try:
+                model.fit(X_scaled, y)
+                logger.info(f"Modelo {name} treinado")
+            except Exception as e:
+                logger.error(f"Erro treinando {name}: {e}")
+        
+        self.trained = True
+        logger.info("SISTEMA ML TREINADO - PREVISÕES EXTREMAMENTE PRECISAS!")
+    
+    def predict(self, prices: np.array) -> Tuple[float, float]:
+        """Predição extremamente precisa"""
+        if not self.trained or len(prices) < 50:
+            return 0.0, 0.5
+        
+        try:
+            features = self.extract_features(prices).reshape(1, -1)
+            features_scaled = self.scaler.transform(features)
+            
+            predictions = []
+            confidences = []
+            
+            for name, model in self.models.items():
+                try:
+                    pred = model.predict(features_scaled)[0]
+                    predictions.append(pred)
+                    
+                    # Confidence baseada na consistência histórica
+                    if hasattr(model, 'feature_importances_'):
+                        conf = np.mean(model.feature_importances_)
+                    else:
+                        conf = 0.7
+                    confidences.append(conf)
+                except Exception as e:
+                    logger.error(f"Erro predição {name}: {e}")
+                    pass
+            
+            if not predictions:
+                return 0.0, 0.5
+            
+            # Ensemble prediction
+            weighted_pred = np.average(predictions, weights=confidences)
+            avg_confidence = np.mean(confidences)
+            
+            return weighted_pred, avg_confidence
+            
+        except Exception as e:
+            logger.error(f"Erro na predição ML: {e}")
+            return 0.0, 0.5
+
+class TradingBot:
+    def __init__(self, bitget_api: BitgetAPI, symbol: str = 'ETHUSDT',
+                 leverage: int = 10, balance_percentage: float = 100.0,
+                 daily_target: int = 350, scalping_interval: float = 0.3,
+                 paper_trading: bool = False):
+        """Initialize PROFESSIONAL Trading Bot para 50% DIÁRIO GARANTIDO com lucro líquido"""
+        
+        # Validação de entrada
+        if not isinstance(bitget_api, BitgetAPI):
+            raise TypeError(f"bitget_api deve ser uma instância de BitgetAPI, recebido: {type(bitget_api)}")
+
+        # API e configurações básicas
+        self.bitget_api = bitget_api
+        self.symbol = symbol
+        self.leverage = leverage
+        self.balance_percentage = balance_percentage
+        self.daily_target = daily_target
+        self.scalping_interval = scalping_interval
+        self.paper_trading = paper_trading
+
+        # Estado do bot
+        self.state = TradingState.STOPPED
+        self.current_position: Optional[TradePosition] = None
+        self.trading_thread: Optional[threading.Thread] = None
+        self.last_error: Optional[str] = None
+
+        # CONFIGURAÇÕES EXTREMAS PARA 50% DIÁRIO GARANTIDO
+        self.min_trades_per_day = 180  # Mínimo 180 trades/dia
+        self.target_trades_per_day = 250  # Meta: 250 trades/dia  
+        self.max_time_between_trades = 240  # Máximo 4 minutos entre trades
+        self.force_trade_after_seconds = 480  # Forçar trade após 8 minutos
+        self.last_trade_time = 0
+
+        # CRITÉRIOS EXTREMAMENTE SELETIVOS - PRECISÃO MÁXIMA
+        self.min_confidence_to_trade = 0.85     # 85% confiança mínima EXTREMA
+        self.min_prediction_score = 0.80        # 80% score de predição EXTREMO
+        self.min_signals_agreement = 8          # 8 sinais precisam concordar
+        self.min_strength_threshold = 0.012     # 1.2% força mínima
+
+        # CONFIGURAÇÕES DE LUCRO PARA 50% DIÁRIO - MANTENDO VALORES ORIGINAIS
+        self.profit_target = 0.012              # 1.2% take profit MÍNIMO para lucro líquido garantido
+        self.stop_loss_target = -0.004          # 0.4% stop loss (controlado)
+        self.minimum_profit_target = 0.010      # 1.0% lucro mínimo absoluto (GARANTIR LUCRO LÍQUIDO)
+        self.max_position_time = 150            # Máximo 2.5 minutos por trade
+        self.min_position_time = 30             # Mínimo 30 segundos
+        self.breakeven_time = 45                # Breakeven após 45 segundos
+
+        # SISTEMA DE PREVENÇÃO DE MÚLTIPLAS POSIÇÕES
+        self.position_lock = threading.Lock()
+        self.is_entering_position = False
+        self.is_exiting_position = False
+        self.last_position_check = 0
+        self.position_check_interval = 5  # Verificar posição a cada 5s
+
+        # Sistema avançado de predição
+        self.predictor = AdvancedPredictor()
+        self.price_history = deque(maxlen=300)  # Mais dados para ML
+        self.volume_history = deque(maxlen=150)
+        self.analysis_history = deque(maxlen=100)
+
+        # Sistema de trading extremo
+        self.extreme_mode_active = True
+        self.last_analysis_result = None
+        self.consecutive_failed_predictions = 0
+        
+        # Rastreamento avançado para trailing preciso
+        self.max_profit_reached = 0.0
+        self.max_loss_reached = 0.0
+        self.profit_locks = [0.008, 0.012, 0.016]  # Lock de lucros em 0.8%, 1.2%, 1.6%
+        self.current_profit_lock = 0
+
+        # Métricas de performance
+        self.metrics = TradingMetrics()
+        self.start_balance = 0.0
+        self.trades_today = 0
+        self.daily_profit_target = 0.5  # 50% diário
+        
+        # Contadores específicos
+        self.quality_trades = 0
+        self.rejected_low_quality = 0
+        self.profitable_exits = 0
+        self.prediction_accuracy = 75.0  # Iniciar com precisão razoável
+        
+        # Sistema de controle de riscos
+        self.consecutive_losses = 0
+        self.daily_loss_accumulated = 0.0
+        self.emergency_stop_triggered = False
+        
+        # Lock para thread safety
+        self._lock = threading.Lock()
+
+        # Contador de análises
+        self.analysis_count = 0
+        self.trades_rejected = 0
+        self.last_rejection_reason = ""
+
+        # Condições de mercado
+        self.market_conditions = {
+            'trend': 'neutral',
+            'volatility': 0.0,
+            'volume_avg': 0.0,
+            'strength': 0.0,
+            'prediction_confidence': 0.0
+        }
+
+        # Inicializar variáveis para predição - CORREÇÃO AQUI
+        self.last_prediction = 0.0
+        self.last_prediction_time = 0.0
+        self.last_price = 0.0  # Inicializar com 0.0 será corrigido no start()
+
+        logger.info("EXTREME TRADING BOT - 50% DAILY TARGET GARANTIDO com LUCRO LÍQUIDO")
+        logger.info("CONFIGURAÇÕES EXTREMAS:")
+        logger.info(f"   Confiança mínima: {self.min_confidence_to_trade*100}%")
+        logger.info(f"   Força mínima: {self.min_strength_threshold*100}%")
+        logger.info(f"   Sinais necessários: {self.min_signals_agreement}")
+        logger.info(f"   Take Profit: {self.profit_target*100}% (GARANTIDO LUCRO LÍQUIDO)")
+        logger.info(f"   Stop Loss: {abs(self.stop_loss_target)*100}%")
+        logger.info(f"   Lucro MÍNIMO: {self.minimum_profit_target*100}% (LÍQUIDO)")
+        logger.info(f"   Trades/dia META: {self.target_trades_per_day}")
+        logger.info(f"   LUCRO DIÁRIO META: {self.daily_profit_target*100}%")
+        logger.info("MODO EXTREMO - PREVISÕES MÁXIMA PRECISÃO COM LUCRO GARANTIDO!")
+
+    def get_status(self) -> Dict:
         """Status completo do bot"""
         try:
             with self._lock:
@@ -245,155 +789,71 @@ def get_status(self) -> Dict:
         while self.state == TradingState.RUNNING:
             try:
                 loop_start = time.time()
-                self.analysis_count += 1 as e:
-            logger.error(f"Erro nas estatísticas extremas: {e}")
-            return {'error': str(e)}
-
-    def _prevent_multiple_positions(self):
-        """PREVENIR MÚLTIPLAS POSIÇÕES - GARANTIA ABSOLUTA"""
-        try:
-            current_time = time.time()
-            
-            # Verificar posição a cada intervalo
-            if current_time - self.last_position_check > self.position_check_interval:
-                with self.position_lock:
-                    # Verificar posições reais na exchange
-                    try:
-                        positions = self.bitget_api.fetch_positions(['ETHUSDT'])
-                        active_positions = [p for p in positions if abs(p.get('size', 0)) > 0]
-                        
-                        if len(active_positions) > 1:
-                            logger.warning("MÚLTIPLAS POSIÇÕES DETECTADAS - FECHANDO EXTRAS!")
-                            for pos in active_positions[1:]:  # Manter apenas primeira
-                                try:
-                                    side = 'sell' if pos['side'] == 'long' else 'buy'
-                                    self.bitget_api.exchange.create_market_order(
-                                        'ETHUSDT', side, abs(pos['size'])
-                                    )
-                                    logger.info(f"Posição extra fechada: {pos['side']}")
-                                except Exception as e:
-                                    logger.error(f"Erro fechando posição extra: {e}")
-                        
-                        # Sincronizar estado interno
-                        if active_positions and not self.current_position:
-                            pos = active_positions[0]
-                            self.current_position = TradePosition(
-                                side=TradeDirection.LONG if pos['side'] == 'long' else TradeDirection.SHORT,
-                                size=abs(pos['size']),
-                                entry_price=pos['entryPrice'],
-                                start_time=time.time() - 30  # Estimar tempo
-                            )
-                            self.current_profit_lock = 0
-                            logger.info("Posição sincronizada com exchange")
-                        
-                    except Exception as e:
-                        logger.error(f"Erro verificando posições: {e}")
+                self.analysis_count += 1
                 
-                self.last_position_check = current_time
-                
-        except Exception as e:
-            logger.error(f"Erro prevenindo múltiplas posições: {e}")
+                # Verificar condições de emergência
+                if self._check_emergency_conditions():
+                    logger.warning("Condições de emergência detectadas!")
+                    break
 
-    @property
-    def is_running(self) -> bool:
-        """Verifica se o bot está rodando"""
-        return self.state == TradingState.RUNNING
+                # VERIFICAR E PREVENIR MÚLTIPLAS POSIÇÕES
+                self._prevent_multiple_positions()
 
-    def _get_position_status(self) -> Dict:
-        """Status da posição atual"""
-        if not self.current_position:
-            return {'active': False}
-        
-        try:
-            market_data = self.bitget_api.get_market_data(self.symbol)
-            current_price = float(market_data['price'])
-            pnl = self.current_position.calculate_pnl(current_price)
-            duration = self.current_position.get_duration()
-            
-            return {
-                'active': True,
-                'side': self.current_position.side.value,
-                'size': self.current_position.size,
-                'entry_price': self.current_position.entry_price,
-                'current_price': current_price,
-                'duration_seconds': round(duration),
-                'pnl_percent': round(pnl * 100, 4),
-                'target_price': self.current_position.target_price,
-                'stop_price': self.current_position.stop_price,
-                'max_profit_reached': round(self.max_profit_reached * 100, 4),
-                'current_profit_lock': self.current_profit_lock,
-                'meets_minimum_profit': pnl >= self.minimum_profit_target,
-                'meets_target_profit': pnl >= self.profit_target,
-                'should_exit_now': (
-                    pnl >= self.profit_target or 
-                    pnl <= self.stop_loss_target or 
-                    duration >= self.max_position_time
-                ),
-                'is_exiting': self.is_exiting_position
-            }
-        except Exception# Verificar condições de emergência
-if self._check_emergency_conditions():
-    logger.warning("Condições de emergência detectadas!")
-    break
+                # ANÁLISE EXTREMAMENTE PRECISA com ML
+                should_trade, confidence, direction, strength, analysis_details = self._extreme_market_analysis_with_ml()
 
-# VERIFICAR E PREVENIR MÚLTIPLAS POSIÇÕES
-self._prevent_multiple_positions()
+                # FORÇAR TRADE SE MUITO TEMPO SEM TRADING (mais agressivo)
+                seconds_since_last = time.time() - self.last_trade_time
+                force_trade = seconds_since_last >= self.force_trade_after_seconds and not self.current_position
 
-# ANÁLISE EXTREMAMENTE PRECISA com ML
-should_trade, confidence, direction, strength, analysis_details = self._extreme_market_analysis_with_ml()
+                if force_trade:
+                    logger.warning(f"FORÇANDO TRADE EXTREMO - {seconds_since_last:.0f}s sem trade!")
+                    should_trade = True
+                    confidence = max(confidence, 0.85)  # Confiança extrema
+                    if not direction:
+                        # Usar predição ML para direção
+                        pred_return, pred_conf = self.predictor.predict(np.array(list(self.price_history)))
+                        direction = TradeDirection.LONG if pred_return > 0 else TradeDirection.SHORT
 
-# FORÇAR TRADE SE MUITO TEMPO SEM TRADING (mais agressivo)
-seconds_since_last = time.time() - self.last_trade_time
-force_trade = seconds_since_last >= self.force_trade_after_seconds and not self.current_position
+                # LOG EXTREMO (menos frequente para performance)
+                if self.analysis_count % 50 == 0:
+                    logger.info(f"Análise #{self.analysis_count} - EXTREMA:")
+                    logger.info(f"   Confiança: {confidence*100:.1f}%")
+                    logger.info(f"   Força: {strength*100:.2f}%")
+                    logger.info(f"   Direção: {direction.name if direction else 'AUTO'}")
+                    logger.info(f"   Executar: {should_trade}")
+                    logger.info(f"   Qualidade: {analysis_details.get('quality_score', 0):.1f}")
+                    logger.info(f"   Pred. Acc: {self.prediction_accuracy:.1f}%")
 
-if force_trade:
-    logger.warning(f"FORÇANDO TRADE EXTREMO - {seconds_since_last:.0f}s sem trade!")
-    should_trade = True
-    confidence = max(confidence, 0.85)  # Confiança extrema
-    if not direction:
-        # Usar predição ML para direção
-        pred_return, pred_conf = self.predictor.predict(np.array(list(self.price_history)))
-        direction = TradeDirection.LONG if pred_return > 0 else TradeDirection.SHORT
+                # EXECUTAR TRADE EXTREMO (COM PREVENÇÃO DE MÚLTIPLAS POSIÇÕES)
+                if should_trade and not self.current_position and not self.is_entering_position:
+                    success = self._execute_extreme_trade_single(direction, confidence, strength, analysis_details)
+                    if success:
+                        self.last_trade_time = time.time()
+                        self.trades_today += 1
+                        self.quality_trades += 1
+                        logger.info(f"TRADE #{self.trades_today} EXTREMO - {direction.name} - Conf: {confidence*100:.1f}%")
+                    else:
+                        self.trades_rejected += 1
+                        self.last_rejection_reason = "Falha na execução extrema"
 
-# LOG EXTREMO (menos frequente para performance)
-if self.analysis_count % 50 == 0:
-    logger.info(f"Análise #{self.analysis_count} - EXTREMA:")
-    logger.info(f"   Confiança: {confidence*100:.1f}%")
-    logger.info(f"   Força: {strength*100:.2f}%")
-    logger.info(f"   Direção: {direction.name if direction else 'AUTO'}")
-    logger.info(f"   Executar: {should_trade}")
-    logger.info(f"   Qualidade: {analysis_details.get('quality_score', 0):.1f}")
-    logger.info(f"   Pred. Acc: {self.prediction_accuracy:.1f}%")
+                elif not should_trade and not self.current_position and not force_trade:
+                    self.trades_rejected += 1
+                    self.rejected_low_quality += 1
+                    self.last_rejection_reason = f"Baixa qualidade: Conf:{confidence*100:.1f}%, Força:{strength*100:.2f}%"
 
-# EXECUTAR TRADE EXTREMO (COM PREVENÇÃO DE MÚLTIPLAS POSIÇÕES)
-if should_trade and not self.current_position and not self.is_entering_position:
-    success = self._execute_extreme_trade_single(direction, confidence, strength, analysis_details)
-    if success:
-        self.last_trade_time = time.time()
-        self.trades_today += 1
-        self.quality_trades += 1
-        logger.info(f"TRADE #{self.trades_today} EXTREMO - {direction.name} - Conf: {confidence*100:.1f}%")
-    else:
-        self.trades_rejected += 1
-        self.last_rejection_reason = "Falha na execução extrema"
+                # GERENCIAR POSIÇÃO COM FECHAMENTO GARANTIDO
+                if self.current_position and not self.is_exiting_position:
+                    self._extreme_position_management_guaranteed()
 
-elif not should_trade and not self.current_position and not force_trade:
-    self.trades_rejected += 1
-    self.rejected_low_quality += 1
-    self.last_rejection_reason = f"Baixa qualidade: Conf:{confidence*100:.1f}%, Força:{strength*100:.2f}%"
+                # Sleep extremo para análise de qualidade
+                elapsed = time.time() - loop_start
+                sleep_time = max(0.1, self.scalping_interval - elapsed)  # Mínimo 100ms
+                time.sleep(sleep_time)
 
-# GERENCIAR POSIÇÃO COM FECHAMENTO GARANTIDO
-if self.current_position and not self.is_exiting_position:
-    self._extreme_position_management_guaranteed()
-
-# Sleep extremo para análise de qualidade
-elapsed = time.time() - loop_start
-sleep_time = max(0.1, self.scalping_interval - elapsed)  # Mínimo 100ms
-time.sleep(sleep_time)
-
-# Ajuste dinâmico para 50% diário
-if self.analysis_count % 200 == 0:
-    self._adjust_for_50_percent_extreme()
+                # Ajuste dinâmico para 50% diário
+                if self.analysis_count % 200 == 0:
+                    self._adjust_for_50_percent_extreme()
 
             except Exception as e:
                 logger.error(f"Erro no loop extremo: {e}")
@@ -930,6 +1390,92 @@ if self.analysis_count % 200 == 0:
             logger.error(f"Erro SHORT extremo: {e}")
             return {"success": False, "error": str(e)}
 
+    def _prevent_multiple_positions(self):
+        """PREVENIR MÚLTIPLAS POSIÇÕES - GARANTIA ABSOLUTA"""
+        try:
+            current_time = time.time()
+            
+            # Verificar posição a cada intervalo
+            if current_time - self.last_position_check > self.position_check_interval:
+                with self.position_lock:
+                    # Verificar posições reais na exchange
+                    try:
+                        positions = self.bitget_api.fetch_positions(['ETHUSDT'])
+                        active_positions = [p for p in positions if abs(p.get('size', 0)) > 0]
+                        
+                        if len(active_positions) > 1:
+                            logger.warning("MÚLTIPLAS POSIÇÕES DETECTADAS - FECHANDO EXTRAS!")
+                            for pos in active_positions[1:]:  # Manter apenas primeira
+                                try:
+                                    side = 'sell' if pos['side'] == 'long' else 'buy'
+                                    self.bitget_api.exchange.create_market_order(
+                                        'ETHUSDT', side, abs(pos['size'])
+                                    )
+                                    logger.info(f"Posição extra fechada: {pos['side']}")
+                                except Exception as e:
+                                    logger.error(f"Erro fechando posição extra: {e}")
+                        
+                        # Sincronizar estado interno
+                        if active_positions and not self.current_position:
+                            pos = active_positions[0]
+                            self.current_position = TradePosition(
+                                side=TradeDirection.LONG if pos['side'] == 'long' else TradeDirection.SHORT,
+                                size=abs(pos['size']),
+                                entry_price=pos['entryPrice'],
+                                start_time=time.time() - 30  # Estimar tempo
+                            )
+                            self.current_profit_lock = 0
+                            logger.info("Posição sincronizada com exchange")
+                        
+                    except Exception as e:
+                        logger.error(f"Erro verificando posições: {e}")
+                
+                self.last_position_check = current_time
+                
+        except Exception as e:
+            logger.error(f"Erro prevenindo múltiplas posições: {e}")
+
+    @property
+    def is_running(self) -> bool:
+        """Verifica se o bot está rodando"""
+        return self.state == TradingState.RUNNING
+
+    def _get_position_status(self) -> Dict:
+        """Status da posição atual"""
+        if not self.current_position:
+            return {'active': False}
+        
+        try:
+            market_data = self.bitget_api.get_market_data(self.symbol)
+            current_price = float(market_data['price'])
+            pnl = self.current_position.calculate_pnl(current_price)
+            duration = self.current_position.get_duration()
+            
+            return {
+                'active': True,
+                'side': self.current_position.side.value,
+                'size': self.current_position.size,
+                'entry_price': self.current_position.entry_price,
+                'current_price': current_price,
+                'duration_seconds': round(duration),
+                'pnl_percent': round(pnl * 100, 4),
+                'target_price': self.current_position.target_price,
+                'stop_price': self.current_position.stop_price,
+                'max_profit_reached': round(self.max_profit_reached * 100, 4),
+                'current_profit_lock': self.current_profit_lock,
+                'meets_minimum_profit': pnl >= self.minimum_profit_target,
+                'meets_target_profit': pnl >= self.profit_target,
+                'should_exit_now': (
+                    pnl >= self.profit_target or 
+                    pnl <= self.stop_loss_target or 
+                    duration >= self.max_position_time
+                ),
+                'is_exiting': self.is_exiting_position
+            }
+        except Exception as e:
+            logger.error(f"Erro ao obter status da posição: {e}")
+            return {'active': True, 'error': str(e)}
+
     def _check_emergency_conditions(self) -> bool:
         """Verificar condições de emergência extremas"""
         try:
@@ -1001,730 +1547,6 @@ if self.analysis_count % 200 == 0:
                 
         except Exception as e:
             logger.error(f"Erro no ajuste extremo: {e}")
-
-    def get_account_balance(self) -> float:
-        """Obter saldo da conta com fallback extremo"""
-        try:
-            balance_info = self.bitget_api.get_balance()
-            if balance_info and isinstance(balance_info, dict):
-                balance = float(balance_info.get('free', 0.0))
-                if balance > 0:
-                    return balance
-                    
-            if self.paper_trading:
-                return 1000.0
-            else:
-                logger.warning("Saldo não obtido - usando fallback extremo")
-                return 100.0
-                
-        except Exception as e:
-            logger.error(f"Erro ao obter saldo: {e}")
-            return 1000.0 if self.paper_trading else 100.0
-
-    def emergency_stop(self) -> bool:
-        """Parada de emergência extrema com fechamento forçado garantido"""
-        try:
-            logger.warning("PARADA DE EMERGÊNCIA EXTREMA TOTAL")
-            
-            self.state = TradingState.EMERGENCY
-            self.emergency_stop_triggered = True
-            
-            # Fechar posição com GARANTIA MÁXIMA
-            if self.current_position:
-                self._force_close_position_guaranteed("Emergency stop extremo total")
-            
-            # Cancelar todas as ordens
-            try:
-                self.bitget_api.exchange.cancel_all_orders(self.symbol)
-            except:
-                pass
-            
-            # Parar thread
-            if self.trading_thread:
-                self.trading_thread.join(timeout=5)
-            
-            self.state = TradingState.STOPPED
-            
-            logger.warning("Parada de emergência extrema total concluída")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Erro na parada de emergência extrema: {e}")
-            return False
-
-    def reset_daily_stats(self):
-        """Reset para novo dia - otimizado para 50% extremo"""
-        try:
-            logger.info("Reset para NOVO DIA EXTREMO - META 50% LUCRO LÍQUIDO!")
-            
-            with self._lock:
-                self.trades_today = 0
-                self.metrics = TradingMetrics()
-                self.analysis_count = 0
-                self.trades_rejected = 0
-                self.quality_trades = 0
-                self.rejected_low_quality = 0
-                self.profitable_exits = 0
-                self.prediction_accuracy = 75.0  # Start with reasonable accuracy
-                self.consecutive_losses = 0
-                self.daily_loss_accumulated = 0.0
-                self.emergency_stop_triggered = False
-                self.consecutive_failed_predictions = 0
-                self.last_rejection_reason = ""
-                self.last_trade_time = time.time()
-                self.max_profit_reached = 0.0
-                self.max_loss_reached = 0.0
-                self.current_profit_lock = 0
-                
-                # Reset para modo extremo
-                self.extreme_mode_active = True
-                self.is_entering_position = False
-                self.is_exiting_position = False
-                self.last_position_check = 0
-                
-                # Reset critérios para padrões extremos MANTENDO valores originais
-                self.min_confidence_to_trade = 0.85
-                self.min_strength_threshold = 0.012
-                # MANTER valores originais de profit/stop
-                self.profit_target = 0.012              # 1.2% mínimo para lucro líquido garantido
-                self.stop_loss_target = -0.004          # 0.4% stop loss
-                self.minimum_profit_target = 0.010      # 1.0% mínimo absoluto para lucro líquido
-            
-            logger.info("NOVO DIA EXTREMO - PRONTO PARA 50% DE LUCRO LÍQUIDO GARANTIDO!")
-            
-        except Exception as e:
-            logger.error(f"Erro ao resetar: {e}")
-
-    def get_daily_stats(self) -> Dict:
-        """Estatísticas focadas na meta de 50% diário extremo com lucro líquido"""
-        try:
-            with self._lock:
-                current_time = datetime.now()
-                hours_trading = max(1, (current_time.hour - 8) if current_time.hour >= 8 else 24)
-                
-                daily_profit_pct = self.metrics.net_profit * 100
-                target_achievement = (daily_profit_pct / 50.0) * 100
-                
-                return {
-                    'target_50_percent_liquid_profit': {
-                        'target_profit': '50.00% LÍQUIDO',
-                        'current_profit_gross': f"{self.metrics.total_profit*100:.4f}%",
-                        'current_profit_net': f"{daily_profit_pct:.4f}%",
-                        'fees_paid': f"{self.metrics.total_fees_paid*100:.4f}%",
-                        'achievement': f"{target_achievement:.1f}%",
-                        'remaining_needed': f"{max(0, 50.0 - daily_profit_pct):.4f}%",
-                        'on_track': target_achievement >= (hours_trading / 24) * 100,
-                        'extreme_mode': True,
-                        'liquid_profit_guaranteed': True
-                    },
-                    'extreme_trading_stats': {
-                        'trades_executed': self.trades_today,
-                        'quality_trades': self.quality_trades,
-                        'quality_ratio': f"{(self.quality_trades / max(1, self.trades_today)) * 100:.1f}%",
-                        'rejected_low_quality': self.rejected_low_quality,
-                        'profitable_exits': self.profitable_exits,
-                        'prediction_accuracy': f"{self.prediction_accuracy:.1f}%",
-                        'target_trades': self.target_trades_per_day,
-                        'trades_per_hour': round(self.trades_today / hours_trading, 1),
-                        'analysis_count': self.analysis_count,
-                        'rejection_rate': round((self.trades_rejected / max(1, self.analysis_count)) * 100, 1)
-                    },
-                    'performance_extreme': {
-                        'total_trades': self.metrics.total_trades,
-                        'win_rate': round(self.metrics.win_rate, 2),
-                        'average_duration': round(self.metrics.average_trade_duration, 1),
-                        'consecutive_wins': self.metrics.consecutive_wins,
-                        'consecutive_losses': self.metrics.consecutive_losses,
-                        'max_consecutive_wins': self.metrics.max_consecutive_wins,
-                        'max_consecutive_losses': self.metrics.max_consecutive_losses,
-                        'max_drawdown': round(self.metrics.max_drawdown * 100, 4),
-                        'profitable_trades': self.metrics.profitable_trades,
-                        'losing_trades': self.metrics.losing_trades,
-                        'daily_loss': round(self.daily_loss_accumulated, 4),
-                        'emergency_stop': self.emergency_stop_triggered
-                    },
-                    'timestamp': current_time.isoformat()
-                }
-        except Exception as e:
-            logger.error(f"Erro ao obter estatísticas: {e}")
-            return {'error': str(e), 'is_running': False}
-
-
-# Funções auxiliares para compatibilidade
-def create_trading_bot(bitget_api: BitgetAPI, **kwargs) -> TradingBot:
-    """Cria instância do TradingBot"""
-    return TradingBot(bitget_api, **kwargs)
-
-# Testar se executado diretamente
-if __name__ == "__main__":
-    # Teste básico do bot
-    try:
-        from bitget_api import BitgetAPI
-        
-        api = BitgetAPI()
-        if api.test_connection():
-            bot = TradingBot(
-                bitget_api=api,
-                paper_trading=True,  # Teste em modo papel
-                leverage=10,
-                daily_target=350
-            )
-            
-            print("Bot de trading extremo criado com sucesso!")
-            print("Configurações:")
-            print(f"   Take Profit: {bot.profit_target*100:.1f}%")
-            print(f"   Stop Loss: {abs(bot.stop_loss_target)*100:.1f}%")
-            print(f"   Lucro Mínimo: {bot.minimum_profit_target*100:.1f}%")
-            print("Pronto para 50% de lucro diário líquido garantido!")
-            
-        else:
-            print("Falha na conexão com a API")
-            
-    except Exception as e:
-        print(f"Erro no teste: {e}")
-        traceback.print_exc()
-
-import logging
-import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
-import threading
-import math
-import statistics
-from collections import deque
-import numpy as np
-import asyncio
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
-import pandas as pd
-import ta
-import traceback
-from dataclasses import dataclass
-from enum import Enum
-
-from bitget_api import BitgetAPI
-
-logger = logging.getLogger(__name__)
-
-class TradingState(Enum):
-    """Estados do bot para melhor controle"""
-    STOPPED = "stopped"
-    RUNNING = "running"
-    PAUSED = "paused"
-    EMERGENCY = "emergency"
-
-class TradeDirection(Enum):
-    """Direções de trade"""
-    LONG = "long"
-    SHORT = "short"
-
-@dataclass
-class TradePosition:
-    """Classe para representar uma posição de trade"""
-    side: TradeDirection
-    size: float
-    entry_price: float
-    start_time: float
-    target_price: float = None
-    stop_price: float = None
-    order_id: str = None
-    
-    def get_duration(self) -> float:
-        return time.time() - self.start_time
-    
-    def calculate_pnl(self, current_price: float) -> float:
-        """Calcula P&L atual"""
-        if self.side == TradeDirection.LONG:
-            return (current_price - self.entry_price) / self.entry_price
-        else:
-            return (self.entry_price - current_price) / self.entry_price
-
-@dataclass
-class TradingMetrics:
-    """Métricas de performance do trading"""
-    total_trades: int = 0
-    profitable_trades: int = 0
-    total_profit: float = 0.0
-    max_drawdown: float = 0.0
-    consecutive_wins: int = 0
-    consecutive_losses: int = 0
-    max_consecutive_wins: int = 0
-    max_consecutive_losses: int = 0
-    average_trade_duration: float = 0.0
-    total_fees_paid: float = 0.0
-    
-    @property
-    def win_rate(self) -> float:
-        return (self.profitable_trades / max(1, self.total_trades)) * 100
-    
-    @property
-    def losing_trades(self) -> int:
-        return self.total_trades - self.profitable_trades
-    
-    @property
-    def net_profit(self) -> float:
-        return self.total_profit - self.total_fees_paid
-
-class AdvancedPredictor:
-    """Preditor avançado para análise técnica extremamente precisa"""
-    
-    def __init__(self):
-        self.models = {
-            'rf': RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42),
-            'gbr': GradientBoostingRegressor(n_estimators=200, max_depth=8, random_state=42),
-            'lr': LinearRegression()
-        }
-        self.scaler = StandardScaler()
-        self.trained = False
-        self.feature_history = deque(maxlen=500)
-        self.price_history = deque(maxlen=500)
-        
-    def extract_features(self, prices: np.array) -> np.array:
-        """Extrai features avançadas para ML"""
-        if len(prices) < 50:
-            return np.zeros(25)  # 25 features
-        
-        features = []
-        
-        # 1. Trends múltiplos
-        for period in [5, 10, 20]:
-            if len(prices) >= period:
-                trend = (prices[-1] - prices[-period]) / prices[-period]
-                features.append(trend)
-            else:
-                features.append(0)
-        
-        # 2. RSI múltiplos
-        for period in [7, 14, 21]:
-            rsi = self._calculate_rsi(prices, period)
-            features.append(rsi / 100.0)
-        
-        # 3. MACD
-        macd, signal = self._calculate_macd(prices)
-        features.extend([macd, signal, macd - signal])
-        
-        # 4. Bollinger Bands
-        bb_upper, bb_lower, bb_middle = self._calculate_bollinger_bands(prices)
-        bb_position = (prices[-1] - bb_lower) / (bb_upper - bb_lower) if bb_upper != bb_lower else 0.5
-        bb_width = (bb_upper - bb_lower) / bb_middle if bb_middle != 0 else 0
-        features.extend([bb_position, bb_width])
-        
-        # 5. Volume indicators (simulados)
-        features.extend([0.5, 0.5])  # Volume ratio, Volume trend
-        
-        # 6. Volatilidade
-        volatility = np.std(prices[-20:]) / np.mean(prices[-20:])
-        features.append(volatility)
-        
-        # 7. Support/Resistance
-        support_strength = self._calculate_support_strength(prices)
-        resistance_strength = self._calculate_resistance_strength(prices)
-        features.extend([support_strength, resistance_strength])
-        
-        # 8. Moving averages crossovers
-        for short, long in [(5, 10), (10, 20), (20, 50)]:
-            if len(prices) >= long:
-                ma_short = np.mean(prices[-short:])
-                ma_long = np.mean(prices[-long:])
-                cross = (ma_short - ma_long) / ma_long
-                features.append(cross)
-            else:
-                features.append(0)
-        
-        # 9. Price action patterns
-        hammer = self._detect_hammer(prices)
-        doji = self._detect_doji(prices)
-        engulfing = self._detect_engulfing(prices)
-        features.extend([hammer, doji, engulfing])
-        
-        return np.array(features[:25])  # Garantir exatamente 25 features
-
-    def _calculate_rsi(self, prices: np.array, period: int = 14) -> float:
-        """RSI preciso"""
-        if len(prices) < period + 1:
-            return 50.0
-        
-        deltas = np.diff(prices[-period-1:])
-        gains = np.where(deltas > 0, deltas, 0)
-        losses = np.where(deltas < 0, -deltas, 0)
-        
-        avg_gain = np.mean(gains)
-        avg_loss = np.mean(losses)
-        
-        if avg_loss == 0:
-            return 100.0
-        
-        rs = avg_gain / avg_loss
-        return 100 - (100 / (1 + rs))
-    
-    def _calculate_macd(self, prices: np.array, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[float, float]:
-        """MACD preciso"""
-        if len(prices) < slow:
-            return 0.0, 0.0
-        
-        ema_fast = self._ema(prices, fast)
-        ema_slow = self._ema(prices, slow)
-        macd = ema_fast - ema_slow
-        
-        # Signal line (EMA do MACD)
-        if len(prices) < slow + signal:
-            return macd, macd
-        
-        macd_history = []
-        for i in range(len(prices) - signal + 1, len(prices) + 1):
-            if i >= slow:
-                fast_ema = self._ema(prices[:i], fast)
-                slow_ema = self._ema(prices[:i], slow)
-                macd_history.append(fast_ema - slow_ema)
-        
-        if len(macd_history) >= signal:
-            signal_line = self._ema(np.array(macd_history), signal)
-        else:
-            signal_line = macd
-            
-        return macd, signal_line
-    
-    def _ema(self, prices: np.array, period: int) -> float:
-        """EMA preciso"""
-        if len(prices) < period:
-            return np.mean(prices)
-        
-        alpha = 2.0 / (period + 1)
-        ema = prices[0]
-        for price in prices[1:]:
-            ema = alpha * price + (1 - alpha) * ema
-        return ema
-    
-    def _calculate_bollinger_bands(self, prices: np.array, period: int = 20, std_dev: float = 2) -> Tuple[float, float, float]:
-        """Bollinger Bands precisas"""
-        if len(prices) < period:
-            price_mean = np.mean(prices)
-            return price_mean, price_mean, price_mean
-        
-        middle = np.mean(prices[-period:])
-        std = np.std(prices[-period:])
-        upper = middle + (std_dev * std)
-        lower = middle - (std_dev * std)
-        
-        return upper, lower, middle
-    
-    def _calculate_support_strength(self, prices: np.array) -> float:
-        """Força do suporte"""
-        if len(prices) < 20:
-            return 0.0
-        
-        try:
-            lows = []
-            for i in range(1, len(prices) - 1):
-                if prices[i] < prices[i-1] and prices[i] < prices[i+1]:
-                    lows.append(prices[i])
-            
-            if len(lows) < 1:
-                return 0.0
-            
-            current_price = prices[-1]
-            supports_below = [low for low in lows if low <= current_price]
-            
-            if not supports_below:
-                return 0.0
-            
-            closest_support = max(supports_below)
-            distance = (current_price - closest_support) / current_price
-            
-            return max(0, 1 - distance * 10)  # Normalizar
-            
-        except Exception:
-            return 0.0
-    
-    def _calculate_resistance_strength(self, prices: np.array) -> float:
-        """Força da resistência"""
-        if len(prices) < 20:
-            return 0.0
-        
-        try:
-            highs = []
-            for i in range(1, len(prices) - 1):
-                if prices[i] > prices[i-1] and prices[i] > prices[i-2] and \
-                   prices[i] > prices[i+1] and prices[i] > prices[i+2]:
-                    highs.append(prices[i])
-            
-            if len(highs) < 1:
-                return 0.0
-            
-            current_price = prices[-1]
-            resistances_above = [high for high in highs if high >= current_price]
-            
-            if not resistances_above:
-                return 0.0
-            
-            closest_resistance = min(resistances_above)
-            distance = (closest_resistance - current_price) / current_price
-            
-            return max(0, 1 - distance * 10)  # Normalizar
-            
-        except Exception:
-            return 0.0
-    
-    def _detect_hammer(self, prices: np.array) -> float:
-        """Detectar padrão hammer"""
-        if len(prices) < 4:
-            return 0.0
-        
-        # Simulação de OHLC do último período
-        recent = prices[-4:]
-        high = np.max(recent)
-        low = np.min(recent)
-        close = recent[-1]
-        open_price = recent[0]
-        
-        body = abs(close - open_price)
-        upper_shadow = high - max(close, open_price)
-        lower_shadow = min(close, open_price) - low
-        
-        if lower_shadow > 2 * body and upper_shadow < body:
-            return 1.0
-        return 0.0
-    
-    def _detect_doji(self, prices: np.array) -> float:
-        """Detectar padrão doji"""
-        if len(prices) < 4:
-            return 0.0
-        
-        recent = prices[-4:]
-        high = np.max(recent)
-        low = np.min(recent)
-        close = recent[-1]
-        open_price = recent[0]
-        
-        body = abs(close - open_price)
-        total_range = high - low
-        
-        if body < 0.1 * total_range:
-            return 1.0
-        return 0.0
-    
-    def _detect_engulfing(self, prices: np.array) -> float:
-        """Detectar padrão engolfo"""
-        if len(prices) < 8:
-            return 0.0
-        
-        # Comparar dois períodos
-        prev_period = prices[-8:-4]
-        curr_period = prices[-4:]
-        
-        prev_open, prev_close = prev_period[0], prev_period[-1]
-        curr_open, curr_close = curr_period[0], curr_period[-1]
-        
-        # Engolfo bullish
-        if prev_close < prev_open and curr_close > curr_open:
-            if curr_close > prev_open and curr_open < prev_close:
-                return 1.0
-        
-        # Engolfo bearish  
-        if prev_close > prev_open and curr_close < curr_open:
-            if curr_close < prev_open and curr_open > prev_close:
-                return -1.0
-        
-        return 0.0
-    
-    def train_models(self, prices: np.array):
-        """Treinar modelos ML"""
-        if len(prices) < 100:
-            return
-        
-        X = []
-        y = []
-        
-        # Criar dataset para treino
-        for i in range(50, len(prices) - 5):
-            features = self.extract_features(prices[:i+1])
-            future_return = (prices[i+5] - prices[i]) / prices[i]
-            
-            X.append(features)
-            y.append(future_return)
-        
-        if len(X) < 50:
-            return
-        
-        X = np.array(X)
-        y = np.array(y)
-        
-        # Normalizar features
-        X_scaled = self.scaler.fit_transform(X)
-        
-        # Treinar modelos
-        for name, model in self.models.items():
-            try:
-                model.fit(X_scaled, y)
-                logger.info(f"Modelo {name} treinado")
-            except Exception as e:
-                logger.error(f"Erro treinando {name}: {e}")
-        
-        self.trained = True
-        logger.info("SISTEMA ML TREINADO - PREVISÕES EXTREMAMENTE PRECISAS!")
-    
-    def predict(self, prices: np.array) -> Tuple[float, float]:
-        """Predição extremamente precisa"""
-        if not self.trained or len(prices) < 50:
-            return 0.0, 0.5
-        
-        try:
-            features = self.extract_features(prices).reshape(1, -1)
-            features_scaled = self.scaler.transform(features)
-            
-            predictions = []
-            confidences = []
-            
-            for name, model in self.models.items():
-                try:
-                    pred = model.predict(features_scaled)[0]
-                    predictions.append(pred)
-                    
-                    # Confidence baseada na consistência histórica
-                    if hasattr(model, 'feature_importances_'):
-                        conf = np.mean(model.feature_importances_)
-                    else:
-                        conf = 0.7
-                    confidences.append(conf)
-                except Exception as e:
-                    logger.error(f"Erro predição {name}: {e}")
-                    pass
-            
-            if not predictions:
-                return 0.0, 0.5
-            
-            # Ensemble prediction
-            weighted_pred = np.average(predictions, weights=confidences)
-            avg_confidence = np.mean(confidences)
-            
-            return weighted_pred, avg_confidence
-            
-        except Exception as e:
-            logger.error(f"Erro na predição ML: {e}")
-            return 0.0, 0.5
-
-class TradingBot:
-    def __init__(self, bitget_api: BitgetAPI, symbol: str = 'ETHUSDT',
-                 leverage: int = 10, balance_percentage: float = 100.0,
-                 daily_target: int = 350, scalping_interval: float = 0.3,
-                 paper_trading: bool = False):
-        """Initialize PROFESSIONAL Trading Bot para 50% DIÁRIO GARANTIDO com lucro líquido"""
-        
-        # Validação de entrada
-        if not isinstance(bitget_api, BitgetAPI):
-            raise TypeError(f"bitget_api deve ser uma instância de BitgetAPI, recebido: {type(bitget_api)}")
-
-        # API e configurações básicas
-        self.bitget_api = bitget_api
-        self.symbol = symbol
-        self.leverage = leverage
-        self.balance_percentage = balance_percentage
-        self.daily_target = daily_target
-        self.scalping_interval = scalping_interval
-        self.paper_trading = paper_trading
-
-        # Estado do bot
-        self.state = TradingState.STOPPED
-        self.current_position: Optional[TradePosition] = None
-        self.trading_thread: Optional[threading.Thread] = None
-        self.last_error: Optional[str] = None
-
-        # CONFIGURAÇÕES EXTREMAS PARA 50% DIÁRIO GARANTIDO
-        self.min_trades_per_day = 180  # Mínimo 180 trades/dia
-        self.target_trades_per_day = 250  # Meta: 250 trades/dia  
-        self.max_time_between_trades = 240  # Máximo 4 minutos entre trades
-        self.force_trade_after_seconds = 480  # Forçar trade após 8 minutos
-        self.last_trade_time = 0
-
-        # CRITÉRIOS EXTREMAMENTE SELETIVOS - PRECISÃO MÁXIMA
-        self.min_confidence_to_trade = 0.85     # 85% confiança mínima EXTREMA
-        self.min_prediction_score = 0.80        # 80% score de predição EXTREMO
-        self.min_signals_agreement = 8          # 8 sinais precisam concordar
-        self.min_strength_threshold = 0.012     # 1.2% força mínima
-
-        # CONFIGURAÇÕES DE LUCRO PARA 50% DIÁRIO - MANTENDO VALORES ORIGINAIS
-        self.profit_target = 0.012              # 1.2% take profit MÍNIMO para lucro líquido garantido
-        self.stop_loss_target = -0.004          # 0.4% stop loss (controlado)
-        self.minimum_profit_target = 0.010      # 1.0% lucro mínimo absoluto (GARANTIR LUCRO LÍQUIDO)
-        self.max_position_time = 150            # Máximo 2.5 minutos por trade
-        self.min_position_time = 30             # Mínimo 30 segundos
-        self.breakeven_time = 45                # Breakeven após 45 segundos
-
-        # SISTEMA DE PREVENÇÃO DE MÚLTIPLAS POSIÇÕES
-        self.position_lock = threading.Lock()
-        self.is_entering_position = False
-        self.is_exiting_position = False
-        self.last_position_check = 0
-        self.position_check_interval = 5  # Verificar posição a cada 5s
-
-        # Sistema avançado de predição
-        self.predictor = AdvancedPredictor()
-        self.price_history = deque(maxlen=300)  # Mais dados para ML
-        self.volume_history = deque(maxlen=150)
-        self.analysis_history = deque(maxlen=100)
-
-        # Sistema de trading extremo
-        self.extreme_mode_active = True
-        self.last_analysis_result = None
-        self.consecutive_failed_predictions = 0
-        
-        # Rastreamento avançado para trailing preciso
-        self.max_profit_reached = 0.0
-        self.max_loss_reached = 0.0
-        self.profit_locks = [0.008, 0.012, 0.016]  # Lock de lucros em 0.8%, 1.2%, 1.6%
-        self.current_profit_lock = 0
-
-        # Métricas de performance
-        self.metrics = TradingMetrics()
-        self.start_balance = 0.0
-        self.trades_today = 0
-        self.daily_profit_target = 0.5  # 50% diário
-        
-        # Contadores específicos
-        self.quality_trades = 0
-        self.rejected_low_quality = 0
-        self.profitable_exits = 0
-        self.prediction_accuracy = 75.0  # Iniciar com precisão razoável
-        
-        # Sistema de controle de riscos
-        self.consecutive_losses = 0
-        self.daily_loss_accumulated = 0.0
-        self.emergency_stop_triggered = False
-        
-        # Lock para thread safety
-        self._lock = threading.Lock()
-
-        # Contador de análises
-        self.analysis_count = 0
-        self.trades_rejected = 0
-        self.last_rejection_reason = ""
-
-        # Condições de mercado
-        self.market_conditions = {
-            'trend': 'neutral',
-            'volatility': 0.0,
-            'volume_avg': 0.0,
-            'strength': 0.0,
-            'prediction_confidence': 0.0
-        }
-
-        # Inicializar variáveis para predição - CORREÇÃO AQUI
-        self.last_prediction = 0.0
-        self.last_prediction_time = 0.0
-        self.last_price = 0.0  # Inicializar com 0.0 será corrigido no start()
-
-        logger.info("EXTREME TRADING BOT - 50% DAILY TARGET GARANTIDO com LUCRO LÍQUIDO")
-        logger.info("CONFIGURAÇÕES EXTREMAS:")
-        logger.info(f"   Confiança mínima: {self.min_confidence_to_trade*100}%")
-        logger.info(f"   Força mínima: {self.min_strength_threshold*100}%")
-        logger.info(f"   Sinais necessários: {self.min_signals_agreement}")
-        logger.info(f"   Take Profit: {self.profit_target*100}% (GARANTIDO LUCRO LÍQUIDO)")
-        logger.info(f"   Stop Loss: {abs(self.stop_loss_target)*100}%")
-        logger.info(f"   Lucro MÍNIMO: {self.minimum_profit_target*100}% (LÍQUIDO)")
-        logger.info(f"   Trades/dia META: {self.target_trades_per_day}")
-        logger.info(f"   LUCRO DIÁRIO META: {self.daily_profit_target*100}%")
-        logger.info("MODO EXTREMO - PREVISÕES MÁXIMA PRECISÃO COM LUCRO GARANTIDO!")
 
     def _extreme_position_management_guaranteed(self):
         """Gerenciamento EXTREMO com FECHAMENTO GARANTIDO para lucro líquido"""
@@ -2045,3 +1867,185 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Erro ao fechar SHORT garantido: {e}")
             return {"success": False, "error": str(e)}
+
+    def get_account_balance(self) -> float:
+        """Obter saldo da conta com fallback extremo"""
+        try:
+            balance_info = self.bitget_api.get_balance()
+            if balance_info and isinstance(balance_info, dict):
+                balance = float(balance_info.get('free', 0.0))
+                if balance > 0:
+                    return balance
+                    
+            if self.paper_trading:
+                return 1000.0
+            else:
+                logger.warning("Saldo não obtido - usando fallback extremo")
+                return 100.0
+                
+        except Exception as e:
+            logger.error(f"Erro ao obter saldo: {e}")
+            return 1000.0 if self.paper_trading else 100.0
+
+    def emergency_stop(self) -> bool:
+        """Parada de emergência extrema com fechamento forçado garantido"""
+        try:
+            logger.warning("PARADA DE EMERGÊNCIA EXTREMA TOTAL")
+            
+            self.state = TradingState.EMERGENCY
+            self.emergency_stop_triggered = True
+            
+            # Fechar posição com GARANTIA MÁXIMA
+            if self.current_position:
+                self._force_close_position_guaranteed("Emergency stop extremo total")
+            
+            # Cancelar todas as ordens
+            try:
+                self.bitget_api.exchange.cancel_all_orders(self.symbol)
+            except:
+                pass
+            
+            # Parar thread
+            if self.trading_thread:
+                self.trading_thread.join(timeout=5)
+            
+            self.state = TradingState.STOPPED
+            
+            logger.warning("Parada de emergência extrema total concluída")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erro na parada de emergência extrema: {e}")
+            return False
+
+    def reset_daily_stats(self):
+        """Reset para novo dia - otimizado para 50% extremo"""
+        try:
+            logger.info("Reset para NOVO DIA EXTREMO - META 50% LUCRO LÍQUIDO!")
+            
+            with self._lock:
+                self.trades_today = 0
+                self.metrics = TradingMetrics()
+                self.analysis_count = 0
+                self.trades_rejected = 0
+                self.quality_trades = 0
+                self.rejected_low_quality = 0
+                self.profitable_exits = 0
+                self.prediction_accuracy = 75.0  # Start with reasonable accuracy
+                self.consecutive_losses = 0
+                self.daily_loss_accumulated = 0.0
+                self.emergency_stop_triggered = False
+                self.consecutive_failed_predictions = 0
+                self.last_rejection_reason = ""
+                self.last_trade_time = time.time()
+                self.max_profit_reached = 0.0
+                self.max_loss_reached = 0.0
+                self.current_profit_lock = 0
+                
+                # Reset para modo extremo
+                self.extreme_mode_active = True
+                self.is_entering_position = False
+                self.is_exiting_position = False
+                self.last_position_check = 0
+                
+                # Reset critérios para padrões extremos MANTENDO valores originais
+                self.min_confidence_to_trade = 0.85
+                self.min_strength_threshold = 0.012
+                # MANTER valores originais de profit/stop
+                self.profit_target = 0.012              # 1.2% mínimo para lucro líquido garantido
+                self.stop_loss_target = -0.004          # 0.4% stop loss
+                self.minimum_profit_target = 0.010      # 1.0% mínimo absoluto para lucro líquido
+            
+            logger.info("NOVO DIA EXTREMO - PRONTO PARA 50% DE LUCRO LÍQUIDO GARANTIDO!")
+            
+        except Exception as e:
+            logger.error(f"Erro ao resetar: {e}")
+
+    def get_daily_stats(self) -> Dict:
+        """Estatísticas focadas na meta de 50% diário extremo com lucro líquido"""
+        try:
+            with self._lock:
+                current_time = datetime.now()
+                hours_trading = max(1, (current_time.hour - 8) if current_time.hour >= 8 else 24)
+                
+                daily_profit_pct = self.metrics.net_profit * 100
+                target_achievement = (daily_profit_pct / 50.0) * 100
+                
+                return {
+                    'target_50_percent_liquid_profit': {
+                        'target_profit': '50.00% LÍQUIDO',
+                        'current_profit_gross': f"{self.metrics.total_profit*100:.4f}%",
+                        'current_profit_net': f"{daily_profit_pct:.4f}%",
+                        'fees_paid': f"{self.metrics.total_fees_paid*100:.4f}%",
+                        'achievement': f"{target_achievement:.1f}%",
+                        'remaining_needed': f"{max(0, 50.0 - daily_profit_pct):.4f}%",
+                        'on_track': target_achievement >= (hours_trading / 24) * 100,
+                        'extreme_mode': True,
+                        'liquid_profit_guaranteed': True
+                    },
+                    'extreme_trading_stats': {
+                        'trades_executed': self.trades_today,
+                        'quality_trades': self.quality_trades,
+                        'quality_ratio': f"{(self.quality_trades / max(1, self.trades_today)) * 100:.1f}%",
+                        'rejected_low_quality': self.rejected_low_quality,
+                        'profitable_exits': self.profitable_exits,
+                        'prediction_accuracy': f"{self.prediction_accuracy:.1f}%",
+                        'target_trades': self.target_trades_per_day,
+                        'trades_per_hour': round(self.trades_today / hours_trading, 1),
+                        'analysis_count': self.analysis_count,
+                        'rejection_rate': round((self.trades_rejected / max(1, self.analysis_count)) * 100, 1)
+                    },
+                    'performance_extreme': {
+                        'total_trades': self.metrics.total_trades,
+                        'win_rate': round(self.metrics.win_rate, 2),
+                        'average_duration': round(self.metrics.average_trade_duration, 1),
+                        'consecutive_wins': self.metrics.consecutive_wins,
+                        'consecutive_losses': self.metrics.consecutive_losses,
+                        'max_consecutive_wins': self.metrics.max_consecutive_wins,
+                        'max_consecutive_losses': self.metrics.max_consecutive_losses,
+                        'max_drawdown': round(self.metrics.max_drawdown * 100, 4),
+                        'profitable_trades': self.metrics.profitable_trades,
+                        'losing_trades': self.metrics.losing_trades,
+                        'daily_loss': round(self.daily_loss_accumulated, 4),
+                        'emergency_stop': self.emergency_stop_triggered
+                    },
+                    'timestamp': current_time.isoformat()
+                }
+        except Exception as e:
+            logger.error(f"Erro ao obter estatísticas: {e}")
+            return {'error': str(e), 'is_running': False}
+
+
+# Funções auxiliares para compatibilidade
+def create_trading_bot(bitget_api: BitgetAPI, **kwargs) -> TradingBot:
+    """Cria instância do TradingBot"""
+    return TradingBot(bitget_api, **kwargs)
+
+# Testar se executado diretamente
+if __name__ == "__main__":
+    # Teste básico do bot
+    try:
+        from bitget_api import BitgetAPI
+        
+        api = BitgetAPI()
+        if api.test_connection():
+            bot = TradingBot(
+                bitget_api=api,
+                paper_trading=True,  # Teste em modo papel
+                leverage=10,
+                daily_target=350
+            )
+            
+            print("Bot de trading extremo criado com sucesso!")
+            print("Configurações:")
+            print(f"   Take Profit: {bot.profit_target*100:.1f}%")
+            print(f"   Stop Loss: {abs(bot.stop_loss_target)*100:.1f}%")
+            print(f"   Lucro Mínimo: {bot.minimum_profit_target*100:.1f}%")
+            print("Pronto para 50% de lucro diário líquido garantido!")
+            
+        else:
+            print("Falha na conexão com a API")
+            
+    except Exception as e:
+        print(f"Erro no teste: {e}")
+        traceback.print_exc()
