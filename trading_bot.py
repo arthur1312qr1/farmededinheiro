@@ -67,7 +67,7 @@ def _calculate_bollinger_bands(self, prices: np.array, period: int = 20, std_dev
         
         return upper, lower, middle
     
-    def _calculate_support_strength(self, prices: np.array) -> float:
+def _calculate_support_strength(self, prices: np.array) -> float:
         """Força do suporte"""
         if len(prices) < 20:
             return 0.0
