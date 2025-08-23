@@ -7,7 +7,7 @@ if self._check_emergency_conditions():
 self._prevent_multiple_positions()
                 
                 # ANÃLISE EXTREMAMENTE PRECISA com ML
-    should_trade, confidence, direction, strength, analysis_details = self._extreme_market_analysis_with_ml()
+should_trade, confidence, direction, strength, analysis_details = self._extreme_market_analysis_with_ml()
                 
                 # FORÃ‡AR TRADE SE MUITO TEMPO SEM TRADING (mais agressivo)
                 seconds_since_last = time.time() - self.last_trade_time
