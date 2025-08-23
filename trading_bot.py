@@ -95,7 +95,7 @@ def _calculate_support_strength(self, prices: np.array) -> float:
         except Exception:
             return 0.0
     
-    def _calculate_resistance_strength(self, prices: np.array) -> float:
+def _calculate_resistance_strength(self, prices: np.array) -> float:
         """Força da resistência"""
         if len(prices) < 20:
             return 0.0
@@ -124,7 +124,7 @@ def _calculate_support_strength(self, prices: np.array) -> float:
         except Exception:
             return 0.0
     
-    def _detect_hammer(self, prices: np.array) -> float:
+def _detect_hammer(self, prices: np.array) -> float:
         """Detectar padrão hammer"""
         if len(prices) < 4:
             return 0.0
@@ -144,7 +144,7 @@ def _calculate_support_strength(self, prices: np.array) -> float:
             return 1.0
         return 0.0
     
-    def _detect_doji(self, prices: np.array) -> float:
+def _detect_doji(self, prices: np.array) -> float:
         """Detectar padrão doji"""
         if len(prices) < 4:
             return 0.0
@@ -162,7 +162,7 @@ def _calculate_support_strength(self, prices: np.array) -> float:
             return 1.0
         return 0.0
     
-    def _detect_engulfing(self, prices: np.array) -> float:
+def _detect_engulfing(self, prices: np.array) -> float:
         """Detectar padrão engolfo"""
         if len(prices) < 8:
             return 0.0
@@ -186,7 +186,7 @@ def _calculate_support_strength(self, prices: np.array) -> float:
         
         return 0.0
     
-    def train_models(self, prices: np.array):
+def train_models(self, prices: np.array):
         """Treinar modelos ML"""
         if len(prices) < 100:
             return
@@ -222,7 +222,7 @@ def _calculate_support_strength(self, prices: np.array) -> float:
         self.trained = True
         logger.info("SISTEMA ML TREINADO - PREVISÕES EXTREMAMENTE PRECISAS!")
     
-    def predict(self, prices: np.array) -> Tuple[float, float]:
+def predict(self, prices: np.array) -> Tuple[float, float]:
         """Predição extremamente precisa"""
         if not self.trained or len(prices) < 50:
             return 0.0, 0.5
