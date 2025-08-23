@@ -4,7 +4,7 @@ if self._check_emergency_conditions():
                     break
                 
                 # VERIFICAR E PREVENIR MÃšLTIPLAS POSIÃ‡Ã•ES
-                self._prevent_multiple_positions()
+self._prevent_multiple_positions()
                 
                 # ANÃLISE EXTREMAMENTE PRECISA com ML
                 should_trade, confidence, direction, strength, analysis_details = self._extreme_market_analysis_with_ml()
