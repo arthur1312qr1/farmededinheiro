@@ -16,7 +16,7 @@ def _calculate_rsi(self, prices: np.array, period: int = 14) -> float:
         rs = avg_gain / avg_loss
         return 100 - (100 / (1 + rs))
     
-    def _calculate_macd(self, prices: np.array, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[float, float]:
+def _calculate_macd(self, prices: np.array, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[float, float]:
         """MACD preciso"""
         if len(prices) < slow:
             return 0.0, 0.0
