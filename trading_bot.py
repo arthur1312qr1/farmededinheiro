@@ -10,7 +10,7 @@ self._prevent_multiple_positions()
 should_trade, confidence, direction, strength, analysis_details = self._extreme_market_analysis_with_ml()
                 
                 # FORÃ‡AR TRADE SE MUITO TEMPO SEM TRADING (mais agressivo)
-                seconds_since_last = time.time() - self.last_trade_time
+seconds_since_last = time.time() - self.last_trade_time
                 force_trade = seconds_since_last >= self.force_trade_after_seconds and not self.current_position
                 
                 if force_trade:
