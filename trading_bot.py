@@ -1,5 +1,5 @@
 # Verificar condiÃ§Ãµes de emergÃªncia
-                if self._check_emergency_conditions():
+if self._check_emergency_conditions():
                     logger.warning("CondiÃ§Ãµes de emergÃªncia detectadas!")
                     break
                 
