@@ -1078,7 +1078,8 @@ if __name__ == "__main__":
             
     except Exception as e:
         print(f"Erro no teste: {e}")
-        traceback.print_exc()def _extreme_market_analysis_with_ml(self) -> Tuple[bool, float, Optional[TradeDirection], float, Dict]:
+        traceback.print_exc()
+def _extreme_market_analysis_with_ml(self) -> Tuple[bool, float, Optional[TradeDirection], float, Dict]:
         """Análise EXTREMAMENTE PRECISA com Machine Learning"""
         try:
             # Obter dados de mercado
