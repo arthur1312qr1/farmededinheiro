@@ -1376,7 +1376,7 @@ def _analyze_extreme_volume(self, current_volume: float) -> int:
         except:
             return 0
 
-    def _analyze_extreme_support_resistance(self, prices: np.array, current_price: float) -> int:
+def _analyze_extreme_support_resistance(self, prices: np.array, current_price: float) -> int:
         """Suporte/Resistência extremos"""
         try:
             if len(prices) < 50:
@@ -1426,7 +1426,7 @@ def _analyze_extreme_volume(self, current_volume: float) -> int:
             logger.debug(f"SR analysis error: {e}")
             return 0
 
-    def _calculate_extreme_momentum(self, prices: np.array) -> float:
+def _calculate_extreme_momentum(self, prices: np.array) -> float:
         """Momentum extremo"""
         try:
             if len(prices) < 20:
@@ -1445,7 +1445,7 @@ def _analyze_extreme_volume(self, current_volume: float) -> int:
         except:
             return 0.0
 
-    def _detect_volatility_breakout(self, prices: np.array) -> int:
+def _detect_volatility_breakout(self, prices: np.array) -> int:
         """Detectar breakout de volatilidade"""
         try:
             if len(prices) < 30:
@@ -1470,7 +1470,7 @@ def _analyze_extreme_volume(self, current_volume: float) -> int:
         except:
             return 0
 
-    def _execute_extreme_trade_single(self, direction: TradeDirection, confidence: float, strength: float, analysis_details: Dict) -> bool:
+def _execute_extreme_trade_single(self, direction: TradeDirection, confidence: float, strength: float, analysis_details: Dict) -> bool:
         """Execução EXTREMA de trade com PREVENÇÃO ABSOLUTA de múltiplas posições"""
         
         # LOCK ABSOLUTO para prevenir múltiplas posições
