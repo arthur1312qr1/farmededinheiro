@@ -38,196 +38,7 @@ class TradePosition:
     stop_price: float = None
     order_id: str = None
     
-    def get_daily_stats(self) -> Dict:
-        """Estatísticas diárias focadas em consistência"""
-        try:
-            with self._lock:
-                daily_profit = self.metrics.net_profit * 100
-                
-                return {
-                    'daily_performance': {
-                        'trades_executed': self.trades_today,
-                        'profit_target': '2-5% consistente',
-                        'current_profit': f"{daily_profit:.3f}%",
-                        'win_rate': f"{self.metrics.win_rate:.1f}%",
-                        'avg_trade_duration': f"{self.metrics.average_trade_duration:.1f}s",
-                        'profitable_trades': self.metrics.profitable_trades,
-                        'losing_trades': self.metrics.losing_trades
-                    },
-                    'risk_metrics': {
-                        'daily_loss': f"{self.daily_loss*100:.3f}%",
-                        'max_drawdown': f"{self.metrics.max_drawdown*100:.3f}%",
-                        'consecutive_losses': self.consecutive_losses,
-                        'risk_level': self._get_risk_level()
-                    },
-                    'consistency_metrics': {
-                        'max_consecutive_wins': self.metrics.max_consecutive_wins,
-                        'max_consecutive_losses': self.metrics.max_consecutive_losses,
-                        'total_fees_paid': f"{self.metrics.total_fees_paid*100:.4f}%",
-                        'net_profit': f"{self.metrics.net_profit*100:.4f}%"
-                    }
-                }
-        except Exception as e:
-            return {'error': str(e)}
-
-    def emergency_stop(self) -> bool:
-        """Parada de emergência"""
-        try:
-            logger.warning("PARADA DE EMERGÊNCIA ATIVADA")
-            self.state = TradingState.EMERGENCY
-            
-            # Fechar posição imediatamente
-            if self.current_position:
-                self._close_position_safely("Emergency stop")
-            
-            # Parar thread
-            if self.trading_thread:
-                self.trading_thread.join(timeout=5)
-            
-            self.state = TradingState.STOPPED
-            logger.info("Parada de emergência concluída")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Erro na parada de emergência: {e}")
-            return False
-
-    def reset_daily_stats(self):
-        """Reset para novo dia"""
-        try:
-            with self._lock:
-                self.trades_today = 0
-                self.daily_loss = 0.0
-                self.consecutive_losses = 0
-                self.metrics = TradingMetrics()
-                self.last_trade_time = time.time()
-                
-                logger.info("Estatísticas diárias resetadas para novo dia")
-                
-        except Exception as e:
-            logger.error(f"Erro ao resetar estatísticas: {e}")
-
-    def adjust_risk_parameters(self, win_rate: float):
-        """Ajustar parâmetros baseado na performance"""
-        try:
-            with self._lock:
-                if win_rate > 70:  # Performance muito boa
-                    # Pode ser um pouco mais agressivo
-                    self.profit_target = min(0.010, self.profit_target + 0.001)
-                    logger.info(f"Win rate alto ({win_rate:.1f}%) - aumentando target para {self.profit_target*100:.1f}%")
-                    
-                elif win_rate < 50:  # Performance ruim
-                    # Ser mais conservador
-                    self.profit_target = max(0.006, self.profit_target - 0.001)
-                    self.stop_loss = min(0.006, self.stop_loss + 0.001)
-                    logger.info(f"Win rate baixo ({win_rate:.1f}%) - ajustando para ser mais conservador")
-                
-                # Ajustar baseado em perdas consecutivas
-                if self.consecutive_losses >= 2:
-                    # Reduzir tamanho da posição temporariamente
-                    self.balance_percentage = max(50.0, self.balance_percentage - 10.0)
-                    logger.info(f"Perdas consecutivas - reduzindo posição para {self.balance_percentage:.0f}%")
-                elif self.consecutive_losses == 0 and self.metrics.consecutive_wins >= 3:
-                    # Voltar ao tamanho normal após sequência de vitórias
-                    self.balance_percentage = min(95.0, self.balance_percentage + 5.0)
-                    
-        except Exception as e:
-            logger.error(f"Erro ajustando parâmetros: {e}")
-
-    def get_market_analysis(self) -> Dict:
-        """Análise atual do mercado"""
-        try:
-            if len(self.price_history) < 20:
-                return {'error': 'Dados insuficientes'}
-            
-            prices = list(self.price_history)
-            current_price = prices[-1]
-            
-            # Indicadores
-            rsi = SimpleIndicators.rsi(prices)
-            sma_20 = SimpleIndicators.sma(prices, 20)
-            ema_12 = SimpleIndicators.ema(prices, 12)
-            ema_26 = SimpleIndicators.ema(prices, 26)
-            bb_upper, bb_lower, bb_middle = SimpleIndicators.bollinger_bands(prices)
-            
-            # Trend
-            trend = "BULLISH" if current_price > sma_20 else "BEARISH"
-            trend_strength = abs(current_price - sma_20) / sma_20 * 100
-            
-            # Volatilidade
-            recent_highs = [max(prices[i:i+5]) for i in range(len(prices)-20, len(prices)-4)]
-            recent_lows = [min(prices[i:i+5]) for i in range(len(prices)-20, len(prices)-4)]
-            volatility = (max(recent_highs) - min(recent_lows)) / current_price * 100
-            
-            return {
-                'current_price': round(current_price, 2),
-                'trend': trend,
-                'trend_strength': round(trend_strength, 3),
-                'volatility': round(volatility, 2),
-                'indicators': {
-                    'rsi': round(rsi, 1),
-                    'sma_20': round(sma_20, 2),
-                    'ema_12': round(ema_12, 2),
-                    'ema_26': round(ema_26, 2),
-                    'bb_upper': round(bb_upper, 2),
-                    'bb_lower': round(bb_lower, 2),
-                    'bb_middle': round(bb_middle, 2)
-                },
-                'signals': {
-                    'rsi_signal': 'OVERSOLD' if rsi < 30 else 'OVERBOUGHT' if rsi > 70 else 'NEUTRAL',
-                    'bb_signal': 'LOWER_BAND' if current_price <= bb_lower else 'UPPER_BAND' if current_price >= bb_upper else 'MIDDLE',
-                    'ema_signal': 'BULLISH' if ema_12 > ema_26 else 'BEARISH'
-                }
-            }
-            
-        except Exception as e:
-            return {'error': str(e)}
-
-    def pause_trading(self):
-        """Pausar trading temporariamente"""
-        if self.state == TradingState.RUNNING:
-            self.state = TradingState.PAUSED
-            logger.info("Trading pausado")
-
-    def resume_trading(self):
-        """Retomar trading"""
-        if self.state == TradingState.PAUSED:
-            self.state = TradingState.RUNNING
-            logger.info("Trading retomado")
-
-# Funções auxiliares para compatibilidade
-def create_trading_bot(bitget_api: BitgetAPI, **kwargs) -> TradingBot:
-    """Criar instância do TradingBot com configurações otimizadas"""
-    return TradingBot(bitget_api, **kwargs)
-
-# Teste básico
-if __name__ == "__main__":
-    try:
-        from bitget_api import BitgetAPI
-        
-        api = BitgetAPI()
-        if api.test_connection():
-            bot = TradingBot(
-                bitget_api=api,
-                paper_trading=True,
-                leverage=10,
-                balance_percentage=90.0,
-                scalping_interval=3.0
-            )
-            
-            print("Bot Profissional criado com sucesso!")
-            print("Configurações otimizadas:")
-            print(f"   Target diário: 2-5% consistente")
-            print(f"   Take Profit: {bot.profit_target*100:.1f}%")
-            print(f"   Stop Loss: {bot.stop_loss*100:.1f}%")
-            print(f"   Risk/Reward: 1:2")
-            print(f"   Max perda diária: {bot.max_daily_loss*100:.1f}%")
-            print("Focado em consistência e preservação de capital!")
-        else:
-            print("Falha na conexão com a API")
-    except Exception as e:
-        print(f"Erro no teste: {e}")
-        traceback.print_exc()_duration(self) -> float:
+    def get_duration(self) -> float:
         return time.time() - self.start_time
     
     def calculate_pnl(self, current_price: float) -> float:
@@ -346,10 +157,10 @@ class TradingBot:
         self.trading_thread: Optional[threading.Thread] = None
         self.last_error: Optional[str] = None
 
-        # CONFIGURAÇÕES REALISTAS E SUSTENTÁVEIS
-        self.profit_target = 0.008          # 0.8% take profit (realista com fees)
-        self.stop_loss = 0.004              # 0.4% stop loss (2:1 risk/reward)
-        self.min_profit_target = 0.005      # 0.5% mínimo para compensar fees
+        # CONFIGURAÇÕES REALISTAS E SUSTENTÁVEIS - CORRIGIDAS
+        self.profit_target = 0.012          # 1.2% take profit (mínimo 0.7% + margem de segurança)
+        self.stop_loss = 0.004              # 0.4% stop loss (3:1 risk/reward)
+        self.min_profit_target = 0.007      # 0.7% mínimo (NUNCA menor que 0.7%)
         self.max_position_time = 300        # 5 minutos máximo por trade
         self.min_position_time = 15         # 15 segundos mínimo
         
@@ -374,12 +185,17 @@ class TradingBot:
         self.is_entering_position = False
         self.is_exiting_position = False
         
+        # Validação do profit target
+        if self.profit_target < 0.007:
+            self.profit_target = 0.007
+            logger.warning("Profit target ajustado para o mínimo de 0.7%")
+        
         # Inicialização
         logger.info("Trading Bot Profissional Inicializado")
         logger.info(f"Target diário realista: 2-5% consistente")
         logger.info(f"Take Profit: {self.profit_target*100:.1f}%")
         logger.info(f"Stop Loss: {self.stop_loss*100:.1f}%")
-        logger.info(f"Risk/Reward: 2:1")
+        logger.info(f"Risk/Reward: 3:1")
 
     def start(self) -> bool:
         """Iniciar bot com configurações otimizadas"""
@@ -609,17 +425,19 @@ class TradingBot:
             current_price = self.price_history[-1]
             position_size = position_value / current_price
             
-            # Calcular targets
+            # Calcular targets - GARANTINDO MÍNIMO 0.7%
+            effective_profit = max(self.profit_target, self.min_profit_target)
+            
             if direction == TradeDirection.LONG:
-                target_price = current_price * (1 + self.profit_target)
+                target_price = current_price * (1 + effective_profit)
                 stop_price = current_price * (1 - self.stop_loss)
             else:
-                target_price = current_price * (1 - self.profit_target)
+                target_price = current_price * (1 - effective_profit)
                 stop_price = current_price * (1 + self.stop_loss)
             
             logger.info(f"Executando {direction.name}:")
             logger.info(f"   Preço: ${current_price:.2f}")
-            logger.info(f"   Target: ${target_price:.2f}")
+            logger.info(f"   Target: ${target_price:.2f} ({effective_profit*100:.1f}%)")
             logger.info(f"   Stop: ${stop_price:.2f}")
             logger.info(f"   Confiança: {confidence*100:.1f}%")
             
@@ -676,7 +494,7 @@ class TradingBot:
             reason = ""
             
             # Condições de fechamento SIMPLIFICADAS
-            if pnl >= self.profit_target:
+            if pnl >= max(self.profit_target, self.min_profit_target):
                 should_close = True
                 reason = f"Take Profit: {pnl*100:.3f}%"
                 
@@ -768,6 +586,10 @@ class TradingBot:
                     # Atualizar duração média
                     total_duration = (self.metrics.average_trade_duration * (self.metrics.total_trades - 1) + duration)
                     self.metrics.average_trade_duration = total_duration / self.metrics.total_trades
+                    
+                    # Atualizar máximos consecutivos
+                    self.metrics.max_consecutive_wins = max(self.metrics.max_consecutive_wins, self.metrics.consecutive_wins)
+                    self.metrics.max_consecutive_losses = max(self.metrics.max_consecutive_losses, self.metrics.consecutive_losses)
                 
                 logger.info(f"Posição fechada! PnL final: {final_pnl*100:.3f}%")
                 self.current_position = None
@@ -833,6 +655,163 @@ class TradingBot:
         """Verificar se bot está rodando"""
         return self.state == TradingState.RUNNING
 
+    def get_daily_stats(self) -> Dict:
+        """Estatísticas diárias focadas em consistência"""
+        try:
+            with self._lock:
+                daily_profit = self.metrics.net_profit * 100
+                
+                return {
+                    'daily_performance': {
+                        'trades_executed': self.trades_today,
+                        'profit_target': '2-5% consistente',
+                        'current_profit': f"{daily_profit:.3f}%",
+                        'win_rate': f"{self.metrics.win_rate:.1f}%",
+                        'avg_trade_duration': f"{self.metrics.average_trade_duration:.1f}s",
+                        'profitable_trades': self.metrics.profitable_trades,
+                        'losing_trades': self.metrics.losing_trades
+                    },
+                    'risk_metrics': {
+                        'daily_loss': f"{self.daily_loss*100:.3f}%",
+                        'max_drawdown': f"{self.metrics.max_drawdown*100:.3f}%",
+                        'consecutive_losses': self.consecutive_losses,
+                        'risk_level': self._get_risk_level()
+                    },
+                    'consistency_metrics': {
+                        'max_consecutive_wins': self.metrics.max_consecutive_wins,
+                        'max_consecutive_losses': self.metrics.max_consecutive_losses,
+                        'total_fees_paid': f"{self.metrics.total_fees_paid*100:.4f}%",
+                        'net_profit': f"{self.metrics.net_profit*100:.4f}%"
+                    }
+                }
+        except Exception as e:
+            return {'error': str(e)}
+
+    def emergency_stop(self) -> bool:
+        """Parada de emergência"""
+        try:
+            logger.warning("PARADA DE EMERGÊNCIA ATIVADA")
+            self.state = TradingState.EMERGENCY
+            
+            # Fechar posição imediatamente
+            if self.current_position:
+                self._close_position_safely("Emergency stop")
+            
+            # Parar thread
+            if self.trading_thread:
+                self.trading_thread.join(timeout=5)
+            
+            self.state = TradingState.STOPPED
+            logger.info("Parada de emergência concluída")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erro na parada de emergência: {e}")
+            return False
+
+    def reset_daily_stats(self):
+        """Reset para novo dia"""
+        try:
+            with self._lock:
+                self.trades_today = 0
+                self.daily_loss = 0.0
+                self.consecutive_losses = 0
+                self.metrics = TradingMetrics()
+                self.last_trade_time = time.time()
+                
+                logger.info("Estatísticas diárias resetadas para novo dia")
+                
+        except Exception as e:
+            logger.error(f"Erro ao resetar estatísticas: {e}")
+
+    def adjust_risk_parameters(self, win_rate: float):
+        """Ajustar parâmetros baseado na performance"""
+        try:
+            with self._lock:
+                if win_rate > 70:  # Performance muito boa
+                    # Pode ser um pouco mais agressivo, mas sempre respeitando mínimo 0.7%
+                    self.profit_target = min(0.015, max(self.profit_target + 0.001, self.min_profit_target))
+                    logger.info(f"Win rate alto ({win_rate:.1f}%) - aumentando target para {self.profit_target*100:.1f}%")
+                    
+                elif win_rate < 50:  # Performance ruim
+                    # Ser mais conservador, mas nunca abaixo de 0.7%
+                    self.profit_target = max(self.min_profit_target, self.profit_target - 0.001)
+                    self.stop_loss = min(0.006, self.stop_loss + 0.001)
+                    logger.info(f"Win rate baixo ({win_rate:.1f}%) - ajustando para ser mais conservador")
+                
+                # Ajustar baseado em perdas consecutivas
+                if self.consecutive_losses >= 2:
+                    # Reduzir tamanho da posição temporariamente
+                    self.balance_percentage = max(50.0, self.balance_percentage - 10.0)
+                    logger.info(f"Perdas consecutivas - reduzindo posição para {self.balance_percentage:.0f}%")
+                elif self.consecutive_losses == 0 and self.metrics.consecutive_wins >= 3:
+                    # Voltar ao tamanho normal após sequência de vitórias
+                    self.balance_percentage = min(95.0, self.balance_percentage + 5.0)
+                    
+        except Exception as e:
+            logger.error(f"Erro ajustando parâmetros: {e}")
+
+    def get_market_analysis(self) -> Dict:
+        """Análise atual do mercado"""
+        try:
+            if len(self.price_history) < 20:
+                return {'error': 'Dados insuficientes'}
+            
+            prices = list(self.price_history)
+            current_price = prices[-1]
+            
+            # Indicadores
+            rsi = SimpleIndicators.rsi(prices)
+            sma_20 = SimpleIndicators.sma(prices, 20)
+            ema_12 = SimpleIndicators.ema(prices, 12)
+            ema_26 = SimpleIndicators.ema(prices, 26)
+            bb_upper, bb_lower, bb_middle = SimpleIndicators.bollinger_bands(prices)
+            
+            # Trend
+            trend = "BULLISH" if current_price > sma_20 else "BEARISH"
+            trend_strength = abs(current_price - sma_20) / sma_20 * 100
+            
+            # Volatilidade
+            recent_highs = [max(prices[i:i+5]) for i in range(len(prices)-20, len(prices)-4)]
+            recent_lows = [min(prices[i:i+5]) for i in range(len(prices)-20, len(prices)-4)]
+            volatility = (max(recent_highs) - min(recent_lows)) / current_price * 100
+            
+            return {
+                'current_price': round(current_price, 2),
+                'trend': trend,
+                'trend_strength': round(trend_strength, 3),
+                'volatility': round(volatility, 2),
+                'indicators': {
+                    'rsi': round(rsi, 1),
+                    'sma_20': round(sma_20, 2),
+                    'ema_12': round(ema_12, 2),
+                    'ema_26': round(ema_26, 2),
+                    'bb_upper': round(bb_upper, 2),
+                    'bb_lower': round(bb_lower, 2),
+                    'bb_middle': round(bb_middle, 2)
+                },
+                'signals': {
+                    'rsi_signal': 'OVERSOLD' if rsi < 30 else 'OVERBOUGHT' if rsi > 70 else 'NEUTRAL',
+                    'bb_signal': 'LOWER_BAND' if current_price <= bb_lower else 'UPPER_BAND' if current_price >= bb_upper else 'MIDDLE',
+                    'ema_signal': 'BULLISH' if ema_12 > ema_26 else 'BEARISH'
+                }
+            }
+            
+        except Exception as e:
+            return {'error': str(e)}
+
+    def pause_trading(self):
+        """Pausar trading temporariamente"""
+        if self.state == TradingState.RUNNING:
+            self.state = TradingState.PAUSED
+            logger.info("Trading pausado")
+
+    def resume_trading(self):
+        """Retomar trading"""
+        if self.state == TradingState.PAUSED:
+            self.state = TradingState.RUNNING
+            logger.info("Trading retomado")
+
     def get_status(self) -> Dict:
         """Status completo do bot"""
         try:
@@ -869,7 +848,8 @@ class TradingBot:
                     'daily_target': "2-5% consistente",
                     'take_profit': f"{self.profit_target*100:.1f}%",
                     'stop_loss': f"{self.stop_loss*100:.1f}%",
-                    'risk_reward': "1:2"
+                    'risk_reward': "3:1",
+                    'min_profit_guaranteed': f"{self.min_profit_target*100:.1f}%"
                 }
             }
         except Exception as e:
@@ -908,4 +888,38 @@ class TradingBot:
         except Exception as e:
             return {'active': True, 'error': str(e)}
 
-    def get
+
+# Funções auxiliares para compatibilidade
+def create_trading_bot(bitget_api: BitgetAPI, **kwargs) -> TradingBot:
+    """Criar instância do TradingBot com configurações otimizadas"""
+    return TradingBot(bitget_api, **kwargs)
+
+# Teste básico
+if __name__ == "__main__":
+    try:
+        from bitget_api import BitgetAPI
+        
+        api = BitgetAPI()
+        if api.test_connection():
+            bot = TradingBot(
+                bitget_api=api,
+                paper_trading=True,
+                leverage=10,
+                balance_percentage=90.0,
+                scalping_interval=3.0
+            )
+            
+            print("Bot Profissional criado com sucesso!")
+            print("Configurações otimizadas:")
+            print(f"   Target diário: 2-5% consistente")
+            print(f"   Take Profit: {bot.profit_target*100:.1f}% (mín. {bot.min_profit_target*100:.1f}%)")
+            print(f"   Stop Loss: {bot.stop_loss*100:.1f}%")
+            print(f"   Risk/Reward: 3:1")
+            print(f"   Max perda diária: {bot.max_daily_loss*100:.1f}%")
+            print("Focado em consistência e preservação de capital!")
+            print("✅ PROFIT TARGET NUNCA SERÁ MENOR QUE 0.7%")
+        else:
+            print("Falha na conexão com a API")
+    except Exception as e:
+        print(f"Erro no teste: {e}")
+        traceback.print_exc()
