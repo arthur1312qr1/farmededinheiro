@@ -243,12 +243,12 @@ class TradingBot:
             if market_data and market_data.get('price', 0) > 0:
                 price = float(market_data['price'])
                 self.price_history.append(price)
-            except Exception as e:
-                # Se falhar, usar último preço conhecido ou manter atual
-                if self.price_history:
-                    last_price = self.price_history[-1]
-                    self.price_history.append(last_price)
-                logger.debug(f"Erro atualizando preço: {e}")
+        except Exception as e:
+            # Se falhar, usar último preço conhecido ou manter atual
+            if self.price_history:
+                last_price = self.price_history[-1]
+                self.price_history.append(last_price)
+            logger.debug(f"Erro atualizando preço: {e}")
 
     def _analyze_market_aggressive(self) -> Optional[Tuple[TradeDirection, float]]:
         """Análise ULTRA-AGRESSIVA para scalping"""
