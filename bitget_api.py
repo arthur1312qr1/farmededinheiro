@@ -29,7 +29,7 @@ class BitgetAPI:
             }
         })
         
-        print("✅ Conectado à Bitget - MODO REAL")
+        print("✅ Conectado à Bitget - MODO REAL COM SUPORTE A SHORT")
 
     def get_balance(self):
         """Pega saldo atual em USDT - CORRIGIDO"""
@@ -169,9 +169,9 @@ class BitgetAPI:
             return 0.01
 
     def place_buy_order(self):
-        """Comprar ETH com 100% do saldo + alavancagem - CORRIGIDO"""
+        """Comprar ETH (LONG) com 100% do saldo + alavancagem - CORRIGIDO"""
         try:
-            print("🚀 Iniciando compra...")
+            print("🚀 Iniciando COMPRA (LONG)...")
             
             # Pegar saldo atual (sempre 100%)
             balance_info = self.get_balance()
@@ -193,7 +193,7 @@ class BitgetAPI:
                 print(error_msg)
                 return {"success": False, "error": error_msg}
             
-            # Calcular quantidade (CORREÇÃO APLICADA)
+            # Calcular quantidade
             eth_quantity = self.calculate_eth_quantity(usdt_balance, eth_price)
             
             if eth_quantity <= 0:
@@ -201,12 +201,13 @@ class BitgetAPI:
                 print(error_msg)
                 return {"success": False, "error": error_msg}
             
-            print(f"🎯 Executando ordem de compra...")
+            print(f"🎯 Executando ordem de COMPRA (LONG)...")
             print(f"   Símbolo: ETHUSDT")
             print(f"   Quantidade: {eth_quantity} ETH")
             print(f"   Alavancagem: 10x")
+            print(f"   Tipo: LONG (compra)")
             
-            # Fazer ordem de compra - CORRIGIDO COM TRATAMENTO DE ERRO
+            # Fazer ordem de compra
             try:
                 order = self.exchange.create_market_buy_order(
                     symbol='ETHUSDT',
@@ -219,7 +220,7 @@ class BitgetAPI:
                 if not order or 'id' not in order:
                     raise Exception("Ordem retornou vazia ou sem ID")
                 
-                success_msg = f"✅ COMPRA EXECUTADA! ID: {order['id']}"
+                success_msg = f"✅ COMPRA (LONG) EXECUTADA! ID: {order['id']}"
                 print(success_msg)
                 print(f"   Quantidade: {eth_quantity} ETH")
                 print(f"   Preço: ${eth_price:.2f}")
@@ -230,23 +231,96 @@ class BitgetAPI:
                     "order": order,
                     "quantity": eth_quantity,
                     "price": eth_price,
+                    "side": "LONG",
                     "message": success_msg
                 }
                 
             except Exception as order_error:
-                error_msg = f"❌ Erro na execução da ordem: {str(order_error)}"
+                error_msg = f"❌ Erro na execução da ordem LONG: {str(order_error)}"
                 print(error_msg)
                 return {"success": False, "error": error_msg}
             
         except Exception as e:
-            error_msg = f"❌ Erro geral na compra: {str(e)}"
+            error_msg = f"❌ Erro geral na compra LONG: {str(e)}"
+            print(error_msg)
+            return {"success": False, "error": error_msg}
+
+    def place_short_order(self):
+        """Abrir posição SHORT - NOVO MÉTODO"""
+        try:
+            print("🔻 Iniciando VENDA (SHORT)...")
+            
+            # Pegar saldo atual
+            balance_info = self.get_balance()
+            if not balance_info or balance_info.get('free', 0) <= 0:
+                error_msg = "❌ Saldo insuficiente para SHORT"
+                print(error_msg)
+                return {"success": False, "error": error_msg}
+            
+            usdt_balance = balance_info['free']
+            if usdt_balance < 1:
+                error_msg = f"❌ Saldo insuficiente: ${usdt_balance:.4f}"
+                print(error_msg)
+                return {"success": False, "error": error_msg}
+            
+            # Pegar preço atual
+            eth_price = self.get_eth_price()
+            if eth_price <= 0:
+                error_msg = "❌ Erro ao pegar preço ETH"
+                print(error_msg)
+                return {"success": False, "error": error_msg}
+            
+            # Calcular quantidade para SHORT
+            eth_quantity = self.calculate_eth_quantity(usdt_balance, eth_price)
+            
+            print(f"🎯 Executando ordem de SHORT...")
+            print(f"   Símbolo: ETHUSDT")
+            print(f"   Quantidade: {eth_quantity} ETH")
+            print(f"   Alavancagem: 10x")
+            print(f"   Tipo: SHORT (venda)")
+            
+            # Fazer ordem de venda para SHORT
+            try:
+                order = self.exchange.create_market_sell_order(
+                    symbol='ETHUSDT',
+                    amount=eth_quantity,
+                    params={
+                        'leverage': 10
+                    }
+                )
+                
+                if not order or 'id' not in order:
+                    raise Exception("Ordem SHORT retornou vazia ou sem ID")
+                
+                success_msg = f"✅ SHORT EXECUTADO! ID: {order['id']}"
+                print(success_msg)
+                print(f"   Quantidade: {eth_quantity} ETH")
+                print(f"   Preço: ${eth_price:.2f}")
+                print(f"   Valor total: ${eth_quantity * eth_price:.2f}")
+                
+                return {
+                    "success": True,
+                    "order": order,
+                    "quantity": eth_quantity,
+                    "price": eth_price,
+                    "side": "SHORT",
+                    "message": success_msg
+                }
+                
+            except Exception as order_error:
+                error_msg = f"❌ Erro na execução SHORT: {str(order_error)}"
+                print(error_msg)
+                return {"success": False, "error": error_msg}
+            
+        except Exception as e:
+            error_msg = f"❌ Erro geral no SHORT: {str(e)}"
             print(error_msg)
             return {"success": False, "error": error_msg}
 
     def place_sell_order(self, profit_target=0.01):
-        """Vender ETH - CRÍTICO CORRIGIDO para fechamento GARANTIDO"""
+        """Fechar posição LONG (vender ETH) - CRÍTICO CORRIGIDO"""
         try:
-            print(f"🔄 INICIANDO VENDA CRÍTICA...")
+            print(f"🔄 FECHANDO POSIÇÃO LONG...")
             
             # 1. BUSCAR POSIÇÕES COM MÚLTIPLAS TENTATIVAS
             positions = None
@@ -273,7 +347,7 @@ class BitgetAPI:
                 print(error_msg)
                 return {"success": False, "error": error_msg}
             
-            # 2. ENCONTRAR POSIÇÃO ETH ATIVA
+            # 2. ENCONTRAR POSIÇÃO ETH LONG ATIVA
             eth_position = None
             active_positions = 0
             
@@ -285,20 +359,19 @@ class BitgetAPI:
                 
                 print(f"   Posição {i+1}: {symbol} | Size: {size} | Side: {side}")
                 
-                if symbol == 'ETHUSDT' and abs(size) > 0:
+                if symbol == 'ETHUSDT' and abs(size) > 0 and side == 'long':
                     eth_position = pos
                     active_positions += 1
-                    print(f"   ✅ POSIÇÃO ETH ATIVA ENCONTRADA!")
+                    print(f"   ✅ POSIÇÃO LONG ENCONTRADA!")
             
             if not eth_position:
-                error_msg = f"❌ Nenhuma posição ETH ativa encontrada ({active_positions} ativas)"
+                error_msg = f"❌ Nenhuma posição LONG ETH ativa encontrada"
                 print(error_msg)
                 return {"success": False, "error": error_msg}
             
             # 3. EXTRAIR DADOS DA POSIÇÃO
             entry_price = float(eth_position.get('entryPrice', 0))
             quantity = abs(float(eth_position.get('size', 0)))
-            position_side = eth_position.get('side', 'unknown')
             unrealized_pnl = float(eth_position.get('unrealizedPnl', 0))
             
             # 4. PEGAR PREÇO ATUAL
@@ -309,113 +382,68 @@ class BitgetAPI:
             
             # 5. CALCULAR PNL
             if entry_price > 0 and current_price > 0:
-                if position_side == 'long':
-                    profit_pct = (current_price - entry_price) / entry_price * 100
-                else:
-                    profit_pct = (entry_price - current_price) / entry_price * 100
+                profit_pct = (current_price - entry_price) / entry_price * 100
             else:
                 profit_pct = 0
             
-            print(f"📊 DADOS DA POSIÇÃO:")
+            print(f"📊 DADOS DA POSIÇÃO LONG:")
             print(f"   Quantidade: {quantity} ETH")
-            print(f"   Lado: {position_side}")
             print(f"   Preço entrada: ${entry_price:.2f}")
             print(f"   Preço atual: ${current_price:.2f}")
             print(f"   PnL: {profit_pct:.3f}%")
             print(f"   PnL não realizado: ${unrealized_pnl:.2f}")
             
-            # 6. EXECUTAR VENDA COM MÚLTIPLAS TENTATIVAS
-            print(f"🎯 EXECUTANDO VENDA PARA FECHAR POSIÇÃO...")
+            # 6. EXECUTAR VENDA PARA FECHAR LONG
+            print(f"🎯 FECHANDO POSIÇÃO LONG (SELL)...")
             
             max_attempts = 5
             for attempt in range(max_attempts):
                 try:
-                    print(f"🔄 TENTATIVA DE VENDA {attempt+1}/{max_attempts}")
+                    print(f"🔄 TENTATIVA DE FECHAMENTO LONG {attempt+1}/{max_attempts}")
                     
-                    # CRÍTICO: Usar ordem de mercado para fechamento IMEDIATO
-                    if position_side == 'long':
-                        # Para LONG, fazer SELL para fechar
-                        print(f"📤 Vendendo {quantity} ETH para fechar LONG...")
-                        order = self.exchange.create_market_sell_order(
-                            symbol='ETHUSDT',
-                            amount=quantity,
-                            params={'reduceOnly': True}  # CRÍTICO: Apenas fechar posição
-                        )
-                    else:
-                        # Para SHORT, fazer BUY para fechar
-                        print(f"📤 Comprando {quantity} ETH para fechar SHORT...")
-                        order = self.exchange.create_market_buy_order(
-                            symbol='ETHUSDT',
-                            amount=quantity,
-                            params={'reduceOnly': True}  # CRÍTICO: Apenas fechar posição
-                        )
+                    # VENDER para fechar LONG
+                    order = self.exchange.create_market_sell_order(
+                        symbol='ETHUSDT',
+                        amount=quantity,
+                        params={'reduceOnly': True}  # CRÍTICO: Apenas fechar posição
+                    )
                     
                     if order and 'id' in order:
                         order_id = order['id']
-                        print(f"✅ ORDEM EXECUTADA! ID: {order_id}")
+                        print(f"✅ LONG FECHADO! ID: {order_id}")
                         
-                        # 7. VERIFICAR SE A POSIÇÃO FOI REALMENTE FECHADA
-                        time.sleep(1)  # Aguardar processamento
+                        # Verificar se foi fechado
+                        time.sleep(1)
+                        verification_success = self._verify_position_closed('ETHUSDT', 'long')
                         
-                        verification_success = False
-                        for verify_attempt in range(3):
-                            try:
-                                print(f"🔍 Verificando fechamento (tentativa {verify_attempt+1})...")
-                                new_positions = self.exchange.fetch_positions(['ETHUSDT'])
-                                
-                                position_still_exists = False
-                                if new_positions:
-                                    for pos in new_positions:
-                                        if pos.get('symbol') == 'ETHUSDT' and abs(float(pos.get('size', 0))) > 0:
-                                            position_still_exists = True
-                                            remaining_size = abs(float(pos.get('size', 0)))
-                                            print(f"⚠️ Posição ainda existe! Size: {remaining_size}")
-                                            break
-                                
-                                if not position_still_exists:
-                                    print(f"✅ POSIÇÃO FECHADA COM SUCESSO!")
-                                    verification_success = True
-                                    break
-                                else:
-                                    print(f"⚠️ Posição ainda ativa, tentativa {verify_attempt+1}")
-                                    time.sleep(2)
-                                    
-                            except Exception as verify_error:
-                                print(f"❌ Erro na verificação: {verify_error}")
-                                time.sleep(1)
+                        success_msg = f"✅ POSIÇÃO LONG FECHADA! PnL: {profit_pct:.3f}%"
+                        print(success_msg)
                         
-                        if verification_success:
-                            success_msg = f"✅ POSIÇÃO FECHADA! PnL: {profit_pct:.3f}%"
-                            print(success_msg)
-                            
-                            return {
-                                "success": True,
-                                "order": order,
-                                "order_id": order_id,
-                                "profit_pct": profit_pct,
-                                "quantity": quantity,
-                                "entry_price": entry_price,
-                                "exit_price": current_price,
-                                "position_side": position_side,
-                                "unrealized_pnl": unrealized_pnl,
-                                "message": success_msg,
-                                "verified_closed": True
-                            }
-                        else:
-                            print(f"⚠️ Ordem executada mas posição não foi completamente fechada")
-                            # Continuar tentativas se posição ainda existe
+                        return {
+                            "success": True,
+                            "order": order,
+                            "order_id": order_id,
+                            "profit_pct": profit_pct,
+                            "quantity": quantity,
+                            "entry_price": entry_price,
+                            "exit_price": current_price,
+                            "position_side": "long",
+                            "unrealized_pnl": unrealized_pnl,
+                            "message": success_msg,
+                            "verified_closed": verification_success
+                        }
                     else:
-                        raise Exception("Ordem retornou vazia ou sem ID")
+                        raise Exception("Ordem LONG retornou vazia ou sem ID")
                         
                 except Exception as sell_error:
-                    print(f"❌ ERRO na tentativa {attempt+1}: {sell_error}")
+                    print(f"❌ ERRO na tentativa LONG {attempt+1}: {sell_error}")
                     if attempt < max_attempts - 1:
-                        sleep_time = (attempt + 1) * 2  # 2s, 4s, 6s, 8s
+                        sleep_time = (attempt + 1) * 2
                         print(f"⏳ Aguardando {sleep_time}s antes da próxima tentativa...")
                         time.sleep(sleep_time)
             
             # Se chegou aqui, todas as tentativas falharam
-            error_msg = f"🚨 FALHA CRÍTICA: Não foi possível fechar posição após {max_attempts} tentativas"
+            error_msg = f"🚨 FALHA CRÍTICA: Não foi possível fechar posição LONG após {max_attempts} tentativas"
             print(error_msg)
             return {
                 "success": False,
@@ -426,11 +454,178 @@ class BitgetAPI:
             }
                 
         except Exception as e:
-            error_msg = f"🚨 ERRO CRÍTICO na venda: {str(e)}"
+            error_msg = f"🚨 ERRO CRÍTICO no fechamento LONG: {str(e)}"
             print(error_msg)
             import traceback
             traceback.print_exc()
             return {"success": False, "error": error_msg}
+
+    def close_short_position(self):
+        """Fechar posição SHORT (comprar ETH) - NOVO MÉTODO"""
+        try:
+            print(f"🔄 FECHANDO POSIÇÃO SHORT...")
+            
+            # 1. BUSCAR POSIÇÕES SHORT
+            positions = None
+            for attempt in range(3):
+                try:
+                    print(f"🔍 Tentativa {attempt+1}: Buscando posições SHORT...")
+                    positions = self.exchange.fetch_positions(['ETHUSDT'])
+                    if positions is not None:
+                        print(f"✅ Posições encontradas: {len(positions)}")
+                        break
+                except Exception as pos_error:
+                    print(f"❌ Erro ao buscar posições SHORT: {pos_error}")
+                    if attempt < 2:
+                        time.sleep(1)
+                        continue
+                    else:
+                        return {"success": False, "error": f"Falha ao buscar posições SHORT: {pos_error}"}
+            
+            if not positions:
+                error_msg = "❌ Nenhuma posição SHORT encontrada"
+                print(error_msg)
+                return {"success": False, "error": error_msg}
+            
+            # 2. ENCONTRAR POSIÇÃO ETH SHORT ATIVA
+            eth_position = None
+            
+            for i, pos in enumerate(positions):
+                symbol = pos.get('symbol', 'UNKNOWN')
+                size = float(pos.get('size', 0))
+                side = pos.get('side', 'none')
+                
+                print(f"   Posição {i+1}: {symbol} | Size: {size} | Side: {side}")
+                
+                if symbol == 'ETHUSDT' and abs(size) > 0 and side == 'short':
+                    eth_position = pos
+                    print(f"   ✅ POSIÇÃO SHORT ENCONTRADA!")
+                    break
+            
+            if not eth_position:
+                error_msg = f"❌ Nenhuma posição SHORT ETH ativa encontrada"
+                print(error_msg)
+                return {"success": False, "error": error_msg}
+            
+            # 3. EXTRAIR DADOS DA POSIÇÃO SHORT
+            entry_price = float(eth_position.get('entryPrice', 0))
+            quantity = abs(float(eth_position.get('size', 0)))
+            unrealized_pnl = float(eth_position.get('unrealizedPnl', 0))
+            
+            # 4. PEGAR PREÇO ATUAL
+            current_price = self.get_eth_price()
+            if current_price <= 0:
+                current_price = entry_price
+            
+            # 5. CALCULAR PNL PARA SHORT
+            if entry_price > 0 and current_price > 0:
+                profit_pct = (entry_price - current_price) / entry_price * 100
+            else:
+                profit_pct = 0
+            
+            print(f"📊 DADOS DA POSIÇÃO SHORT:")
+            print(f"   Quantidade: {quantity} ETH")
+            print(f"   Preço entrada: ${entry_price:.2f}")
+            print(f"   Preço atual: ${current_price:.2f}")
+            print(f"   PnL SHORT: {profit_pct:.3f}%")
+            print(f"   PnL não realizado: ${unrealized_pnl:.2f}")
+            
+            # 6. EXECUTAR COMPRA PARA FECHAR SHORT
+            print(f"🎯 FECHANDO POSIÇÃO SHORT (BUY)...")
+            
+            max_attempts = 5
+            for attempt in range(max_attempts):
+                try:
+                    print(f"🔄 TENTATIVA DE FECHAMENTO SHORT {attempt+1}/{max_attempts}")
+                    
+                    # COMPRAR para fechar SHORT
+                    order = self.exchange.create_market_buy_order(
+                        symbol='ETHUSDT',
+                        amount=quantity,
+                        params={'reduceOnly': True}  # CRÍTICO: Apenas fechar posição
+                    )
+                    
+                    if order and 'id' in order:
+                        order_id = order['id']
+                        print(f"✅ SHORT FECHADO! ID: {order_id}")
+                        
+                        # Verificar se foi fechado
+                        time.sleep(1)
+                        verification_success = self._verify_position_closed('ETHUSDT', 'short')
+                        
+                        success_msg = f"✅ POSIÇÃO SHORT FECHADA! PnL: {profit_pct:.3f}%"
+                        print(success_msg)
+                        
+                        return {
+                            "success": True,
+                            "order": order,
+                            "order_id": order_id,
+                            "profit_pct": profit_pct,
+                            "quantity": quantity,
+                            "entry_price": entry_price,
+                            "exit_price": current_price,
+                            "position_side": "short",
+                            "unrealized_pnl": unrealized_pnl,
+                            "message": success_msg,
+                            "verified_closed": verification_success
+                        }
+                    else:
+                        raise Exception("Ordem SHORT retornou vazia ou sem ID")
+                        
+                except Exception as buy_error:
+                    print(f"❌ ERRO na tentativa SHORT {attempt+1}: {buy_error}")
+                    if attempt < max_attempts - 1:
+                        sleep_time = (attempt + 1) * 2
+                        print(f"⏳ Aguardando {sleep_time}s antes da próxima tentativa...")
+                        time.sleep(sleep_time)
+            
+            # Se chegou aqui, todas as tentativas falharam
+            error_msg = f"🚨 FALHA CRÍTICA: Não foi possível fechar posição SHORT após {max_attempts} tentativas"
+            print(error_msg)
+            return {
+                "success": False,
+                "error": error_msg,
+                "attempts": max_attempts,
+                "last_profit_pct": profit_pct,
+                "position_data": eth_position
+            }
+                
+        except Exception as e:
+            error_msg = f"🚨 ERRO CRÍTICO no fechamento SHORT: {str(e)}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "error": error_msg}
+
+    def _verify_position_closed(self, symbol: str, side: str) -> bool:
+        """Verificar se posição foi realmente fechada"""
+        try:
+            for verify_attempt in range(3):
+                print(f"🔍 Verificando fechamento {side.upper()} (tentativa {verify_attempt+1})...")
+                new_positions = self.exchange.fetch_positions([symbol])
+                
+                position_still_exists = False
+                if new_positions:
+                    for pos in new_positions:
+                        if (pos.get('symbol') == symbol and 
+                            abs(float(pos.get('size', 0))) > 0 and 
+                            pos.get('side') == side):
+                            position_still_exists = True
+                            remaining_size = abs(float(pos.get('size', 0)))
+                            print(f"⚠️ Posição {side.upper()} ainda existe! Size: {remaining_size}")
+                            break
+                
+                if not position_still_exists:
+                    print(f"✅ POSIÇÃO {side.upper()} TOTALMENTE FECHADA!")
+                    return True
+                else:
+                    print(f"⚠️ Posição {side.upper()} ainda ativa, tentativa {verify_attempt+1}")
+                    time.sleep(2)
+                    
+        except Exception as verify_error:
+            print(f"❌ Erro na verificação: {verify_error}")
+        
+        return False
 
     def force_close_all_positions(self):
         """MÉTODO DE EMERGÊNCIA - Fechar TODAS as posições"""
@@ -460,7 +655,7 @@ class BitgetAPI:
                                 amount=abs(size),
                                 params={'reduceOnly': True}
                             )
-                        else:
+                        else:  # short
                             order = self.exchange.create_market_buy_order(
                                 symbol=symbol,
                                 amount=abs(size),
@@ -469,7 +664,7 @@ class BitgetAPI:
                         
                         if order and 'id' in order:
                             closed_positions.append(f"{symbol}: {size} {side}")
-                            print(f"✅ {symbol} fechado")
+                            print(f"✅ {symbol} {side} fechado")
                         else:
                             failed_positions.append(f"{symbol}: Ordem falhou")
                             
@@ -493,23 +688,22 @@ class BitgetAPI:
             positions = self.exchange.fetch_positions(['ETHUSDT'])
             balance = self.get_balance()
             
-            eth_position = None
+            eth_positions = []
             if positions:
                 for pos in positions:
                     if pos.get('symbol') == 'ETHUSDT' and abs(float(pos.get('size', 0))) > 0:
-                        eth_position = pos
-                        break
+                        eth_positions.append(pos)
             
             return {
                 'balance': balance,
-                'position': eth_position,
+                'positions': eth_positions,  # Pode ter LONG e SHORT simultâneos
                 'eth_price': self.get_eth_price()
             }
         except Exception as e:
             print(f"❌ Erro ao pegar informações: {e}")
             return {
                 'balance': {'free': 0, 'used': 0, 'total': 0},
-                'position': None,
+                'positions': [],
                 'eth_price': 0
             }
 
@@ -522,7 +716,7 @@ class BitgetAPI:
         try:
             balance = self.exchange.fetch_balance()
             if balance and isinstance(balance, dict):
-                print("✅ Conexão com Bitget OK")
+                print("✅ Conexão com Bitget OK - SUPORTE LONG/SHORT")
                 return True
             else:
                 print("❌ Resposta de balance inválida")
@@ -537,11 +731,13 @@ class BitgetAPI:
 
     # Métodos antigos para compatibilidade TOTAL
     def place_order(self, side='buy', **kwargs):
-        """Compatibilidade com código antigo"""
-        if side.lower() == 'buy':
+        """Compatibilidade com código antigo - SUPORTE LONG/SHORT"""
+        if side.lower() == 'buy' or side.lower() == 'long':
             return self.place_buy_order()
+        elif side.lower() == 'sell' or side.lower() == 'short':
+            return self.place_short_order()
         else:
-            return self.place_sell_order()
+            return {"success": False, "error": f"Side inválido: {side}"}
 
     def get_ticker(self, symbol='ETHUSDT'):
         """Compatibilidade - alias para get_market_data"""
@@ -597,17 +793,19 @@ class BitgetAPI:
             print(f"❌ Erro create_order: {e}")
             return None
 
+
 # Função para compatibilidade total
 def create_bitget_api():
     """Cria instância da BitgetAPI usando variáveis de ambiente"""
     return BitgetAPI()
+
 
 # Testar se executado diretamente
 if __name__ == "__main__":
     try:
         api = BitgetAPI()
         if api.test_connection():
-            print("🔥 API funcionando!")
+            print("🔥 API funcionando com SUPORTE COMPLETO LONG/SHORT!")
             
             # Teste básico
             balance = api.get_balance()
@@ -620,7 +818,21 @@ if __name__ == "__main__":
             
             # Teste de posições
             position_info = api.get_position_info()
-            print(f"📍 Posições: {'Ativa' if position_info.get('position') else 'Nenhuma'}")
+            positions = position_info.get('positions', [])
+            print(f"🔍 Posições ativas: {len(positions)}")
+            
+            for pos in positions:
+                symbol = pos.get('symbol', 'UNKNOWN')
+                side = pos.get('side', 'unknown')
+                size = pos.get('size', 0)
+                print(f"   {symbol}: {side} {size}")
+            
+            print("\n✅ RECURSOS DISPONÍVEIS:")
+            print("   - place_buy_order() -> Abrir LONG")
+            print("   - place_short_order() -> Abrir SHORT") 
+            print("   - place_sell_order() -> Fechar LONG")
+            print("   - close_short_position() -> Fechar SHORT")
+            print("   - force_close_all_positions() -> Emergência")
             
         else:
             print("❌ Falha na conexão")
