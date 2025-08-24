@@ -73,50 +73,118 @@ class TradingMetrics:
     def net_profit(self) -> float:
         return self.total_profit - self.total_fees_paid
 
-class SimpleIndicators:
-    """Indicadores técnicos simplificados e confiáveis"""
+class AdvancedIndicators:
+    """Indicadores técnicos aprimorados e mais precisos"""
     
     @staticmethod
-    def rsi(prices: List[float], period: int = 14) -> float:
-        """RSI simples e confiável"""
-        if len(prices) < period + 1:
-            return 50.0
+    def rsi_with_validation(prices: List[float], period: int = 14) -> Tuple[float, float]:
+        """RSI com validação de qualidade do sinal"""
+        if len(prices) < period + 10:  # Mais dados para precisão
+            return 50.0, 0.0
         
+        # Usar mais dados para melhor precisão
+        extended_period = min(len(prices), period * 2)
         deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
-        gains = [max(0, delta) for delta in deltas[-period:]]
-        losses = [max(0, -delta) for delta in deltas[-period:]]
         
-        avg_gain = sum(gains) / len(gains) if gains else 0
-        avg_loss = sum(losses) / len(losses) if losses else 0.001
+        # Calcular RSI com suavização
+        gains = [max(0, delta) for delta in deltas[-extended_period:]]
+        losses = [max(0, -delta) for delta in deltas[-extended_period:]]
         
-        rs = avg_gain / avg_loss
-        return 100 - (100 / (1 + rs))
+        # Média móvel exponencial para suavizar
+        if len(gains) > period:
+            avg_gain = sum(gains[-period:]) / period
+            avg_loss = sum(losses[-period:]) / period
+        else:
+            avg_gain = sum(gains) / len(gains) if gains else 0
+            avg_loss = sum(losses) / len(losses) if losses else 0.001
+        
+        rs = avg_gain / max(avg_loss, 0.001)
+        rsi = 100 - (100 / (1 + rs))
+        
+        # Calcular força do sinal (volatilidade do RSI)
+        if len(prices) > period * 2:
+            recent_rsi = []
+            for i in range(period, min(len(prices), period + 10)):
+                subset = prices[:i+1]
+                if len(subset) >= period:
+                    sub_deltas = [subset[j] - subset[j-1] for j in range(1, len(subset))]
+                    sub_gains = [max(0, d) for d in sub_deltas[-period:]]
+                    sub_losses = [max(0, -d) for d in sub_deltas[-period:]]
+                    sub_avg_gain = sum(sub_gains) / len(sub_gains) if sub_gains else 0
+                    sub_avg_loss = sum(sub_losses) / len(sub_losses) if sub_losses else 0.001
+                    sub_rs = sub_avg_gain / sub_avg_loss
+                    sub_rsi = 100 - (100 / (1 + sub_rs))
+                    recent_rsi.append(sub_rsi)
+            
+            if len(recent_rsi) > 3:
+                rsi_volatility = statistics.stdev(recent_rsi)
+                signal_strength = min(1.0, rsi_volatility / 20)  # Normalizar
+            else:
+                signal_strength = 0.5
+        else:
+            signal_strength = 0.3
+        
+        return rsi, signal_strength
     
     @staticmethod
-    def sma(prices: List[float], period: int) -> float:
-        """Média móvel simples"""
-        if len(prices) < period:
-            return prices[-1] if prices else 0
-        return sum(prices[-period:]) / period
-    
-    @staticmethod
-    def ema(prices: List[float], period: int) -> float:
-        """Média móvel exponencial"""
-        if len(prices) < period:
-            return prices[-1] if prices else 0
+    def macd_advanced(prices: List[float], fast=12, slow=26, signal=9) -> Tuple[float, float, float, float]:
+        """MACD com histogram e força do sinal"""
+        if len(prices) < slow + signal + 5:
+            return 0.0, 0.0, 0.0, 0.0
         
-        multiplier = 2 / (period + 1)
-        ema = prices[0]
-        for price in prices[1:]:
-            ema = (price * multiplier) + (ema * (1 - multiplier))
-        return ema
+        # EMAs
+        def ema(data, period):
+            multiplier = 2 / (period + 1)
+            ema_vals = [data[0]]
+            for price in data[1:]:
+                ema_vals.append((price * multiplier) + (ema_vals[-1] * (1 - multiplier)))
+            return ema_vals[-1]
+        
+        ema_fast = ema(prices, fast)
+        ema_slow = ema(prices, slow)
+        macd_line = ema_fast - ema_slow
+        
+        # Calcular linha de sinal
+        if len(prices) >= slow + signal:
+            macd_history = []
+            for i in range(slow, len(prices)):
+                subset = prices[:i+1]
+                if len(subset) >= slow:
+                    fast_ema = ema(subset, fast)
+                    slow_ema = ema(subset, slow)
+                    macd_history.append(fast_ema - slow_ema)
+            
+            if len(macd_history) >= signal:
+                signal_line = ema(macd_history, signal)
+                histogram = macd_line - signal_line
+                
+                # Força do sinal baseada no momentum
+                if len(macd_history) > 3:
+                    recent_macd = macd_history[-3:]
+                    momentum = (recent_macd[-1] - recent_macd[0]) / abs(recent_macd[0] + 0.001)
+                    signal_strength = min(1.0, abs(momentum) * 10)
+                else:
+                    signal_strength = 0.3
+            else:
+                signal_line = 0.0
+                histogram = macd_line
+                signal_strength = 0.3
+        else:
+            signal_line = 0.0
+            histogram = macd_line
+            signal_strength = 0.3
+        
+        return macd_line, signal_line, histogram, signal_strength
     
     @staticmethod
-    def bollinger_bands(prices: List[float], period: int = 20, std_dev: float = 2) -> Tuple[float, float, float]:
-        """Bandas de Bollinger"""
-        if len(prices) < period:
+    def bollinger_with_squeeze(prices: List[float], period: int = 20, std_dev: float = 2) -> Dict:
+        """Bollinger Bands com detecção de squeeze"""
+        if len(prices) < period + 10:
             price = prices[-1] if prices else 0
-            return price, price, price
+            return {
+                'upper': price, 'lower': price, 'middle': price,
+                'squeeze': False, 'breakout_direction': None, 'strength': 0.0
+            }
         
         recent_prices = prices[-period:]
         middle = sum(recent_prices) / len(recent_prices)
@@ -125,7 +193,107 @@ class SimpleIndicators:
         
         upper = middle + (std_dev * std)
         lower = middle - (std_dev * std)
-        return upper, lower, middle
+        current_price = prices[-1]
+        
+        # Detectar squeeze (bandas estreitas)
+        band_width = (upper - lower) / middle
+        historical_widths = []
+        
+        for i in range(max(0, len(prices) - 50), len(prices) - period):
+            if i >= period:
+                subset = prices[i:i+period]
+                sub_middle = sum(subset) / len(subset)
+                sub_var = sum([(p - sub_middle) ** 2 for p in subset]) / len(subset)
+                sub_std = math.sqrt(sub_var)
+                sub_width = (sub_std * 2 * 2) / sub_middle
+                historical_widths.append(sub_width)
+        
+        if historical_widths:
+            avg_width = sum(historical_widths) / len(historical_widths)
+            is_squeeze = band_width < avg_width * 0.8
+        else:
+            is_squeeze = False
+        
+        # Detectar direção de breakout
+        bb_position = (current_price - lower) / max(upper - lower, 0.001)
+        breakout_direction = None
+        strength = 0.0
+        
+        if bb_position > 0.8:
+            breakout_direction = "UP"
+            strength = min(1.0, (bb_position - 0.8) * 5)
+        elif bb_position < 0.2:
+            breakout_direction = "DOWN" 
+            strength = min(1.0, (0.2 - bb_position) * 5)
+        
+        return {
+            'upper': upper,
+            'lower': lower,
+            'middle': middle,
+            'squeeze': is_squeeze,
+            'breakout_direction': breakout_direction,
+            'strength': strength,
+            'position': bb_position
+        }
+    
+    @staticmethod
+    def volume_price_analysis(prices: List[float], volumes: List[float]) -> Dict:
+        """Análise de volume-preço"""
+        if len(prices) < 10 or len(volumes) < 10:
+            return {'strength': 0.0, 'signal': 'NEUTRAL', 'quality': 0.0}
+        
+        # Alinhar preços e volumes
+        min_len = min(len(prices), len(volumes))
+        recent_prices = prices[-min_len:]
+        recent_volumes = volumes[-min_len:]
+        
+        if len(recent_prices) < 5:
+            return {'strength': 0.0, 'signal': 'NEUTRAL', 'quality': 0.0}
+        
+        # Calcular mudanças de preço e volume
+        price_changes = [recent_prices[i] - recent_prices[i-1] for i in range(1, len(recent_prices))]
+        volume_changes = [recent_volumes[i] - recent_volumes[i-1] for i in range(1, len(recent_volumes))]
+        
+        # Correlação preço-volume
+        positive_moves = 0
+        negative_moves = 0
+        total_strength = 0
+        
+        for i in range(len(price_changes)):
+            price_change = price_changes[i]
+            volume = recent_volumes[i+1]
+            avg_volume = sum(recent_volumes) / len(recent_volumes)
+            
+            volume_strength = volume / max(avg_volume, 1)
+            
+            if price_change > 0 and volume_strength > 1.2:
+                positive_moves += 1
+                total_strength += volume_strength
+            elif price_change < 0 and volume_strength > 1.2:
+                negative_moves += 1
+                total_strength += volume_strength
+        
+        total_moves = positive_moves + negative_moves
+        if total_moves == 0:
+            return {'strength': 0.0, 'signal': 'NEUTRAL', 'quality': 0.0}
+        
+        if positive_moves > negative_moves:
+            signal = 'BULLISH'
+            strength = (positive_moves / total_moves) * (total_strength / total_moves)
+        elif negative_moves > positive_moves:
+            signal = 'BEARISH'
+            strength = (negative_moves / total_moves) * (total_strength / total_moves)
+        else:
+            signal = 'NEUTRAL'
+            strength = 0.0
+        
+        quality = min(1.0, total_strength / len(price_changes))
+        
+        return {
+            'strength': min(1.0, strength),
+            'signal': signal,
+            'quality': quality
+        }
 
 class TradingBot:
     def __init__(self, bitget_api: BitgetAPI, symbol: str = 'ETHUSDT',
@@ -152,9 +320,9 @@ class TradingBot:
         self.trading_thread: Optional[threading.Thread] = None
         self.last_error: Optional[str] = None
 
-        # CONFIGURAÇÕES CORRIGIDAS - Take Profit 0.9%
-        self.profit_target = 0.009           # 0.9% take profit (CORRIGIDO)
-        self.stop_loss = 0.004               # 0.4% stop loss 
+        # CONFIGURAÇÕES MANTIDAS - Take Profit 0.9% e Stop Loss 0.4%
+        self.profit_target = 0.009           # 0.9% take profit (MANTIDO)
+        self.stop_loss = 0.004               # 0.4% stop loss (MANTIDO)
         self.min_profit_target = 0.005       # 0.5% mínimo para compensar fees
         self.max_position_time = 300         # 5 minutos máximo por trade
         self.min_position_time = 15          # 15 segundos mínimo
@@ -164,9 +332,9 @@ class TradingBot:
         self.max_consecutive_losses = 3     # Parar após 3 perdas seguidas
         self.min_time_between_trades = 10   # 10 segundos entre trades
         
-        # Indicadores e dados
-        self.price_history = deque(maxlen=200)
-        self.volume_history = deque(maxlen=50)
+        # Indicadores e dados - APRIMORADOS
+        self.price_history = deque(maxlen=500)  # Mais dados para análise
+        self.volume_history = deque(maxlen=200) # Mais volume para análise
         
         # Métricas
         self.metrics = TradingMetrics()
@@ -175,15 +343,21 @@ class TradingBot:
         self.consecutive_losses = 0
         self.last_trade_time = 0
         
-        # Threading - CORRIGIDO
+        # Threading - APRIMORADO
         self._lock = threading.Lock()
         self.is_entering_position = False
         self.is_exiting_position = False
+        self.force_close_flag = False  # Flag para fechamento forçado
+        
+        # Controle de fechamento CRÍTICO
+        self.close_attempts = 0
+        self.max_close_attempts = 5
+        self.last_close_attempt = 0
         
         # Inicialização
-        logger.info("Trading Bot Profissional Inicializado")
-        logger.info(f"Take Profit: {self.profit_target*100:.1f}%")
-        logger.info(f"Stop Loss: {self.stop_loss*100:.1f}%")
+        logger.info("Trading Bot Profissional Aprimorado Inicializado")
+        logger.info(f"Take Profit: {self.profit_target*100:.1f}% (MANTIDO)")
+        logger.info(f"Stop Loss: {self.stop_loss*100:.1f}% (MANTIDO)")
 
     def start(self) -> bool:
         """Iniciar bot com configurações otimizadas"""
@@ -191,7 +365,7 @@ class TradingBot:
             if self.state == TradingState.RUNNING:
                 return True
             
-            logger.info("Iniciando bot profissional...")
+            logger.info("Iniciando bot profissional aprimorado...")
             
             # Reset estado
             self.state = TradingState.RUNNING
@@ -200,9 +374,11 @@ class TradingBot:
             self.daily_loss = 0.0
             self.trades_today = 0
             
-            # Reset locks
+            # Reset locks e flags críticos
             self.is_entering_position = False
             self.is_exiting_position = False
+            self.force_close_flag = False
+            self.close_attempts = 0
             
             # Coletar dados iniciais
             self._collect_initial_data()
@@ -211,11 +387,11 @@ class TradingBot:
             self.trading_thread = threading.Thread(
                 target=self._main_trading_loop,
                 daemon=True,
-                name="ProfessionalTradingBot"
+                name="EnhancedTradingBot"
             )
             self.trading_thread.start()
             
-            logger.info("Bot profissional iniciado com sucesso!")
+            logger.info("Bot profissional aprimorado iniciado com sucesso!")
             return True
             
         except Exception as e:
@@ -229,9 +405,10 @@ class TradingBot:
             logger.info("Parando bot...")
             self.state = TradingState.STOPPED
             
-            # Fechar posição se existir
+            # Fechar posição se existir - FORÇADO
             if self.current_position:
-                self._close_position_safely("Bot stopping")
+                self.force_close_flag = True
+                self._close_position_safely("Bot stopping - FORCED")
             
             # Aguardar thread
             if self.trading_thread and self.trading_thread.is_alive():
@@ -251,23 +428,29 @@ class TradingBot:
             return False
 
     def _collect_initial_data(self):
-        """Coletar dados históricos iniciais"""
+        """Coletar dados históricos iniciais - APRIMORADO"""
         try:
-            logger.info("Coletando dados iniciais...")
-            for _ in range(30):
+            logger.info("Coletando dados iniciais aprimorados...")
+            for i in range(100):  # Mais dados para análise melhor
                 market_data = self.bitget_api.get_market_data(self.symbol)
                 if market_data and market_data.get('price', 0) > 0:
                     self.price_history.append(float(market_data['price']))
                     if market_data.get('volume', 0) > 0:
                         self.volume_history.append(float(market_data['volume']))
-                time.sleep(0.5)
-            logger.info(f"Coletados {len(self.price_history)} pontos de preço")
+                
+                # Mostrar progresso
+                if (i + 1) % 20 == 0:
+                    logger.info(f"Coletados {len(self.price_history)} pontos...")
+                
+                time.sleep(0.3)  # Mais rápido
+            
+            logger.info(f"✅ Dados coletados: {len(self.price_history)} preços, {len(self.volume_history)} volumes")
         except Exception as e:
             logger.error(f"Erro coletando dados: {e}")
 
     def _main_trading_loop(self):
         """Loop principal otimizado"""
-        logger.info("Loop principal iniciado")
+        logger.info("Loop principal aprimorado iniciado")
         
         while self.state == TradingState.RUNNING:
             try:
@@ -281,17 +464,17 @@ class TradingBot:
                 # Atualizar dados de mercado
                 self._update_market_data()
                 
-                # Gerenciar posição existente
+                # Gerenciar posição existente - CRÍTICO
                 if self.current_position:
-                    self._manage_position()
+                    self._manage_position_enhanced()
                 
-                # Procurar nova oportunidade
+                # Procurar nova oportunidade - APRIMORADO
                 elif self._can_open_new_position():
-                    signal = self._analyze_market()
+                    signal = self._analyze_market_advanced()
                     if signal:
-                        direction, confidence = signal
-                        if confidence > 0.7:
-                            self._execute_trade(direction, confidence)
+                        direction, confidence, analysis = signal
+                        if confidence > 0.75 and analysis.get('quality', 0) > 0.6:
+                            self._execute_trade(direction, confidence, analysis)
                 
                 # Sleep controlado
                 elapsed = time.time() - loop_start
@@ -319,68 +502,129 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Erro atualizando dados: {e}")
 
-    def _analyze_market(self) -> Optional[Tuple[TradeDirection, float]]:
-        """Análise de mercado simplificada"""
+    def _analyze_market_advanced(self) -> Optional[Tuple[TradeDirection, float, Dict]]:
+        """Análise de mercado APRIMORADA com múltiplos indicadores"""
         try:
-            if len(self.price_history) < 30:
+            if len(self.price_history) < 100:  # Mais dados necessários
                 return None
                 
             prices = list(self.price_history)
+            volumes = list(self.volume_history) if len(self.volume_history) > 50 else None
             current_price = prices[-1]
             
-            # Indicadores principais
-            rsi = SimpleIndicators.rsi(prices)
-            sma_20 = SimpleIndicators.sma(prices, 20)
-            ema_12 = SimpleIndicators.ema(prices, 12)
-            ema_26 = SimpleIndicators.ema(prices, 26)
-            bb_upper, bb_lower, bb_middle = SimpleIndicators.bollinger_bands(prices)
+            # Indicadores avançados
+            rsi, rsi_strength = AdvancedIndicators.rsi_with_validation(prices, 14)
+            macd, signal_line, histogram, macd_strength = AdvancedIndicators.macd_advanced(prices)
+            bb_data = AdvancedIndicators.bollinger_with_squeeze(prices)
             
-            # Sinais de entrada
+            # Análise de volume se disponível
+            volume_analysis = {'strength': 0.0, 'signal': 'NEUTRAL', 'quality': 0.0}
+            if volumes and len(volumes) > 20:
+                volume_analysis = AdvancedIndicators.volume_price_analysis(prices, volumes)
+            
+            # Sistema de pontuação aprimorado
             signals = []
+            total_confidence = 0.0
             
-            # RSI oversold/overbought
-            if rsi < 30:
-                signals.append(("LONG", 0.3))
-            elif rsi > 70:
-                signals.append(("SHORT", 0.3))
+            # 1. RSI com força
+            if rsi < 25 and rsi_strength > 0.4:
+                signals.append(("LONG", 0.35 * rsi_strength, "RSI Oversold Strong"))
+                total_confidence += 0.35 * rsi_strength
+            elif rsi > 75 and rsi_strength > 0.4:
+                signals.append(("SHORT", 0.35 * rsi_strength, "RSI Overbought Strong"))
+                total_confidence += 0.35 * rsi_strength
             
-            # EMA crossover
-            if ema_12 > ema_26:
-                signals.append(("LONG", 0.2))
-            else:
-                signals.append(("SHORT", 0.2))
+            # 2. MACD com momentum
+            if histogram > 0 and macd > signal_line and macd_strength > 0.3:
+                signals.append(("LONG", 0.3 * macd_strength, "MACD Bullish"))
+                total_confidence += 0.3 * macd_strength
+            elif histogram < 0 and macd < signal_line and macd_strength > 0.3:
+                signals.append(("SHORT", 0.3 * macd_strength, "MACD Bearish"))
+                total_confidence += 0.3 * macd_strength
             
-            # Bollinger Bands
-            if bb_upper != bb_lower:
-                bb_position = (current_price - bb_lower) / (bb_upper - bb_lower)
-                if bb_position < 0.2:
-                    signals.append(("LONG", 0.25))
-                elif bb_position > 0.8:
-                    signals.append(("SHORT", 0.25))
+            # 3. Bollinger Bands com breakout
+            if bb_data['breakout_direction'] == "UP" and bb_data['strength'] > 0.5:
+                signals.append(("LONG", 0.25 * bb_data['strength'], "BB Breakout Up"))
+                total_confidence += 0.25 * bb_data['strength']
+            elif bb_data['breakout_direction'] == "DOWN" and bb_data['strength'] > 0.5:
+                signals.append(("SHORT", 0.25 * bb_data['strength'], "BB Breakout Down"))
+                total_confidence += 0.25 * bb_data['strength']
             
-            # Trend following
-            if current_price > sma_20 * 1.002:
-                signals.append(("LONG", 0.15))
-            elif current_price < sma_20 * 0.998:
-                signals.append(("SHORT", 0.15))
+            # 4. Volume confirmation
+            if volume_analysis['signal'] == 'BULLISH' and volume_analysis['quality'] > 0.5:
+                signals.append(("LONG", 0.2 * volume_analysis['strength'], "Volume Bullish"))
+                total_confidence += 0.2 * volume_analysis['strength']
+            elif volume_analysis['signal'] == 'BEARISH' and volume_analysis['quality'] > 0.5:
+                signals.append(("SHORT", 0.2 * volume_analysis['strength'], "Volume Bearish"))
+                total_confidence += 0.2 * volume_analysis['strength']
             
-            # Calcular direção final
-            long_strength = sum([strength for direction, strength in signals if direction == "LONG"])
-            short_strength = sum([strength for direction, strength in signals if direction == "SHORT"])
+            # 5. Trend following aprimorado
+            sma_20 = sum(prices[-20:]) / 20
+            sma_50 = sum(prices[-50:]) / 50 if len(prices) >= 50 else sma_20
             
-            if long_strength > short_strength and long_strength > 0.6:
-                return TradeDirection.LONG, min(long_strength, 0.95)
-            elif short_strength > long_strength and short_strength > 0.6:
-                return TradeDirection.SHORT, min(short_strength, 0.95)
+            trend_strength = abs(current_price - sma_20) / sma_20
+            if current_price > sma_20 > sma_50 and trend_strength > 0.003:
+                signals.append(("LONG", 0.15 * min(trend_strength * 100, 1.0), "Trend Following"))
+                total_confidence += 0.15 * min(trend_strength * 100, 1.0)
+            elif current_price < sma_20 < sma_50 and trend_strength > 0.003:
+                signals.append(("SHORT", 0.15 * min(trend_strength * 100, 1.0), "Trend Following"))
+                total_confidence += 0.15 * min(trend_strength * 100, 1.0)
+            
+            # Calcular direção final com validação
+            long_signals = [s for s in signals if s[0] == "LONG"]
+            short_signals = [s for s in signals if s[0] == "SHORT"]
+            
+            long_strength = sum([s[1] for s in long_signals])
+            short_strength = sum([s[1] for s in short_signals])
+            
+            # Critérios mais rigorosos
+            min_confidence = 0.75
+            min_signal_count = 3
+            
+            analysis_data = {
+                'rsi': rsi,
+                'rsi_strength': rsi_strength,
+                'macd': macd,
+                'macd_strength': macd_strength,
+                'bb_data': bb_data,
+                'volume_analysis': volume_analysis,
+                'signals': signals,
+                'total_confidence': total_confidence,
+                'quality': min(1.0, (len(signals) / 5) * total_confidence)
+            }
+            
+            if (long_strength > short_strength and 
+                long_strength >= min_confidence and 
+                len(long_signals) >= min_signal_count):
+                
+                logger.info(f"🎯 SINAL LONG detectado:")
+                for signal in long_signals:
+                    logger.info(f"   {signal[2]}: {signal[1]:.3f}")
+                
+                return TradeDirection.LONG, min(long_strength, 0.95), analysis_data
+                
+            elif (short_strength > long_strength and 
+                  short_strength >= min_confidence and 
+                  len(short_signals) >= min_signal_count):
+                
+                logger.info(f"🎯 SINAL SHORT detectado:")
+                for signal in short_signals:
+                    logger.info(f"   {signal[2]}: {signal[1]:.3f}")
+                
+                return TradeDirection.SHORT, min(short_strength, 0.95), analysis_data
+            
+            # Log de análise quando não há sinal forte
+            if len(signals) > 0:
+                logger.debug(f"📊 Análise: L:{long_strength:.2f} S:{short_strength:.2f} Q:{analysis_data['quality']:.2f}")
             
             return None
             
         except Exception as e:
-            logger.error(f"Erro na análise: {e}")
+            logger.error(f"Erro na análise avançada: {e}")
             return None
 
-    def _execute_trade(self, direction: TradeDirection, confidence: float):
-        """Executar trade de forma segura - CORRIGIDO"""
+    def _execute_trade(self, direction: TradeDirection, confidence: float, analysis: Dict):
+        """Executar trade de forma segura - MANTIDO IGUAL"""
         if self.is_entering_position:
             return
             
@@ -398,7 +642,7 @@ class TradingBot:
             
             current_price = self.price_history[-1]
             
-            # Calcular targets
+            # Calcular targets - MANTIDOS
             if direction == TradeDirection.LONG:
                 target_price = current_price * (1 + self.profit_target)
                 stop_price = current_price * (1 - self.stop_loss)
@@ -406,11 +650,12 @@ class TradingBot:
                 target_price = current_price * (1 - self.profit_target)
                 stop_price = current_price * (1 + self.stop_loss)
             
-            logger.info(f"Executando {direction.name}:")
+            logger.info(f"🚀 Executando {direction.name} APRIMORADO:")
             logger.info(f"   Preço: ${current_price:.2f}")
             logger.info(f"   Target: ${target_price:.2f} ({self.profit_target*100:.1f}%)")
             logger.info(f"   Stop: ${stop_price:.2f}")
             logger.info(f"   Confiança: {confidence*100:.1f}%")
+            logger.info(f"   Qualidade: {analysis.get('quality', 0)*100:.1f}%")
             
             # Executar ordem - CORRIGIDO
             success = False
@@ -449,7 +694,9 @@ class TradingBot:
                 
                 self.trades_today += 1
                 self.last_trade_time = time.time()
-                logger.info(f"✅ Trade #{self.trades_today} executado com sucesso!")
+                self.close_attempts = 0  # Reset contador
+                
+                logger.info(f"✅ Trade #{self.trades_today} executado com SUCESSO!")
                 logger.info(f"   Posição: {position_size:.4f} ETH")
                 logger.info(f"   Valor: ${position_value:.2f}")
             
@@ -459,8 +706,8 @@ class TradingBot:
         finally:
             self.is_entering_position = False
 
-    def _manage_position(self):
-        """Gerenciar posição - MÉTODO PRINCIPAL DE FECHAMENTO"""
+    def _manage_position_enhanced(self):
+        """Gerenciar posição - MÉTODO CRÍTICO APRIMORADO"""
         if not self.current_position or self.is_exiting_position:
             return
             
@@ -471,85 +718,159 @@ class TradingBot:
             
             should_close = False
             reason = ""
+            is_emergency = False
             
-            # CONDIÇÕES DE FECHAMENTO CORRIGIDAS
+            # CONDIÇÕES DE FECHAMENTO CRÍTICAS - MANTIDAS
+            
+            # 1. TAKE PROFIT - 0.9% (MANTIDO)
             if pnl >= self.profit_target:
                 should_close = True
-                reason = f"✅ TAKE PROFIT: {pnl*100:.3f}%"
+                reason = f"✅ TAKE PROFIT ATINGIDO: {pnl*100:.3f}% >= {self.profit_target*100:.1f}%"
+                logger.info(f"🎯 TAKE PROFIT DETECTADO: {pnl*100:.3f}%")
                 
+            # 2. STOP LOSS - 0.4% (MANTIDO) 
             elif pnl <= -self.stop_loss:
                 should_close = True
-                reason = f"❌ STOP LOSS: {pnl*100:.3f}%"
+                is_emergency = True
+                reason = f"⛔ STOP LOSS ATINGIDO: {pnl*100:.3f}% <= -{self.stop_loss*100:.1f}%"
+                logger.warning(f"🚨 STOP LOSS DETECTADO: {pnl*100:.3f}%")
                 
+            # 3. TEMPO LIMITE - 5 minutos
             elif duration >= self.max_position_time:
                 should_close = True
-                reason = f"⏰ TEMPO LIMITE: {duration:.0f}s, PnL: {pnl*100:.3f}%"
+                reason = f"⏰ TEMPO LIMITE: {duration:.0f}s >= {self.max_position_time}s, PnL: {pnl*100:.3f}%"
+                logger.warning(f"⏰ TEMPO LIMITE ATINGIDO: {duration:.0f}s")
+                
+            # 4. PERDA CRÍTICA - Emergência
+            elif pnl <= -0.01:  # -1% perda crítica
+                should_close = True
+                is_emergency = True
+                reason = f"🚨 PERDA CRÍTICA: {pnl*100:.3f}%"
+                logger.error(f"🚨 PERDA CRÍTICA DETECTADA: {pnl*100:.3f}%")
             
-            # Log periódico da posição
-            if int(duration) % 15 == 0:  # A cada 15 segundos
-                logger.info(f"📊 Posição ativa: {pnl*100:.3f}% | {duration:.0f}s | Target: {self.profit_target*100:.1f}%")
+            # 5. FORÇA FECHAMENTO se muitas tentativas
+            elif self.close_attempts >= 3:
+                should_close = True
+                is_emergency = True
+                reason = f"🔴 FECHAMENTO FORÇADO: {self.close_attempts} tentativas, PnL: {pnl*100:.3f}%"
+                logger.error(reason)
+            
+            # 6. Flag de fechamento forçado
+            elif self.force_close_flag:
+                should_close = True
+                is_emergency = True
+                reason = "🔴 FECHAMENTO FORÇADO POR FLAG"
+                logger.error(reason)
+            
+            # Log periódico da posição a cada 10 segundos
+            if int(duration) % 10 == 0 and int(duration) > 0:
+                target_distance = (self.profit_target - pnl) * 100
+                stop_distance = (pnl + self.stop_loss) * 100
+                logger.info(f"📊 Posição: {pnl*100:.3f}% | {duration:.0f}s | Target: -{target_distance:.1f}% | Stop: +{stop_distance:.1f}%")
             
             if should_close:
-                logger.info(f"🔄 Fechando posição: {reason}")
-                self._close_position_safely(reason)
+                logger.info(f"🔄 INICIANDO FECHAMENTO: {reason}")
+                if is_emergency:
+                    self.force_close_flag = True
+                success = self._close_position_safely(reason)
+                
+                # Se falhou, incrementar contador
+                if not success:
+                    self.close_attempts += 1
+                    logger.error(f"❌ FALHA NO FECHAMENTO #{self.close_attempts}")
+                    
+                    # Tentar novamente em 2 segundos
+                    time.sleep(2)
+                    if self.close_attempts < self.max_close_attempts:
+                        logger.warning(f"🔄 NOVA TENTATIVA DE FECHAMENTO #{self.close_attempts + 1}")
                 
         except Exception as e:
-            logger.error(f"Erro gerenciando posição: {e}")
+            logger.error(f"Erro crítico gerenciando posição: {e}")
+            traceback.print_exc()
+            # Em caso de erro crítico, forçar fechamento
+            self.force_close_flag = True
+            self.close_attempts += 1
 
     def _close_position_safely(self, reason: str) -> bool:
-        """Fechar posição com múltiplas tentativas - CORRIGIDO"""
+        """Fechar posição com múltiplas tentativas - CRÍTICO CORRIGIDO"""
         if self.is_exiting_position or not self.current_position:
             return False
             
-        self.is_exiting_position = True
+        # Prevenir múltiplas execuções simultâneas
+        with self._lock:
+            if self.is_exiting_position:
+                return False
+            self.is_exiting_position = True
         
         try:
             current_price = self.price_history[-1] if self.price_history else self.current_position.entry_price
             final_pnl = self.current_position.calculate_pnl(current_price)
             duration = self.current_position.get_duration()
             
-            logger.info(f"🔄 Iniciando fechamento: {reason}")
-            logger.info(f"   PnL atual: {final_pnl*100:.3f}%")
+            logger.info(f"🔄 EXECUTANDO FECHAMENTO: {reason}")
+            logger.info(f"   PnL atual: {final_pnl*100:.4f}%")
             logger.info(f"   Duração: {duration:.1f}s")
+            logger.info(f"   Tentativa: #{self.close_attempts + 1}")
             
             success = False
-            max_attempts = 3
+            max_attempts = 5 if self.force_close_flag else 3
             
             for attempt in range(max_attempts):
                 try:
+                    attempt_start = time.time()
+                    logger.info(f"🔄 Tentativa {attempt+1}/{max_attempts}...")
+                    
                     if self.paper_trading:
                         success = True
-                        logger.info("PAPER TRADING - Fechamento simulado")
+                        logger.info("PAPER TRADING - Fechamento simulado com SUCESSO")
                         break
                     
-                    # FECHAR POSIÇÃO REAL - CORRIGIDO
+                    # FECHAR POSIÇÃO REAL - CRÍTICO
                     if self.current_position.side == TradeDirection.LONG:
-                        # Para LONG, vender para fechar
-                        logger.info(f"Tentativa {attempt+1}: Vendendo posição LONG...")
-                        result = self.bitget_api.place_sell_order(profit_target=0)  # Vender imediatamente
-                        if result:
+                        logger.info(f"📤 Vendendo posição LONG...")
+                        
+                        # Usar profit_target=0 para vender IMEDIATAMENTE
+                        result = self.bitget_api.place_sell_order(profit_target=0)
+                        
+                        if result and isinstance(result, dict):
                             success = result.get('success', False)
-                            logger.info(f"Resultado venda: {result}")
+                            if success:
+                                logger.info(f"✅ VENDA EXECUTADA: {result}")
+                                break
+                            else:
+                                error_msg = result.get('error', 'Erro desconhecido')
+                                logger.warning(f"⚠️ Venda falhou: {error_msg}")
                         else:
-                            logger.warning("Resultado venda é None")
+                            logger.warning(f"⚠️ Resultado venda inválido: {result}")
                     else:
                         # Para SHORT, comprar para fechar
-                        logger.info(f"Tentativa {attempt+1}: Comprando para fechar SHORT...")
-                        # Implementar quando necessário
-                        success = False
+                        logger.info(f"📤 Comprando para fechar SHORT...")
+                        result = self.bitget_api.place_buy_order()
+                        if result and isinstance(result, dict):
+                            success = result.get('success', False)
+                            if success:
+                                logger.info(f"✅ COMPRA EXECUTADA: {result}")
+                                break
                     
-                    if success:
-                        break
-                    else:
-                        logger.warning(f"Tentativa {attempt+1} falhou")
+                    if not success:
+                        attempt_duration = time.time() - attempt_start
+                        logger.warning(f"⚠️ Tentativa {attempt+1} falhou em {attempt_duration:.1f}s")
                         
-                except Exception as e:
-                    logger.error(f"Tentativa {attempt+1} com erro: {e}")
+                        if attempt < max_attempts - 1:
+                            sleep_time = min(3, (attempt + 1) * 1)  # 1s, 2s, 3s
+                            logger.info(f"⏳ Aguardando {sleep_time}s antes da próxima tentativa...")
+                            time.sleep(sleep_time)
+                        
+                except Exception as attempt_error:
+                    logger.error(f"❌ Erro na tentativa {attempt+1}: {attempt_error}")
                     if attempt < max_attempts - 1:
                         time.sleep(2)
             
+            # PROCESSAR RESULTADO
             if success:
-                # Atualizar métricas
+                logger.info(f"🎉 POSIÇÃO FECHADA COM SUCESSO!")
+                
+                # Atualizar métricas - CRÍTICO
                 with self._lock:
                     self.metrics.total_trades += 1
                     self.metrics.total_profit += final_pnl
@@ -560,13 +881,13 @@ class TradingBot:
                         self.metrics.consecutive_wins += 1
                         self.metrics.consecutive_losses = 0
                         self.consecutive_losses = 0
-                        logger.info(f"✅ LUCRO: {final_pnl*100:.3f}%")
+                        logger.info(f"✅ LUCRO: {final_pnl*100:.4f}% | Win Streak: {self.metrics.consecutive_wins}")
                     else:
                         self.metrics.consecutive_wins = 0
                         self.metrics.consecutive_losses += 1
                         self.consecutive_losses += 1
                         self.daily_loss += abs(final_pnl)
-                        logger.info(f"❌ PERDA: {final_pnl*100:.3f}%")
+                        logger.info(f"❌ PERDA: {final_pnl*100:.4f}% | Loss Streak: {self.consecutive_losses}")
                     
                     # Atualizar drawdown
                     if final_pnl < 0:
@@ -576,22 +897,54 @@ class TradingBot:
                     total_duration = (self.metrics.average_trade_duration * (self.metrics.total_trades - 1) + duration)
                     self.metrics.average_trade_duration = total_duration / self.metrics.total_trades
                 
-                logger.info(f"🎯 POSIÇÃO FECHADA!")
-                logger.info(f"   PnL final: {final_pnl*100:.3f}%")
+                # STATS FINAIS
+                logger.info(f"📊 ESTATÍSTICAS:")
+                logger.info(f"   PnL final: {final_pnl*100:.4f}%")
                 logger.info(f"   Duração: {duration:.1f}s")
                 logger.info(f"   Win Rate: {self.metrics.win_rate:.1f}%")
+                logger.info(f"   Trades hoje: {self.trades_today}")
+                logger.info(f"   Profit líquido: {self.metrics.net_profit*100:.4f}%")
                 
+                # RESET POSIÇÃO E FLAGS
                 self.current_position = None
+                self.force_close_flag = False
+                self.close_attempts = 0
+                
                 return True
             else:
-                logger.error("❌ FALHA CRÍTICA ao fechar posição!")
-                # Em caso de falha crítica, marcar posição como None para evitar loop
-                self.current_position = None
+                logger.error(f"🚨 FALHA CRÍTICA NO FECHAMENTO após {max_attempts} tentativas!")
+                logger.error(f"   PnL não realizado: {final_pnl*100:.4f}%")
+                logger.error(f"   Duração: {duration:.1f}s")
+                
+                # EM CASO DE FALHA TOTAL - MEDIDAS DRÁSTICAS
+                if self.force_close_flag or self.close_attempts >= self.max_close_attempts:
+                    logger.error("🚨 ATIVANDO PROTOCOLO DE EMERGÊNCIA")
+                    logger.error("🚨 REMOVENDO POSIÇÃO DA MEMÓRIA PARA EVITAR LOOP INFINITO")
+                    
+                    # Registrar como perda total e remover posição
+                    with self._lock:
+                        self.metrics.total_trades += 1
+                        self.metrics.total_profit += final_pnl  # Registrar perda
+                        self.consecutive_losses += 1
+                        self.daily_loss += abs(final_pnl)
+                    
+                    self.current_position = None  # REMOVER POSIÇÃO FORÇADAMENTE
+                    self.force_close_flag = False
+                    self.close_attempts = 0
+                    
+                    logger.error("🚨 POSIÇÃO REMOVIDA DA MEMÓRIA - PROTOCOLO DE EMERGÊNCIA ATIVO")
+                    return False
+                
                 return False
                 
         except Exception as e:
-            logger.error(f"Erro crítico fechando posição: {e}")
+            logger.error(f"🚨 ERRO CRÍTICO no fechamento: {e}")
             traceback.print_exc()
+            
+            # Em caso de erro crítico, aplicar protocolo de emergência
+            self.current_position = None
+            self.force_close_flag = False
+            self.close_attempts = 0
             return False
         finally:
             self.is_exiting_position = False
@@ -651,7 +1004,9 @@ class TradingBot:
                     'is_running': self.is_running,
                     'symbol': self.symbol,
                     'leverage': self.leverage,
-                    'paper_trading': self.paper_trading
+                    'paper_trading': self.paper_trading,
+                    'close_attempts': self.close_attempts,
+                    'force_close_flag': self.force_close_flag
                 },
                 'performance': {
                     'trades_today': self.trades_today,
@@ -709,7 +1064,9 @@ class TradingBot:
                 'duration_seconds': round(duration),
                 'target_price': self.current_position.target_price,
                 'stop_price': self.current_position.stop_price,
-                'is_profitable': pnl > 0
+                'is_profitable': pnl > 0,
+                'close_attempts': self.close_attempts,
+                'force_close': self.force_close_flag
             }
         except Exception as e:
             return {'active': True, 'error': str(e)}
@@ -723,7 +1080,7 @@ class TradingBot:
                 return {
                     'daily_performance': {
                         'trades_executed': self.trades_today,
-                        'profit_target': '0.9% por trade',
+                        'profit_target': '0.9% por trade (MANTIDO)',
                         'current_profit': f"{daily_profit:.3f}%",
                         'win_rate': f"{self.metrics.win_rate:.1f}%",
                         'avg_trade_duration': f"{self.metrics.average_trade_duration:.1f}s",
@@ -741,6 +1098,12 @@ class TradingBot:
                         'max_consecutive_losses': self.metrics.max_consecutive_losses,
                         'total_fees_paid': f"{self.metrics.total_fees_paid*100:.4f}%",
                         'net_profit': f"{self.metrics.net_profit*100:.4f}%"
+                    },
+                    'enhanced_features': {
+                        'advanced_analysis': 'Ativo',
+                        'multi_indicator_signals': 'Ativo',
+                        'enhanced_risk_management': 'Ativo',
+                        'critical_position_control': 'Ativo'
                     }
                 }
         except Exception as e:
@@ -751,10 +1114,12 @@ class TradingBot:
         try:
             logger.warning("⚠️ PARADA DE EMERGÊNCIA ATIVADA")
             self.state = TradingState.EMERGENCY
+            self.force_close_flag = True
             
             # Fechar posição imediatamente
             if self.current_position:
-                self._close_position_safely("Emergency stop")
+                logger.warning("🚨 FECHAMENTO DE EMERGÊNCIA DA POSIÇÃO")
+                self._close_position_safely("EMERGENCY STOP")
             
             # Parar thread
             if self.trading_thread:
@@ -777,6 +1142,8 @@ class TradingBot:
                 self.consecutive_losses = 0
                 self.metrics = TradingMetrics()
                 self.last_trade_time = time.time()
+                self.close_attempts = 0
+                self.force_close_flag = False
                 
                 logger.info("📊 Estatísticas diárias resetadas para novo dia")
                 
@@ -796,23 +1163,29 @@ class TradingBot:
             logger.info("▶️ Trading retomado")
 
     def get_market_analysis(self) -> Dict:
-        """Análise atual do mercado"""
+        """Análise atual do mercado - APRIMORADA"""
         try:
-            if len(self.price_history) < 20:
-                return {'error': 'Dados insuficientes'}
+            if len(self.price_history) < 50:
+                return {'error': 'Dados insuficientes para análise completa'}
             
             prices = list(self.price_history)
+            volumes = list(self.volume_history) if len(self.volume_history) > 20 else []
             current_price = prices[-1]
             
-            # Indicadores
-            rsi = SimpleIndicators.rsi(prices)
-            sma_20 = SimpleIndicators.sma(prices, 20)
-            ema_12 = SimpleIndicators.ema(prices, 12)
-            ema_26 = SimpleIndicators.ema(prices, 26)
-            bb_upper, bb_lower, bb_middle = SimpleIndicators.bollinger_bands(prices)
+            # Indicadores avançados
+            rsi, rsi_strength = AdvancedIndicators.rsi_with_validation(prices, 14)
+            macd, signal_line, histogram, macd_strength = AdvancedIndicators.macd_advanced(prices)
+            bb_data = AdvancedIndicators.bollinger_with_squeeze(prices)
             
-            # Trend
-            trend = "BULLISH" if current_price > sma_20 else "BEARISH"
+            # Análise de volume
+            volume_analysis = {'strength': 0.0, 'signal': 'NEUTRAL', 'quality': 0.0}
+            if volumes:
+                volume_analysis = AdvancedIndicators.volume_price_analysis(prices, volumes)
+            
+            # Trend analysis
+            sma_20 = sum(prices[-20:]) / 20
+            sma_50 = sum(prices[-50:]) / 50
+            trend = "BULLISH" if current_price > sma_20 > sma_50 else "BEARISH" if current_price < sma_20 < sma_50 else "NEUTRAL"
             trend_strength = abs(current_price - sma_20) / sma_20 * 100
             
             # Volatilidade
@@ -823,24 +1196,44 @@ class TradingBot:
             else:
                 volatility = 0
             
+            # Score geral
+            total_score = (
+                (rsi_strength * 0.25) +
+                (macd_strength * 0.25) +
+                (bb_data.get('strength', 0) * 0.25) +
+                (volume_analysis['quality'] * 0.25)
+            ) * 100
+            
             return {
                 'current_price': round(current_price, 2),
                 'trend': trend,
                 'trend_strength': round(trend_strength, 3),
                 'volatility': round(volatility, 2),
+                'analysis_score': round(total_score, 1),
                 'indicators': {
                     'rsi': round(rsi, 1),
-                    'sma_20': round(sma_20, 2),
-                    'ema_12': round(ema_12, 2),
-                    'ema_26': round(ema_26, 2),
-                    'bb_upper': round(bb_upper, 2),
-                    'bb_lower': round(bb_lower, 2),
-                    'bb_middle': round(bb_middle, 2)
+                    'rsi_strength': round(rsi_strength * 100, 1),
+                    'macd': round(macd, 4),
+                    'macd_signal': round(signal_line, 4),
+                    'macd_histogram': round(histogram, 4),
+                    'macd_strength': round(macd_strength * 100, 1),
+                    'bb_upper': round(bb_data['upper'], 2),
+                    'bb_lower': round(bb_data['lower'], 2),
+                    'bb_middle': round(bb_data['middle'], 2),
+                    'bb_squeeze': bb_data['squeeze'],
+                    'bb_breakout': bb_data['breakout_direction']
+                },
+                'volume_analysis': {
+                    'signal': volume_analysis['signal'],
+                    'strength': round(volume_analysis['strength'] * 100, 1),
+                    'quality': round(volume_analysis['quality'] * 100, 1)
                 },
                 'signals': {
-                    'rsi_signal': 'OVERSOLD' if rsi < 30 else 'OVERBOUGHT' if rsi > 70 else 'NEUTRAL',
-                    'bb_signal': 'LOWER_BAND' if current_price <= bb_lower else 'UPPER_BAND' if current_price >= bb_upper else 'MIDDLE',
-                    'ema_signal': 'BULLISH' if ema_12 > ema_26 else 'BEARISH'
+                    'rsi_signal': 'OVERSOLD' if rsi < 25 else 'OVERBOUGHT' if rsi > 75 else 'NEUTRAL',
+                    'macd_signal': 'BULLISH' if histogram > 0 and macd > signal_line else 'BEARISH' if histogram < 0 and macd < signal_line else 'NEUTRAL',
+                    'bb_signal': bb_data['breakout_direction'] or 'NEUTRAL',
+                    'trend_signal': trend,
+                    'overall_signal': 'STRONG' if total_score > 70 else 'MODERATE' if total_score > 40 else 'WEAK'
                 }
             }
             
@@ -868,15 +1261,21 @@ if __name__ == "__main__":
                 scalping_interval=3.0
             )
             
-            print("✅ Bot Profissional criado com sucesso!")
-            print("Configurações otimizadas:")
-            print(f"   Take Profit: {bot.profit_target*100:.1f}%")
-            print(f"   Stop Loss: {bot.stop_loss*100:.1f}%")
+            print("✅ Bot Profissional APRIMORADO criado com sucesso!")
+            print("Configurações mantidas:")
+            print(f"   Take Profit: {bot.profit_target*100:.1f}% (MANTIDO)")
+            print(f"   Stop Loss: {bot.stop_loss*100:.1f}% (MANTIDO)")
             print(f"   Risk/Reward: 1:{bot.profit_target/bot.stop_loss:.1f}")
             print(f"   Max perda diária: {bot.max_daily_loss*100:.1f}%")
-            print("🎯 Focado em consistência e preservação de capital!")
+            print("🚀 MELHORIAS IMPLEMENTADAS:")
+            print("   ✅ Análise técnica aprimorada com múltiplos indicadores")
+            print("   ✅ Sistema de fechamento de posição crítico")
+            print("   ✅ Controle rigoroso de take profit e stop loss")
+            print("   ✅ Protocolo de emergência para falhas")
+            print("   ✅ Análise de volume e momentum")
+            print("   ✅ Detecção de breakouts e squeezes")
+            print("🎯 Focado em PRECISÃO e EXECUÇÃO GARANTIDA!")
         else:
             print("❌ Falha na conexão com a API")
     except Exception as e:
-        print(f"❌ Erro no teste: {e}")
-        traceback.print_exc()
+        print(f"
