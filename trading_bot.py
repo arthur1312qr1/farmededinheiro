@@ -65,9 +65,9 @@ class TradingMetrics:
 class TradingBot:
     def __init__(self, bitget_api: BitgetAPI, symbol: str = 'ETHUSDT',
                  leverage: int = 10, balance_percentage: float = 95.0,
-                 scalping_interval: float = 3.0, paper_trading: bool = False):
+                 scalping_interval: float = 1.5, paper_trading: bool = False):
         """
-        Bot de trading SIMPLIFICADO e EFICIENTE - SEM CONFLITOS
+        Bot de trading ULTRA-AGRESSIVO para scalping de alta frequência
         """
         
         if not isinstance(bitget_api, BitgetAPI):
@@ -78,7 +78,7 @@ class TradingBot:
         self.symbol = symbol
         self.leverage = leverage
         self.balance_percentage = min(balance_percentage, 95.0)
-        self.scalping_interval = max(scalping_interval, 2.0)
+        self.scalping_interval = max(scalping_interval, 1.0)  # Mínimo 1s
         self.paper_trading = paper_trading
 
         # Estado do bot
@@ -86,18 +86,18 @@ class TradingBot:
         self.current_position: Optional[TradePosition] = None
         self.trading_thread: Optional[threading.Thread] = None
 
-        # CONFIGURAÇÕES CORRIGIDAS - SIMPLES E EFICIENTES
-        self.profit_target = 0.009           # 0.9% take profit
-        self.stop_loss = 0.004               # 0.4% stop loss
-        self.max_position_time = 300         # 5 minutos máximo
+        # CONFIGURAÇÕES CORRIGIDAS - MANTENDO TARGETS ORIGINAIS
+        self.profit_target = 0.009           # 0.9% take profit (ORIGINAL)
+        self.stop_loss = 0.004               # 0.4% stop loss (ORIGINAL)
+        self.max_position_time = 60          # 1 minuto máximo
         
-        # Controles de risco SIMPLIFICADOS
-        self.max_daily_loss = 0.02          # 2% perda máxima por dia
-        self.max_consecutive_losses = 3     # Parar após 3 perdas seguidas
-        self.min_time_between_trades = 10   # 10 segundos entre trades
+        # Controles de risco AGRESSIVOS
+        self.max_daily_loss = 0.08          # 8% perda máxima por dia
+        self.max_consecutive_losses = 6     # Muito tolerante
+        self.min_time_between_trades = 1    # 1 segundo entre trades
         
-        # Dados de mercado SIMPLIFICADOS
-        self.price_history = deque(maxlen=100)  # Menos dados, mais eficiência
+        # Dados de mercado ULTRA-RÁPIDOS
+        self.price_history = deque(maxlen=30)  # Histórico mínimo
         
         # Métricas
         self.metrics = TradingMetrics()
@@ -106,11 +106,11 @@ class TradingBot:
         self.consecutive_losses = 0
         self.last_trade_time = 0
         
-        # CONTROLE ÚNICO DE FECHAMENTO - SEM CONFLITOS
+        # CONTROLE ÚNICO DE FECHAMENTO
         self.is_closing = False
         self._lock = threading.Lock()
         
-        logger.info("Trading Bot CORRIGIDO Inicializado")
+        logger.info("Trading Bot ULTRA-AGRESSIVO Inicializado")
         logger.info(f"Take Profit: {self.profit_target*100:.1f}%")
         logger.info(f"Stop Loss: {self.stop_loss*100:.1f}%")
 
@@ -120,7 +120,7 @@ class TradingBot:
             if self.state == TradingState.RUNNING:
                 return True
             
-            logger.info("🚀 Iniciando bot corrigido...")
+            logger.info("Iniciando bot ultra-agressivo...")
             
             # Reset estado
             self.state = TradingState.RUNNING
@@ -130,7 +130,7 @@ class TradingBot:
             self.trades_today = 0
             self.is_closing = False
             
-            # Coletar dados iniciais
+            # Coletar dados iniciais RÁPIDO
             self._collect_initial_data()
             
             # Iniciar thread principal
@@ -141,7 +141,7 @@ class TradingBot:
             )
             self.trading_thread.start()
             
-            logger.info("✅ Bot iniciado com sucesso!")
+            logger.info("Bot iniciado - MODO SCALPING AGRESSIVO!")
             return True
             
         except Exception as e:
@@ -152,7 +152,7 @@ class TradingBot:
     def stop(self) -> bool:
         """Parar bot"""
         try:
-            logger.info("🛑 Parando bot...")
+            logger.info("Parando bot...")
             self.state = TradingState.STOPPED
             
             # Fechar posição se existir
@@ -163,7 +163,7 @@ class TradingBot:
             if self.trading_thread and self.trading_thread.is_alive():
                 self.trading_thread.join(timeout=10)
             
-            logger.info(f"📊 RELATÓRIO FINAL:")
+            logger.info(f"RELATÓRIO FINAL:")
             logger.info(f"   Trades: {self.trades_today}")
             logger.info(f"   Win Rate: {self.metrics.win_rate:.1f}%")
             logger.info(f"   Profit: {self.metrics.net_profit*100:.3f}%")
@@ -175,52 +175,66 @@ class TradingBot:
             return False
 
     def _collect_initial_data(self):
-        """Coletar dados iniciais SIMPLES"""
+        """Coletar dados iniciais ULTRA-RÁPIDOS"""
         try:
-            logger.info("📊 Coletando dados iniciais...")
-            for i in range(30):  # Apenas 30 pontos
+            logger.info("Coletando dados iniciais...")
+            
+            # Tentar obter preço atual primeiro
+            current_price = self.bitget_api.get_eth_price()
+            if current_price > 0:
+                # Preencher com preço atual para começar imediatamente
+                for _ in range(5):
+                    self.price_history.append(current_price)
+                logger.info(f"Iniciado com preço: ${current_price:.2f}")
+                return
+            
+            # Se falhar, coletar normalmente mas bem rápido
+            for i in range(5):
                 market_data = self.bitget_api.get_market_data(self.symbol)
                 if market_data and market_data.get('price', 0) > 0:
                     self.price_history.append(float(market_data['price']))
-                time.sleep(0.5)
+                time.sleep(0.05)  # 50ms entre coletas
             
-            logger.info(f"✅ Coletados {len(self.price_history)} pontos")
+            logger.info(f"Coletados {len(self.price_history)} pontos")
+            
         except Exception as e:
             logger.error(f"Erro coletando dados: {e}")
+            # Fallback: usar um preço base
+            self.price_history.extend([3500.0] * 5)
 
     def _main_loop(self):
-        """Loop principal SIMPLIFICADO"""
-        logger.info("🔄 Loop principal iniciado")
+        """Loop principal ULTRA-RÁPIDO"""
+        logger.info("Loop principal iniciado - MODO AGRESSIVO")
         
         while self.state == TradingState.RUNNING:
             try:
                 # Verificar condições de parada
                 if self._should_stop_trading():
-                    logger.warning("⚠️ Condições de parada atingidas")
+                    logger.warning("Condições de parada atingidas")
                     break
                 
                 # Atualizar preço
                 self._update_price()
                 
-                # Gerenciar posição existente - MÉTODO ÚNICO
+                # Gerenciar posição existente
                 if self.current_position:
                     self._manage_position_simple()
                 
                 # Procurar nova oportunidade
                 elif self._can_trade():
-                    signal = self._analyze_market_simple()
+                    signal = self._analyze_market_aggressive()
                     if signal:
                         direction, confidence = signal
-                        if confidence > 75:  # 75% confiança mínima
+                        if confidence > 55:  # Threshold muito baixo
                             self._execute_trade(direction, confidence)
                 
                 time.sleep(self.scalping_interval)
                 
             except Exception as e:
                 logger.error(f"Erro no loop: {e}")
-                time.sleep(5)
+                time.sleep(2)
         
-        logger.info("🔄 Loop finalizado")
+        logger.info("Loop finalizado")
 
     def _update_price(self):
         """Atualizar preço atual"""
@@ -229,52 +243,84 @@ class TradingBot:
             if market_data and market_data.get('price', 0) > 0:
                 price = float(market_data['price'])
                 self.price_history.append(price)
-        except Exception as e:
-            logger.error(f"Erro atualizando preço: {e}")
+            except Exception as e:
+                # Se falhar, usar último preço conhecido ou manter atual
+                if self.price_history:
+                    last_price = self.price_history[-1]
+                    self.price_history.append(last_price)
+                logger.debug(f"Erro atualizando preço: {e}")
 
-    def _analyze_market_simple(self) -> Optional[Tuple[TradeDirection, float]]:
-        """Análise SIMPLES e PRECISA"""
+    def _analyze_market_aggressive(self) -> Optional[Tuple[TradeDirection, float]]:
+        """Análise ULTRA-AGRESSIVA para scalping"""
         try:
-            if len(self.price_history) < 20:
+            if len(self.price_history) < 3:  # Mínimo absoluto
                 return None
                 
             prices = list(self.price_history)
             current_price = prices[-1]
             
-            # RSI simples
-            rsi = self._calculate_rsi(prices, 14)
+            if current_price <= 0:
+                logger.error("Preço atual inválido")
+                return None
             
-            # Médias móveis simples
-            sma_fast = sum(prices[-10:]) / 10
-            sma_slow = sum(prices[-20:]) / 20
-            
-            # Momentum simples
-            momentum = (current_price - prices[-5]) / prices[-5] * 100
-            
-            confidence = 0
+            # Análise ultra-simples baseada em movimento de preço
+            signals = 0
             direction = None
             
-            # SINAL DE COMPRA (LONG)
-            if (rsi < 30 and                    # RSI oversold
-                current_price > sma_fast and    # Preço acima da média rápida
-                sma_fast > sma_slow and         # Trend positivo
-                momentum > 0.1):                # Momentum positivo
-                
-                confidence = min(90, 60 + abs(momentum) * 10)
-                direction = TradeDirection.LONG
-                logger.info(f"🔵 SINAL LONG: RSI={rsi:.1f}, Momentum={momentum:.2f}%")
-                
-            # SINAL DE VENDA (SHORT)  
-            elif (rsi > 70 and                  # RSI overbought
-                  current_price < sma_fast and  # Preço abaixo da média rápida
-                  sma_fast < sma_slow and       # Trend negativo
-                  momentum < -0.1):             # Momentum negativo
-                
-                confidence = min(90, 60 + abs(momentum) * 10)
-                direction = TradeDirection.SHORT
-                logger.info(f"🔴 SINAL SHORT: RSI={rsi:.1f}, Momentum={momentum:.2f}%")
+            # 1. Momentum instantâneo (últimos 2 ticks)
+            if len(prices) >= 2:
+                prev_price = prices[-2]
+                if prev_price > 0:
+                    instant_change = (current_price - prev_price) / prev_price * 100
+                    
+                    if instant_change > 0.01:  # 0.01% movimento para cima
+                        signals += 2
+                        direction = TradeDirection.LONG
+                    elif instant_change < -0.01:  # 0.01% movimento para baixo
+                        signals += 2
+                        direction = TradeDirection.SHORT
             
-            if direction and confidence >= 75:
+            # 2. Momentum de curto prazo (últimos 3-5 ticks)
+            if len(prices) >= 5:
+                old_price = prices[-5]
+                if old_price > 0:
+                    short_momentum = (current_price - old_price) / old_price * 100
+                    
+                    if short_momentum > 0.02 and direction == TradeDirection.LONG:
+                        signals += 1
+                    elif short_momentum < -0.02 and direction == TradeDirection.SHORT:
+                        signals += 1
+            
+            # 3. Tendência de micro-prazo
+            if len(prices) >= 3:
+                p1, p2, p3 = prices[-3], prices[-2], prices[-1]
+                if p1 > 0 and p2 > 0 and p3 > 0:
+                    trend_up = p3 > p2 > p1
+                    trend_down = p3 < p2 < p1
+                    
+                    if trend_up and direction == TradeDirection.LONG:
+                        signals += 1
+                    elif trend_down and direction == TradeDirection.SHORT:
+                        signals += 1
+            
+            # 4. Volume implícito (volatilidade)
+            if len(prices) >= 5:
+                recent_prices = [p for p in prices[-5:] if p > 0]
+                if len(recent_prices) >= 3:
+                    recent_volatility = max(recent_prices) - min(recent_prices)
+                    volatility_pct = (recent_volatility / current_price) * 100
+                    
+                    if volatility_pct > 0.05:  # Mais de 0.05% de volatilidade
+                        signals += 1
+            
+            # Calcular confiança baseada em sinais
+            if signals >= 2 and direction:
+                confidence = min(85, 40 + signals * 15)
+                
+                logger.info(f"{'LONG' if direction == TradeDirection.LONG else 'SHORT'}: "
+                          f"Sinais={signals}, Conf={confidence:.1f}%, "
+                          f"Preço=${current_price:.2f}")
+                
                 return direction, confidence
             
             return None
@@ -283,25 +329,8 @@ class TradingBot:
             logger.error(f"Erro na análise: {e}")
             return None
 
-    def _calculate_rsi(self, prices: List[float], period: int = 14) -> float:
-        """RSI simples e confiável"""
-        if len(prices) < period + 1:
-            return 50.0
-            
-        deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
-        gains = [max(0, delta) for delta in deltas[-period:]]
-        losses = [max(0, -delta) for delta in deltas[-period:]]
-        
-        avg_gain = sum(gains) / period if gains else 0
-        avg_loss = sum(losses) / period if losses else 0.001
-        
-        rs = avg_gain / avg_loss
-        rsi = 100 - (100 / (1 + rs))
-        
-        return rsi
-
     def _execute_trade(self, direction: TradeDirection, confidence: float):
-        """Executar trade SIMPLES"""
+        """Executar trade ULTRA-RÁPIDO"""
         try:
             # Verificar saldo
             balance = self._get_balance()
@@ -309,12 +338,12 @@ class TradingBot:
                 if self.paper_trading:
                     balance = 1000
                 else:
-                    logger.error("❌ Saldo insuficiente")
+                    logger.error("Saldo insuficiente")
                     return
             
             current_price = self.price_history[-1]
             
-            # Calcular targets
+            # Calcular targets AGRESSIVOS
             if direction == TradeDirection.LONG:
                 target_price = current_price * (1 + self.profit_target)
                 stop_price = current_price * (1 - self.stop_loss)
@@ -322,30 +351,30 @@ class TradingBot:
                 target_price = current_price * (1 - self.profit_target)
                 stop_price = current_price * (1 + self.stop_loss)
             
-            logger.info(f"🚀 Executando {direction.name}:")
+            logger.info(f"Executando {direction.name}:")
             logger.info(f"   Preço: ${current_price:.2f}")
-            logger.info(f"   Target: ${target_price:.2f}")
-            logger.info(f"   Stop: ${stop_price:.2f}")
+            logger.info(f"   Target: ${target_price:.2f} ({self.profit_target*100:.1f}%)")
+            logger.info(f"   Stop: ${stop_price:.2f} ({self.stop_loss*100:.1f}%)")
             logger.info(f"   Confiança: {confidence:.1f}%")
             
             # Executar ordem
             success = False
             if self.paper_trading:
                 success = True
-                logger.info("📄 PAPER TRADING - Ordem simulada")
+                logger.info("PAPER TRADING - Ordem simulada")
             else:
                 try:
                     if direction == TradeDirection.LONG:
                         result = self.bitget_api.place_buy_order()
                         success = result and result.get('success', False)
                         if not success:
-                            logger.error(f"❌ Falha na compra: {result}")
+                            logger.error(f"Falha na compra: {result}")
                     else:
-                        logger.info("⚠️ SHORT temporariamente desabilitado")
+                        logger.info("SHORT temporariamente desabilitado")
                         return
                         
                 except Exception as e:
-                    logger.error(f"❌ Erro executando ordem: {e}")
+                    logger.error(f"Erro executando ordem: {e}")
                     success = False
             
             if success:
@@ -365,16 +394,15 @@ class TradingBot:
                 self.trades_today += 1
                 self.last_trade_time = time.time()
                 
-                logger.info(f"✅ Trade #{self.trades_today} executado!")
+                logger.info(f"Trade #{self.trades_today} executado!")
                 logger.info(f"   Posição: {position_size:.4f} ETH")
                 logger.info(f"   Valor: ${position_value:.2f}")
             
         except Exception as e:
-            logger.error(f"❌ Erro no trade: {e}")
-            traceback.print_exc()
+            logger.error(f"Erro no trade: {e}")
 
     def _manage_position_simple(self):
-        """Gerenciar posição - MÉTODO ÚNICO SIMPLIFICADO"""
+        """Gerenciar posição ULTRA-AGRESSIVA"""
         if not self.current_position or self.is_closing:
             return
             
@@ -386,41 +414,49 @@ class TradingBot:
             should_close = False
             reason = ""
             
-            # 1. TAKE PROFIT
+            # 1. TAKE PROFIT AGRESSIVO
             if pnl >= self.profit_target:
                 should_close = True
-                reason = f"✅ TAKE PROFIT: {pnl*100:.3f}%"
+                reason = f"TAKE PROFIT: {pnl*100:.3f}%"
                 
-            # 2. STOP LOSS
+            # 2. STOP LOSS AGRESSIVO
             elif pnl <= -self.stop_loss:
                 should_close = True
-                reason = f"🛑 STOP LOSS: {pnl*100:.3f}%"
+                reason = f"STOP LOSS: {pnl*100:.3f}%"
                 
-            # 3. TEMPO LIMITE
+            # 3. TEMPO LIMITE CURTO
             elif duration >= self.max_position_time:
                 should_close = True
-                reason = f"⏰ TEMPO LIMITE: {duration:.0f}s"
+                reason = f"TEMPO LIMITE: {duration:.0f}s"
                 
-            # 4. PERDA CRÍTICA
-            elif pnl <= -0.01:  # -1%
+            # 4. BREAKEVEN após 15 segundos se não está ganhando
+            elif duration >= 15 and pnl < 0.002:  # 0.2%
                 should_close = True
-                reason = f"🚨 PERDA CRÍTICA: {pnl*100:.3f}%"
+                reason = f"BREAKEVEN: {pnl*100:.3f}%"
+                
+            # 5. TRAILING STOP dinâmico
+            elif pnl > 0.003 and duration >= 20:  # Se teve lucro mas pode estar caindo
+                # Verificar se preço está caindo nos últimos ticks
+                if len(self.price_history) >= 3:
+                    recent_trend = self.price_history[-1] < self.price_history[-2] < self.price_history[-3]
+                    if recent_trend and pnl < self.profit_target * 0.6:
+                        should_close = True
+                        reason = f"TRAILING: {pnl*100:.3f}%"
             
-            # Log periódico
-            if int(duration) % 15 == 0 and int(duration) > 0:
-                logger.info(f"📊 Posição: {pnl*100:.3f}% | {duration:.0f}s")
+            # Log a cada 5 segundos
+            if int(duration) % 5 == 0 and int(duration) > 0:
+                logger.info(f"Posição: {pnl*100:.3f}% | {duration:.0f}s")
             
             if should_close:
-                logger.info(f"🔄 FECHANDO: {reason}")
+                logger.info(f"FECHANDO: {reason}")
                 self._close_position_simple(reason)
                 
         except Exception as e:
-            logger.error(f"❌ Erro gerenciando posição: {e}")
-            # Forçar fechamento em caso de erro
+            logger.error(f"Erro gerenciando posição: {e}")
             self._close_position_simple("ERRO CRÍTICO")
 
     def _close_position_simple(self, reason: str) -> bool:
-        """MÉTODO ÚNICO DE FECHAMENTO - SEM CONFLITOS"""
+        """MÉTODO ÚNICO DE FECHAMENTO"""
         
         # Prevenir execuções múltiplas
         with self._lock:
@@ -433,7 +469,7 @@ class TradingBot:
             final_pnl = self.current_position.calculate_pnl(current_price)
             duration = self.current_position.get_duration()
             
-            logger.info(f"🔄 FECHANDO POSIÇÃO: {reason}")
+            logger.info(f"FECHANDO POSIÇÃO: {reason}")
             logger.info(f"   PnL: {final_pnl*100:.4f}%")
             logger.info(f"   Duração: {duration:.1f}s")
             
@@ -441,7 +477,7 @@ class TradingBot:
             
             if self.paper_trading:
                 success = True
-                logger.info("📄 PAPER TRADING - Fechamento simulado")
+                logger.info("PAPER TRADING - Fechamento simulado")
             else:
                 try:
                     # FECHAR POSIÇÃO REAL
@@ -451,19 +487,19 @@ class TradingBot:
                         
                         if not success:
                             error = result.get('error', 'Erro desconhecido') if result else 'Sem resposta'
-                            logger.error(f"❌ Falha na venda: {error}")
+                            logger.error(f"Falha na venda: {error}")
                     else:
                         # Para SHORT (quando implementado)
                         result = self.bitget_api.place_buy_order()
                         success = result and result.get('success', False)
                         
                 except Exception as e:
-                    logger.error(f"❌ Erro executando fechamento: {e}")
+                    logger.error(f"Erro executando fechamento: {e}")
                     success = False
             
             # PROCESSAR RESULTADO
-            if success:
-                logger.info(f"✅ POSIÇÃO FECHADA COM SUCESSO!")
+            if success or self.paper_trading:
+                logger.info(f"POSIÇÃO FECHADA COM SUCESSO!")
                 
                 # Atualizar métricas
                 self.metrics.total_trades += 1
@@ -473,58 +509,54 @@ class TradingBot:
                     self.metrics.profitable_trades += 1
                     self.metrics.consecutive_wins += 1
                     self.consecutive_losses = 0
-                    logger.info(f"💰 LUCRO: {final_pnl*100:.4f}%")
+                    logger.info(f"LUCRO: {final_pnl*100:.4f}%")
                 else:
                     self.metrics.consecutive_wins = 0
                     self.consecutive_losses += 1
                     self.daily_loss += abs(final_pnl)
-                    logger.info(f"📉 PERDA: {final_pnl*100:.4f}%")
+                    logger.info(f"PERDA: {final_pnl*100:.4f}%")
                 
                 # Atualizar drawdown
                 if final_pnl < 0:
                     self.metrics.max_drawdown = max(self.metrics.max_drawdown, abs(final_pnl))
                 
-                logger.info(f"📊 Win Rate: {self.metrics.win_rate:.1f}%")
-                logger.info(f"📊 Trades hoje: {self.trades_today}")
+                logger.info(f"Win Rate: {self.metrics.win_rate:.1f}% | Trades: {self.trades_today}")
                 
                 # Limpar posição
                 self.current_position = None
                 
                 return True
             else:
-                logger.error(f"❌ FALHA NO FECHAMENTO!")
-                
-                # Em caso de falha crítica, remover da memória
-                logger.error("🚨 REMOVENDO POSIÇÃO DA MEMÓRIA")
+                logger.error(f"FALHA NO FECHAMENTO!")
                 self.current_position = None
-                
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ ERRO CRÍTICO no fechamento: {e}")
+            logger.error(f"ERRO CRÍTICO no fechamento: {e}")
             self.current_position = None
             return False
         finally:
             self.is_closing = False
 
     def _should_stop_trading(self) -> bool:
-        """Verificar se deve parar"""
+        """Verificar se deve parar - MAIS TOLERANTE"""
         if self.daily_loss >= self.max_daily_loss:
-            logger.warning(f"⚠️ Perda diária máxima: {self.daily_loss*100:.2f}%")
+            logger.warning(f"Perda diária máxima: {self.daily_loss*100:.2f}%")
             return True
         
         if self.consecutive_losses >= self.max_consecutive_losses:
-            logger.warning(f"⚠️ Perdas consecutivas: {self.consecutive_losses}")
+            logger.warning(f"Perdas consecutivas: {self.consecutive_losses}")
             return True
         
         return False
 
     def _can_trade(self) -> bool:
-        """Verificar se pode operar"""
+        """Verificar se pode operar - MUITO PERMISSIVO"""
         if time.time() - self.last_trade_time < self.min_time_between_trades:
             return False
         
-        if self.consecutive_losses >= 2:
+        # Muito tolerante com perdas consecutivas
+        if self.consecutive_losses >= 5:  # Só parar após 5 perdas
             return False
         
         return True
@@ -552,7 +584,8 @@ class TradingBot:
                     'state': self.state.value,
                     'is_running': self.is_running,
                     'symbol': self.symbol,
-                    'paper_trading': self.paper_trading
+                    'paper_trading': self.paper_trading,
+                    'mode': 'ULTRA_AGGRESSIVE_SCALPING'
                 },
                 'performance': {
                     'trades_today': self.trades_today,
@@ -566,7 +599,13 @@ class TradingBot:
                 'current_position': self._get_position_status(),
                 'targets': {
                     'take_profit': f"{self.profit_target*100:.1f}%",
-                    'stop_loss': f"{self.stop_loss*100:.1f}%"
+                    'stop_loss': f"{self.stop_loss*100:.1f}%",
+                    'max_time': f"{self.max_position_time}s"
+                },
+                'trading_config': {
+                    'scalping_interval': f"{self.scalping_interval}s",
+                    'min_confidence': "55%",
+                    'max_daily_loss': f"{self.max_daily_loss*100:.0f}%"
                 }
             }
         except Exception as e:
@@ -589,7 +628,9 @@ class TradingBot:
                 'current_price': current_price,
                 'pnl_percent': round(pnl * 100, 3),
                 'duration_seconds': round(duration),
-                'is_closing': self.is_closing
+                'is_closing': self.is_closing,
+                'target_price': self.current_position.target_price,
+                'stop_price': self.current_position.stop_price
             }
         except Exception as e:
             return {'active': True, 'error': str(e)}
@@ -597,7 +638,7 @@ class TradingBot:
     def emergency_stop(self) -> bool:
         """Parada de emergência"""
         try:
-            logger.warning("🚨 PARADA DE EMERGÊNCIA")
+            logger.warning("PARADA DE EMERGÊNCIA")
             self.state = TradingState.STOPPED
             
             if self.current_position:
@@ -618,17 +659,21 @@ class TradingBot:
                     'current_profit': f"{self.metrics.net_profit*100:.3f}%",
                     'win_rate': f"{self.metrics.win_rate:.1f}%",
                     'profitable_trades': self.metrics.profitable_trades,
-                    'losing_trades': self.metrics.total_trades - self.metrics.profitable_trades
+                    'losing_trades': self.metrics.total_trades - self.metrics.profitable_trades,
+                    'avg_trade_duration': f"{self.max_position_time}s max"
                 },
                 'risk_metrics': {
                     'daily_loss': f"{self.daily_loss*100:.3f}%",
                     'max_drawdown': f"{self.metrics.max_drawdown*100:.3f}%",
-                    'consecutive_losses': self.consecutive_losses
+                    'consecutive_losses': self.consecutive_losses,
+                    'risk_level': 'ULTRA_HIGH'
                 },
                 'bot_config': {
                     'take_profit': f"{self.profit_target*100:.1f}%",
                     'stop_loss': f"{self.stop_loss*100:.1f}%",
-                    'max_position_time': f"{self.max_position_time}s"
+                    'max_position_time': f"{self.max_position_time}s",
+                    'scalping_interval': f"{self.scalping_interval}s",
+                    'trading_mode': 'ULTRA_AGGRESSIVE'
                 }
             }
         except Exception as e:
@@ -637,7 +682,7 @@ class TradingBot:
 
 # Função para criar bot
 def create_trading_bot(bitget_api: BitgetAPI, **kwargs) -> TradingBot:
-    """Criar bot corrigido"""
+    """Criar bot ultra-agressivo"""
     return TradingBot(bitget_api, **kwargs)
 
 
@@ -652,21 +697,20 @@ if __name__ == "__main__":
                 bitget_api=api,
                 paper_trading=True,
                 leverage=10,
-                scalping_interval=3.0
+                scalping_interval=1.5
             )
             
-            print("✅ Bot CORRIGIDO criado com sucesso!")
-            print("🔧 CORREÇÕES IMPLEMENTADAS:")
-            print("   ✅ Método único de fechamento (sem conflitos)")
-            print("   ✅ Análise técnica simplificada e precisa")
-            print("   ✅ Threading simplificado")
-            print("   ✅ Controle rigoroso de posições")
-            print("   ✅ Log detalhado de operações")
-            print("   ✅ Gerenciamento de erro robusto")
-            print(f"🎯 Take Profit: {bot.profit_target*100:.1f}%")
-            print(f"🛑 Stop Loss: {bot.stop_loss*100:.1f}%")
+            print("Bot ULTRA-AGRESSIVO criado com sucesso!")
+            print("CONFIGURAÇÕES CORRIGIDAS:")
+            print("   Take Profit: 0.9% (mantido original)")
+            print("   Stop Loss: 0.4% (mantido original)")
+            print("   Max Time: 60s")
+            print("   Min Confidence: 55%")
+            print("   Scalping Interval: 1.5s")
+            print("   MODO: Scalping agressivo com análise rápida")
+            
         else:
-            print("❌ Falha na conexão com a API")
+            print("Falha na conexão com a API")
     except Exception as e:
-        print(f"❌ Erro: {e}")
+        print(f"Erro: {e}")
         traceback.print_exc()
