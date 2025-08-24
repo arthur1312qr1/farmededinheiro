@@ -500,8 +500,205 @@ class TradingBot:
             # Verificar saldo
             balance = self._get_balance()
             if balance <= 0:
-                if self.paper_trading:
-                    balance = 1000
+                logger.error("Saldo insuficiente")
+                return
+            
+            current_price = self.price_history[-1]
+            
+            # Calcular targets
+            if direction == TradeDirection.LONG:
+                target_price = current_price * (1 + self.profit_target)
+                stop_price = current_price * (1 - self.stop_loss)
+            else:
+                target_price = current_price * (1 - self.profit_target)
+                stop_price = current_price * (1 + self.stop_loss)
+            
+            logger.info(f"Executando {direction.name}:")
+            logger.info(f"   Preço: ${current_price:.2f}")
+            logger.info(f"   Target: ${target_price:.2f} ({self.profit_target*100:.1f}%)")
+            logger.info(f"   Stop: ${stop_price:.2f} ({self.stop_loss*100:.1f}%)")
+            logger.info(f"   Confiança: {confidence:.1f}%")
+            
+            # Executar ordem
+            success = False
+            if self.paper_trading:
+                success = True
+                logger.info("PAPER TRADING - Ordem simulada")
+            else:
+                try:
+                    if direction == TradeDirection.LONG:
+                        result = self.bitget_api.place_buy_order()
+                        success = result and result.get('success', False)
+                        if not success:
+                            logger.error(f"Falha na compra LONG: {result}")
+                    else:  # SHORT CORRIGIDO
+                        logger.info("Executando SHORT - Usando método correto")
+                        result = self.bitget_api.place_short_order()
+                        success = result and result.get('success', False)
+                        if not success:
+                            logger.error(f"Falha no SHORT: {result}")
+                        
+                except Exception as e:
+                    logger.error(f"Erro executando ordem: {e}")
+                    success = False
+            
+            if success:
+                # Criar posição
+                position_value = balance * (self.balance_percentage / 100) * self.leverage
+                position_size = position_value / current_price
+                
+                self.current_position = TradePosition(
+                    side=direction,
+                    size=position_size,
+                    entry_price=current_price,
+                    start_time=time.time(),
+                    target_price=target_price,
+                    stop_price=stop_price
+                )
+                
+                self.trades_today += 1
+                self.last_trade_time = time.time()
+                
+                logger.info(f"Trade #{self.trades_today} executado!")
+                logger.info(f"   Posição: {position_size:.4f} ETH")
+                logger.info(f"   Valor: ${position_value:.2f}")
+            
+        except Exception as e:
+            logger.error(f"Erro no trade: {e}")
+
+    def _manage_position_simple(self):
+        """Gerenciar posição com análise contínua"""
+        if not self.current_position or self.is_closing:
+            return
+            
+        try:
+            current_price = self.price_history[-1] if self.price_history else self.current_position.entry_price
+            pnl = self.current_position.calculate_pnl(current_price)
+            duration = self.current_position.get_duration()
+            
+            should_close = False
+            reason = ""
+            
+            # 1. TAKE PROFIT
+            if pnl >= self.profit_target:
+                should_close = True
+                reason = f"TAKE PROFIT: {pnl*100:.3f}%"
+                
+            # 2. STOP LOSS
+            elif pnl <= -self.stop_loss:
+                should_close = True
+                reason = f"STOP LOSS: {pnl*100:.3f}%"
+                
+            # 3. TEMPO LIMITE
+            elif duration >= self.max_position_time:
+                should_close = True
+                reason = f"TEMPO LIMITE: {duration:.0f}s"
+                
+            # 4. ANÁLISE TÉCNICA REVERSA
+            elif duration >= 20:  # Após 20s, verificar se sinais mudaram
+                reverse_signal = self._analyze_market_technical()
+                if reverse_signal:
+                    signal_direction, signal_confidence = reverse_signal
+                    # Se sinal forte na direção oposta
+                    if (signal_confidence >= 80 and 
+                        signal_direction != self.current_position.side):
+                        should_close = True
+                        reason = f"REVERSÃO TÉCNICA: {signal_confidence:.1f}%"
+                
+            # 5. TRAILING STOP para lucros
+            elif pnl > 0.005 and duration >= 30:  # 0.5% lucro mínimo
+                # Verificar tendência recente
+                if len(self.price_history) >= 5:
+                    recent_trend = []
+                    for i in range(1, 5):
+                        if self.price_history[-i] > 0 and self.price_history[-i-1] > 0:
+                            change = (self.price_history[-i] - self.price_history[-i-1]) / self.price_history[-i-1]
+                            recent_trend.append(change)
+                    
+                    if recent_trend:
+                        avg_trend = sum(recent_trend) / len(recent_trend)
+                        
+                        # Para LONG: fechar se tendência negativa forte
+                        if (self.current_position.side == TradeDirection.LONG and 
+                            avg_trend < -0.0005):  # -0.05% trend
+                            should_close = True
+                            reason = f"TRAILING STOP: {pnl*100:.3f}%"
+                        
+                        # Para SHORT: fechar se tendência positiva forte  
+                        elif (self.current_position.side == TradeDirection.SHORT and 
+                              avg_trend > 0.0005):  # +0.05% trend
+                            should_close = True
+                            reason = f"TRAILING STOP: {pnl*100:.3f}%"
+            
+            # Log periódico
+            if int(duration) % 10 == 0 and int(duration) > 0:
+                logger.info(f"Posição {self.current_position.side.name}: {pnl*100:.3f}% | {duration:.0f}s")
+            
+            if should_close:
+                logger.info(f"FECHANDO: {reason}")
+                self._close_position_simple(reason)
+                
+        except Exception as e:
+            logger.error(f"Erro gerenciando posição: {e}")
+            self._close_position_simple("ERRO CRÍTICO")
+
+    def _close_position_simple(self, reason: str) -> bool:
+        """MÉTODO ÚNICO DE FECHAMENTO - Corrigido para SHORT"""
+        
+        # Prevenir execuções múltiplas
+        with self._lock:
+            if self.is_closing or not self.current_position:
+                return False
+            self.is_closing = True
+        
+        try:
+            current_price = self.price_history[-1] if self.price_history else self.current_position.entry_price
+            final_pnl = self.current_position.calculate_pnl(current_price)
+            duration = self.current_position.get_duration()
+            
+            logger.info(f"FECHANDO POSIÇÃO: {reason}")
+            logger.info(f"   Tipo: {self.current_position.side.name}")
+            logger.info(f"   PnL: {final_pnl*100:.4f}%")
+            logger.info(f"   Duração: {duration:.1f}s")
+            
+            success = False
+            
+            if self.paper_trading:
+                success = True
+                logger.info("PAPER TRADING - Fechamento simulado")
+            else:
+                try:
+                    # CORREÇÃO: Lógica correta para fechar LONG e SHORT usando métodos específicos
+                    if self.current_position.side == TradeDirection.LONG:
+                        # Para LONG: usar place_sell_order() para fechar
+                        result = self.bitget_api.place_sell_order(profit_target=0)
+                        success = result and result.get('success', False)
+                        if not success:
+                            logger.error(f"Falha fechando LONG: {result}")
+                    else:
+                        # Para SHORT: usar close_short_position() para fechar
+                        result = self.bitget_api.close_short_position()
+                        success = result and result.get('success', False)
+                        if not success:
+                            logger.error(f"Falha fechando SHORT: {result}")
+                        
+                except Exception as e:
+                    logger.error(f"Erro executando fechamento: {e}")
+                    success = False
+            
+            # PROCESSAR RESULTADO
+            if success or self.paper_trading:
+                logger.info(f"POSIÇÃO FECHADA COM SUCESSO!")
+                
+                # Atualizar métricas
+                self.metrics.total_trades += 1
+                self.metrics.total_profit += final_pnl
+                
+                if final_pnl > 0:
+                    self.metrics.profitable_trades += 1
+                    self.metrics.consecutive_wins += 1
+                    self.consecutive_losses = 0
+                    logger.info(f"LUCRO: {final_pnl*100:.4f}%")
                 else:
                     self.metrics.consecutive_wins = 0
                     self.consecutive_losses += 1
@@ -726,209 +923,15 @@ if __name__ == "__main__":
             print("   - EMA rápida/lenta (12, 26)")
             print("   - Momentum (5 e 10 períodos)")
             print("   - Análise de volume")
+            print("")
+            print("CONFIGURAÇÕES CONFIRMADAS:")
+            print(f"   - Take Profit: {bot.profit_target*100:.1f}%")
+            print(f"   - Stop Loss: {bot.stop_loss*100:.1f}%")
+            print(f"   - Tempo Máximo: {bot.max_position_time}s")
+            print(f"   - Confiança Mínima: {bot.min_confidence_threshold:.1f}%")
             
         else:
             print("Falha na conexão com a API")
     except Exception as e:
         print(f"Erro: {e}")
         traceback.print_exc()
-                    logger.error("Saldo insuficiente")
-                    return
-            
-            current_price = self.price_history[-1]
-            
-            # Calcular targets
-            if direction == TradeDirection.LONG:
-                target_price = current_price * (1 + self.profit_target)
-                stop_price = current_price * (1 - self.stop_loss)
-            else:
-                target_price = current_price * (1 - self.profit_target)
-                stop_price = current_price * (1 + self.stop_loss)
-            
-            logger.info(f"Executando {direction.name}:")
-            logger.info(f"   Preço: ${current_price:.2f}")
-            logger.info(f"   Target: ${target_price:.2f} ({self.profit_target*100:.1f}%)")
-            logger.info(f"   Stop: ${stop_price:.2f} ({self.stop_loss*100:.1f}%)")
-            logger.info(f"   Confiança: {confidence:.1f}%")
-            
-            # Executar ordem
-            success = False
-            if self.paper_trading:
-                success = True
-                logger.info("PAPER TRADING - Ordem simulada")
-            else:
-                try:
-                    if direction == TradeDirection.LONG:
-                        result = self.bitget_api.place_buy_order()
-                        success = result and result.get('success', False)
-                        if not success:
-                            logger.error(f"Falha na compra LONG: {result}")
-                    else:  # SHORT CORRIGIDO
-                        logger.info("Executando SHORT - Usando método correto")
-                        result = self.bitget_api.place_short_order()
-                        success = result and result.get('success', False)
-                        if not success:
-                            logger.error(f"Falha no SHORT: {result}")
-                        
-                except Exception as e:
-                    logger.error(f"Erro executando ordem: {e}")
-                    success = False
-            
-            if success:
-                # Criar posição
-                position_value = balance * (self.balance_percentage / 100) * self.leverage
-                position_size = position_value / current_price
-                
-                self.current_position = TradePosition(
-                    side=direction,
-                    size=position_size,
-                    entry_price=current_price,
-                    start_time=time.time(),
-                    target_price=target_price,
-                    stop_price=stop_price
-                )
-                
-                self.trades_today += 1
-                self.last_trade_time = time.time()
-                
-                logger.info(f"Trade #{self.trades_today} executado!")
-                logger.info(f"   Posição: {position_size:.4f} ETH")
-                logger.info(f"   Valor: ${position_value:.2f}")
-            
-        except Exception as e:
-            logger.error(f"Erro no trade: {e}")
-
-    def _manage_position_simple(self):
-        """Gerenciar posição com análise contínua"""
-        if not self.current_position or self.is_closing:
-            return
-            
-        try:
-            current_price = self.price_history[-1] if self.price_history else self.current_position.entry_price
-            pnl = self.current_position.calculate_pnl(current_price)
-            duration = self.current_position.get_duration()
-            
-            should_close = False
-            reason = ""
-            
-            # 1. TAKE PROFIT
-            if pnl >= self.profit_target:
-                should_close = True
-                reason = f"TAKE PROFIT: {pnl*100:.3f}%"
-                
-            # 2. STOP LOSS
-            elif pnl <= -self.stop_loss:
-                should_close = True
-                reason = f"STOP LOSS: {pnl*100:.3f}%"
-                
-            # 3. TEMPO LIMITE
-            elif duration >= self.max_position_time:
-                should_close = True
-                reason = f"TEMPO LIMITE: {duration:.0f}s"
-                
-            # 4. ANÁLISE TÉCNICA REVERSA
-            elif duration >= 20:  # Após 20s, verificar se sinais mudaram
-                reverse_signal = self._analyze_market_technical()
-                if reverse_signal:
-                    signal_direction, signal_confidence = reverse_signal
-                    # Se sinal forte na direção oposta
-                    if (signal_confidence >= 80 and 
-                        signal_direction != self.current_position.side):
-                        should_close = True
-                        reason = f"REVERSÃO TÉCNICA: {signal_confidence:.1f}%"
-                
-            # 5. TRAILING STOP para lucros
-            elif pnl > 0.005 and duration >= 30:  # 0.5% lucro mínimo
-                # Verificar tendência recente
-                if len(self.price_history) >= 5:
-                    recent_trend = []
-                    for i in range(1, 5):
-                        if self.price_history[-i] > 0 and self.price_history[-i-1] > 0:
-                            change = (self.price_history[-i] - self.price_history[-i-1]) / self.price_history[-i-1]
-                            recent_trend.append(change)
-                    
-                    if recent_trend:
-                        avg_trend = sum(recent_trend) / len(recent_trend)
-                        
-                        # Para LONG: fechar se tendência negativa forte
-                        if (self.current_position.side == TradeDirection.LONG and 
-                            avg_trend < -0.0005):  # -0.05% trend
-                            should_close = True
-                            reason = f"TRAILING STOP: {pnl*100:.3f}%"
-                        
-                        # Para SHORT: fechar se tendência positiva forte  
-                        elif (self.current_position.side == TradeDirection.SHORT and 
-                              avg_trend > 0.0005):  # +0.05% trend
-                            should_close = True
-                            reason = f"TRAILING STOP: {pnl*100:.3f}%"
-            
-            # Log periódico
-            if int(duration) % 10 == 0 and int(duration) > 0:
-                logger.info(f"Posição {self.current_position.side.name}: {pnl*100:.3f}% | {duration:.0f}s")
-            
-            if should_close:
-                logger.info(f"FECHANDO: {reason}")
-                self._close_position_simple(reason)
-                
-        except Exception as e:
-            logger.error(f"Erro gerenciando posição: {e}")
-            self._close_position_simple("ERRO CRÍTICO")
-
-    def _close_position_simple(self, reason: str) -> bool:
-        """MÉTODO ÚNICO DE FECHAMENTO - Corrigido para SHORT"""
-        
-        # Prevenir execuções múltiplas
-        with self._lock:
-            if self.is_closing or not self.current_position:
-                return False
-            self.is_closing = True
-        
-        try:
-            current_price = self.price_history[-1] if self.price_history else self.current_position.entry_price
-            final_pnl = self.current_position.calculate_pnl(current_price)
-            duration = self.current_position.get_duration()
-            
-            logger.info(f"FECHANDO POSIÇÃO: {reason}")
-            logger.info(f"   Tipo: {self.current_position.side.name}")
-            logger.info(f"   PnL: {final_pnl*100:.4f}%")
-            logger.info(f"   Duração: {duration:.1f}s")
-            
-            success = False
-            
-            if self.paper_trading:
-                success = True
-                logger.info("PAPER TRADING - Fechamento simulado")
-            else:
-                try:
-                    # CORREÇÃO: Lógica correta para fechar LONG e SHORT usando métodos específicos
-                    if self.current_position.side == TradeDirection.LONG:
-                        # Para LONG: usar place_sell_order() para fechar
-                        result = self.bitget_api.place_sell_order(profit_target=0)
-                        success = result and result.get('success', False)
-                        if not success:
-                            logger.error(f"Falha fechando LONG: {result}")
-                    else:
-                        # Para SHORT: usar close_short_position() para fechar
-                        result = self.bitget_api.close_short_position()
-                        success = result and result.get('success', False)
-                        if not success:
-                            logger.error(f"Falha fechando SHORT: {result}")
-                        
-                except Exception as e:
-                    logger.error(f"Erro executando fechamento: {e}")
-                    success = False
-            
-            # PROCESSAR RESULTADO
-            if success or self.paper_trading:
-                logger.info(f"POSIÇÃO FECHADA COM SUCESSO!")
-                
-                # Atualizar métricas
-                self.metrics.total_trades += 1
-                self.metrics.total_profit += final_pnl
-                
-                if final_pnl > 0:
-                    self.metrics.profitable_trades += 1
-                    self.metrics.consecutive_wins += 1
-                    self.consecutive_losses = 0
-                    logger.info(f"LUCRO: {final_pnl*100:.4f}%")
-                else:
