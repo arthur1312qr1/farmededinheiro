@@ -91,7 +91,7 @@ class BitgetAPI:
         return self.get_eth_price()
 
     def get_market_data(self, symbol='ETHUSDT'):
-        """Dados de mercado - CORRIGIDO para tratar erros"""
+        """Dados de mercado - CORRIGIDO para tratar valores None"""
         try:
             ticker = self.exchange.fetch_ticker(symbol)
             
@@ -99,8 +99,15 @@ class BitgetAPI:
                 print(f"❌ Ticker vazio para {symbol}")
                 return self._empty_market_data(symbol)
             
+            # Função auxiliar para converter valores com fallback
+            def safe_float(value, fallback=0.0):
+                try:
+                    return float(value) if value is not None else fallback
+                except (TypeError, ValueError):
+                    return fallback
+            
             # Validar dados essenciais
-            price = float(ticker.get('last', 0))
+            price = safe_float(ticker.get('last'))
             if price <= 0:
                 print(f"❌ Preço inválido: {price}")
                 return self._empty_market_data(symbol)
@@ -108,13 +115,13 @@ class BitgetAPI:
             market_data = {
                 'symbol': symbol,
                 'price': price,
-                'bid': float(ticker.get('bid', price)),
-                'ask': float(ticker.get('ask', price)),
-                'high': float(ticker.get('high', price)),
-                'low': float(ticker.get('low', price)),
-                'volume': float(ticker.get('baseVolume', 0)),
-                'change': float(ticker.get('change', 0)),
-                'percentage': float(ticker.get('percentage', 0)),
+                'bid': safe_float(ticker.get('bid'), price),
+                'ask': safe_float(ticker.get('ask'), price),
+                'high': safe_float(ticker.get('high'), price),
+                'low': safe_float(ticker.get('low'), price),
+                'volume': safe_float(ticker.get('baseVolume')),
+                'change': safe_float(ticker.get('change')),
+                'percentage': safe_float(ticker.get('percentage')),
                 'timestamp': int(ticker.get('timestamp', time.time() * 1000))
             }
             
@@ -248,7 +255,7 @@ class BitgetAPI:
     def place_short_order(self):
         """Abrir posição SHORT - NOVO MÉTODO"""
         try:
-            print("🔻 Iniciando VENDA (SHORT)...")
+            print("📻 Iniciando VENDA (SHORT)...")
             
             # Pegar saldo atual
             balance_info = self.get_balance()
